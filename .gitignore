@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+backups/
+api/uploads/
+.DS_Store
+*.zip
+*.archive
+*.gz
+uploads/
