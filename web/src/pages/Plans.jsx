@@ -1,28 +1,94 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addDays, api, fmtDateTime, fmtDay, fmtSize, fmtTime, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
+import { addDays, api, fmtDate, fmtDateTime, fmtDay, fmtSize, fmtTime, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
 import { BibleFields } from '../scripture.jsx';
-import { DropZone, Empty, Icon, useApp } from '../ui.jsx';
+import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
+import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
+
+const VIEWS = [
+  { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter.' },
+  { id: 'archive', tab: 'Archive', title: 'Archive', blurb: 'Past services, read-only. Search them, and copy anything you need into this week.' },
+  { id: 'songs', tab: 'Songs', title: 'Song library', blurb: 'Every song the team uses, with lyrics, .pro files and when it was last sung.' },
+  { id: 'media', tab: 'Media', title: 'Media library', blurb: 'Backgrounds, countdowns and logo loops you use every week. Services link to these instead of uploading them again.' },
+];
 
 export default function Plans() {
   const [view, setView] = useState('plans');
+  const v = VIEWS.find((x) => x.id === view);
   return (
     <div className="stack-lg">
       <div className="page-head">
         <div>
-          <h1>{view === 'plans' ? 'Service plans' : 'Song library'}</h1>
-          <div className="muted">Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter.</div>
+          <h1>{v.title}</h1>
+          <div className="muted">{v.blurb}</div>
         </div>
         <div className="seg" role="group" aria-label="View">
-          <button type="button" aria-pressed={view === 'plans'} onClick={() => setView('plans')}>
-            Plans
-          </button>
-          <button type="button" aria-pressed={view === 'songs'} onClick={() => setView('songs')}>
-            Song library
-          </button>
+          {VIEWS.map((x) => (
+            <button key={x.id} type="button" aria-pressed={view === x.id} onClick={() => setView(x.id)}>
+              {x.tab}
+            </button>
+          ))}
         </div>
       </div>
-      {view === 'plans' ? <PlanBrowser /> : <SongLibrary />}
+      {view === 'plans' && <PlanBrowser />}
+      {view === 'archive' && <ArchiveBrowser />}
+      {view === 'songs' && <SongLibrary />}
+      {view === 'media' && <MediaLibrary />}
+    </div>
+  );
+}
+
+// Past services, newest first, with search. Picking one opens it read-only on the right.
+function ArchiveBrowser() {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState(null);
+  const [more, setMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [selId, setSelId] = useState(null);
+
+  const load = useCallback(async (pg, query) => {
+    const r = await api(`/plans/archive?page=${pg}${query ? `&q=${encodeURIComponent(query)}` : ''}`).catch(() => ({ items: [], more: false }));
+    setItems((cur) => (pg === 0 ? r.items : [...(cur || []), ...r.items]));
+    setMore(r.more);
+    setPage(pg);
+    if (pg === 0) setSelId(r.items[0]?.id || null);
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => load(0, q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q, load]);
+
+  return (
+    <div className="split">
+      <aside className="side-col stack" aria-label="Past services">
+        <label className="field">
+          <span className="sr-only">Search the archive</span>
+          <input type="search" placeholder="Search sermon, song, speaker, verse" value={q} onChange={(e) => setQ(e.target.value)} />
+        </label>
+        {items && items.length === 0 && <Empty>{q.trim() ? 'Nothing in the archive matches.' : 'No past services yet. A service moves here the day after it happens.'}</Empty>}
+        <div className="plan-list">
+          {(items || []).map((r) => (
+            <button key={r.id} type="button" className={`plan-item ${r.id === selId ? 'plan-on' : ''}`} aria-pressed={r.id === selId} onClick={() => setSelId(r.id)}>
+              <span className="muted small strong">
+                {fmtDate(r.date)} · {r.title}
+              </span>
+              {r.sermonTitle ? <strong>“{r.sermonTitle}”</strong> : <strong className="muted">No sermon title</strong>}
+              {r.speaker && <span className="small">{r.speaker}</span>}
+              {r.songs.length > 0 && <span className="small muted ellipsis-2">{r.songs.join(' · ')}</span>}
+              <span className="plan-stats">
+                {r.scriptures.length > 0 && <span>{r.scriptures.join(', ')}</span>}
+                {r.media > 0 && <span>{r.media} file{r.media === 1 ? '' : 's'}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+        {more && (
+          <button type="button" className="btn btn-outline" onClick={() => load(page + 1, q.trim())}>
+            Show older services
+          </button>
+        )}
+      </aside>
+      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={() => {}} /> : items === null ? <div className="loading-inline">Loading…</div> : null}</div>
     </div>
   );
 }
@@ -72,6 +138,7 @@ function PlanBrowser() {
                 {r.songs > 0 && <span>{r.songs} song{r.songs === 1 ? '' : 's'}</span>}
                 {r.media > 0 && <span>{r.media} file{r.media === 1 ? '' : 's'}</span>}
                 {r.pending > 0 && <span className="chip chip-pending">{r.pending} to approve</span>}
+                {r.archived && <span className="chip chip-archived">Archived</span>}
               </span>
             </button>
           ))}
@@ -84,9 +151,10 @@ function PlanBrowser() {
 
 function PlanEditor({ eventId, onChanged }) {
   const app = useApp();
-  const canEdit = app.can.plans;
+  const canPlans = app.can.plans;
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState('');
+  const [copying, setCopying] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -113,9 +181,24 @@ function PlanEditor({ eventId, onChanged }) {
   if (error) return <div className="error" role="alert">{error}</div>;
   if (!plan) return <div className="loading-inline">Loading…</div>;
   const ev = plan.event;
+  // Past services are read-only. Anything in them can still be copied into an upcoming one.
+  const canEdit = canPlans && !plan.archived;
 
   return (
     <div className="stack-lg">
+      {plan.archived && (
+        <div className="archive-banner" role="note">
+          <div>
+            <strong>In the archive</strong>
+            <div className="small muted">This service has passed, so it’s read-only. Nothing in it was deleted.</div>
+          </div>
+          {canPlans && (
+            <button type="button" className="btn btn-primary" onClick={() => setCopying(true)}>
+              <Icon name="copy" size={16} /> Copy to this week…
+            </button>
+          )}
+        </div>
+      )}
       <section className="card stack">
         <div className="section-head">
           <div>
@@ -140,9 +223,131 @@ function PlanEditor({ eventId, onChanged }) {
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
       <Scriptures plan={plan} canEdit={canEdit} onSave={patch} />
       <Songs plan={plan} canEdit={canEdit} onSave={patch} reload={load} />
-      <MediaSection plan={plan} canEdit={canEdit} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
+      <MediaSection plan={plan} canEdit={canEdit} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
       {canEdit && <Guests plan={plan} eventId={eventId} reload={load} />}
+      {copying && <CopyModal plan={plan} onClose={() => setCopying(false)} />}
     </div>
+  );
+}
+
+// Copy parts of an archived service into an upcoming one
+function CopyModal({ plan, onClose }) {
+  const app = useApp();
+  const src = plan.event;
+  const files = plan.media.filter((m) => m.status === 'approved' && m.stored !== 'removed');
+  const [targets, setTargets] = useState(null);
+  const [to, setTo] = useState('');
+  const [pick, setPick] = useState({
+    sermon: false,
+    notes: false,
+    scriptures: plan.scriptures.length > 0,
+    songs: plan.songs.length > 0,
+    assets: plan.assets.some((a) => a.stored !== 'removed'),
+  });
+  const [media, setMedia] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState([]);
+
+  useEffect(() => {
+    const today = todayISO();
+    api(`/plans/summary?from=${today}&to=${addDays(today, 35)}`).then(
+      (rows) => {
+        const list = rows.filter((r) => !r.archived && r.kind !== 'soundcheck');
+        setTargets(list);
+        setTo((list.find((r) => r.title === src.title) || list[0])?.id || '');
+      },
+      () => setTargets([])
+    );
+  }, [src.title]);
+
+  const options = [
+    ['sermon', 'Sermon title and speaker', plan.sermonTitle || plan.speaker ? [plan.sermonTitle && `“${plan.sermonTitle}”`, plan.speaker].filter(Boolean).join(' — ') : null],
+    ['notes', 'Pastor’s notes', plan.notes ? 'Added under any notes already there' : null],
+    ['scriptures', 'Bible texts', plan.scriptures.length ? plan.scriptures.map((x) => x.reference).join(', ') : null],
+    ['songs', 'Songs, with their keys', plan.songs.length ? plan.songs.map((x) => x.song.title).join(' · ') : null],
+    ['assets', 'Media library items', plan.assets.filter((a) => a.stored !== 'removed').map((a) => a.title).join(' · ') || null],
+  ].filter(([, , detail]) => detail);
+  const chosenMedia = files.filter((m) => media[m.id]).map((m) => m.id);
+  const anything = options.some(([k]) => pick[k]) || chosenMedia.length > 0;
+
+  const copy = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setFailed([]);
+    try {
+      const r = await api(`/plans/${to}/copy`, { method: 'POST', body: { from: src.id, ...pick, media: chosenMedia } });
+      const target = targets.find((t) => t.id === to);
+      app.toast(r.copied.length ? `Copied ${r.copied.join(', ')} to ${target.title}, ${fmtDay(target.date)}` : 'Nothing new to copy — it’s already there');
+      if (r.failed.length) {
+        setFailed(r.failed);
+        setBusy(false);
+      } else onClose();
+    } catch (err) {
+      app.toast(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Copy to an upcoming service" onClose={onClose} wide>
+      <form className="stack" onSubmit={copy}>
+        <p className="muted small">
+          From {src.title}, {fmtDate(src.date)}. This archived service stays as it is; things already in the other service aren’t added twice.
+        </p>
+        {targets && targets.length === 0 ? (
+          <Empty>No upcoming services in the next five weeks. Build the weekend on the Schedule tab first.</Empty>
+        ) : (
+          <label className="field">
+            <span>Copy into</span>
+            <select value={to} onChange={(e) => setTo(e.target.value)} disabled={!targets}>
+              {(targets || []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {fmtDay(t.date)} · {fmtTime(t.start)} · {t.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <fieldset className="stack-sm plain-fieldset">
+          <legend className="label-sm">What to copy</legend>
+          {options.map(([k, label, detail]) => (
+            <label key={k} className="check check-top">
+              <input type="checkbox" checked={pick[k]} onChange={(e) => setPick({ ...pick, [k]: e.target.checked })} />
+              <span>
+                <strong>{label}</strong>
+                <span className="small muted block">{detail}</span>
+              </span>
+            </label>
+          ))}
+          {files.map((m) => (
+            <label key={m.id} className="check check-top">
+              <input type="checkbox" checked={!!media[m.id]} onChange={(e) => setMedia({ ...media, [m.id]: e.target.checked })} />
+              <span>
+                <strong>{m.title}</strong>
+                <span className="small muted block">
+                  File · {fmtSize(m.size)}
+                  {m.stored === 'cold' ? ' · comes back from the NAS archive' : ''}
+                </span>
+              </span>
+            </label>
+          ))}
+          {!options.length && !files.length && <p className="muted small">This service has nothing to copy.</p>}
+        </fieldset>
+        {failed.length > 0 && (
+          <div className="warn-box" role="alert">
+            Some files couldn’t be copied: {failed.join('; ')}
+          </div>
+        )}
+        <div className="row-wrap">
+          <button className="btn btn-primary" disabled={busy || !to || !anything}>
+            {busy ? 'Copying…' : 'Copy'}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            {failed.length ? 'Close' : 'Cancel'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -399,55 +604,97 @@ function Songs({ plan, canEdit, onSave, reload }) {
   );
 }
 
-const ext = (name) => (name.includes('.') ? name.split('.').pop().slice(0, 5) : 'file');
-
-function MediaSection({ plan, canEdit, eventId, setPlan, reload, onChanged }) {
+function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onChanged }) {
   const app = useApp();
+  const [saving, setSaving] = useState(null);
   const upload = async (files, onProgress) => {
-    setPlan(await uploadFiles(`/plans/${eventId}/media`, files, { onProgress }));
-    app.toast(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
+    const out = await uploadFiles(`/plans/${eventId}/media`, files, { onProgress });
+    setPlan(out);
+    const linked = out.linked || [];
+    const stored = files.length - linked.length;
+    app.toast(
+      linked.length
+        ? `${linked.join(', ')} ${linked.length === 1 ? 'is' : 'are'} already in the media library, so ${linked.length === 1 ? 'it’s' : 'they’re'} linked instead${stored ? `. Uploaded ${stored} other${stored === 1 ? '' : 's'}.` : '.'}`
+        : `Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`
+    );
     onChanged();
   };
   const remove = async (m) => {
-    if (!window.confirm(`Delete ${m.title}?`)) return;
+    const msg = plan.archived ? `Delete “${m.title}” to free up space? This service will still list it.` : `Delete ${m.title}?`;
+    if (!window.confirm(msg)) return;
     await api(`/media/${m.id}`, { method: 'DELETE' }).catch((e) => app.toast(e.message));
     reload();
     onChanged();
   };
+  const setAssets = async (ids, msg) => {
+    try {
+      setPlan(await api(`/plans/${eventId}`, { method: 'PATCH', body: { assets: ids } }));
+      app.toast(msg);
+      onChanged();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const assets = plan.assets || [];
+  const showLibrary = assets.length > 0 || canEdit;
+
   return (
     <section className="card stack" aria-label="Media">
       <div>
         <h2>Media</h2>
-        {plan.media?.length > 0 && <div className="muted small">Download for ProPresenter includes all of these. Pictures also go into the PowerPoint.</div>}
+        {(plan.media.length > 0 || assets.length > 0) && <div className="muted small">Download for ProPresenter includes all of these. Pictures also go into the PowerPoint.</div>}
       </div>
-      {canEdit && <DropZone onFiles={upload} />}
-      {plan.media.length === 0 && !canEdit && <Empty>No media yet.</Empty>}
-      <div className="media-grid">
-        {plan.media.map((m) => (
-          <div key={m.id} className="media-card">
-            <a className="media-thumb" href={m.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${m.title}`}>
-              {/^image\/(png|jpeg|gif|webp)$/.test(m.mime) ? <img src={m.url} alt="" loading="lazy" /> : ext(m.originalName)}
-            </a>
-            <div className="media-body">
-              <strong className="small ellipsis" title={m.title}>{m.title}</strong>
-              <span className="muted small">
-                {fmtSize(m.size)} · {m.guestName ? `from ${m.guestName}` : m.uploadedBy || ''}
-              </span>
-              {m.status === 'pending' && <span className="chip chip-pending self-start">Waiting for approval</span>}
-              <div className="row-wrap push-down">
-                <a className="btn btn-outline" href={`${m.url}?download=1`} download>
-                  Download
-                </a>
-                {canEdit && m.status !== 'pending' && (
-                  <button type="button" className="icon-btn" aria-label={`Delete ${m.title}`} onClick={() => remove(m)}>
+      {showLibrary && (
+        <div className="stack-sm">
+          <h3>From the media library</h3>
+          {assets.length === 0 && <p className="muted small">Backgrounds, countdowns and logo loops you use every week. Pick them here instead of uploading them again.</p>}
+          <div className="media-grid">
+            {assets.map((a) => (
+              <MediaCard key={a.id} m={a} sub={`${a.category || 'Library'} · ${fmtSize(a.size)}`}>
+                {canEdit && (
+                  <button type="button" className="icon-btn" aria-label={`Take ${a.title} out of this service`} onClick={() => setAssets(assets.filter((x) => x.id !== a.id).map((x) => x.id), 'Taken out of this service')}>
                     <Icon name="close" size={16} />
                   </button>
                 )}
-              </div>
-            </div>
+              </MediaCard>
+            ))}
           </div>
-        ))}
+          {canEdit && <AssetPicker have={assets} onAdd={(item) => setAssets([...assets.map((x) => x.id), item.id], `Added ${item.title}`)} />}
+        </div>
+      )}
+      <div className="stack-sm">
+        {showLibrary && <h3>Uploaded for this service</h3>}
+        {canEdit && <DropZone onFiles={upload} hint="Sermon slides, videos, announcements — up to 80 MB each. Files already in the media library get linked, not stored twice." />}
+        {plan.media.length === 0 && !canEdit && <Empty>{assets.length ? 'No other files.' : 'No media yet.'}</Empty>}
+        <div className="media-grid">
+          {plan.media.map((m) => (
+            <MediaCard key={m.id} m={m}>
+              {canPlans && m.status === 'approved' && m.stored !== 'removed' && (
+                <button type="button" className="link-btn small" onClick={() => setSaving(m)} title="Keep it in the media library to reuse in other services">
+                  Save to library
+                </button>
+              )}
+              {canPlans && m.status !== 'pending' && m.stored !== 'removed' && (
+                <button type="button" className="icon-btn" aria-label={`Delete ${m.title}`} onClick={() => remove(m)}>
+                  <Icon name="close" size={16} />
+                </button>
+              )}
+            </MediaCard>
+          ))}
+        </div>
       </div>
+      {saving && (
+        <SaveToLibrary
+          media={saving}
+          archived={plan.archived}
+          onClose={() => setSaving(null)}
+          onSaved={() => {
+            setSaving(null);
+            reload();
+            onChanged();
+          }}
+        />
+      )}
     </section>
   );
 }

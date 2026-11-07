@@ -21,6 +21,18 @@ What it does:
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
   Everyone signed in can read and download a plan. People with the **Edit service plans** privilege can change it.
+- **Archive.** A service moves to the archive the day after it happens. It becomes read-only, so last week's slides never get mixed into this week, but nothing is deleted.
+  - The **Archive** view lists past services, newest first. Search by sermon title, speaker, song, Bible text or service name.
+  - **Copy to this week** on any archived service copies its songs (with keys), Bible texts, notes, sermon title, media library items or individual files into an upcoming service. Things already there aren't added twice.
+  - Deleting a file from an archived service frees the space but keeps it listed, so you can still see what was used.
+- **Media library.** Backgrounds, countdowns, logo loops and announcement loops you use every week.
+  - Services link to library items instead of holding their own copy. Pick them under **Media → From the media library** on a plan.
+  - **Save to library** on any file in a plan moves it into the library (from an archived service it's copied).
+  - Upload a file that's already in the library and the plan links to the library copy instead of storing it again.
+  - Library items are in **Download for ProPresenter** and the PowerPoint, and are never archived or moved.
+- **Song history.** Each song shows when it was last sung and how many times in the past year. **CCLI usage report** downloads a spreadsheet of every song sung between two dates.
+  - Deleting a song that past services used *retires* it: it's hidden from the library and pickers, but archived plans still list it. **Show retired songs** → **Bring back** undoes it.
+- **Cold storage (optional).** Files from services older than 90 days can move to a NAS folder. They still open from the plan, a little slower. See [Archive and cold storage](#12-archive-and-cold-storage).
 - **Song library and ProPresenter.**
   - Each song's lyrics download as a `.txt` that ProPresenter 7 imports. Section labels such as Verse 1 or Chorus become groups.
   - You can store the song's real `.pro` file with it so anyone can download it. If the lyrics are edited after the `.pro` was uploaded, the app flags it.
@@ -188,7 +200,7 @@ docker compose exec mongo sh -c 'mongodump --quiet --archive=/backups/crewcall-$
 docker compose exec mongo sh -c 'mongorestore --drop --archive=/backups/crewcall-YYYY-MM-DD.gz --gzip -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin'
 ```
 
-Uploaded media and `.pro` files live in the `uploads` volume. To back them up:
+Uploaded media and `.pro` files live in the `uploads` volume. Files already moved to cold storage live in the NAS folder instead (back that up with the NAS's own tools). To back up the `uploads` volume:
 
 ```bash
 docker run --rm -v crew-call_uploads:/data -v "$PWD/backups":/backups alpine tar czf /backups/uploads-$(date +%F).tgz -C /data .
@@ -246,6 +258,73 @@ It covers:
 - resources
 - deactivation
 
+## 12. Archive and cold storage
+
+How a week's media is handled:
+
+| Stage | When | What crew see | Where files are |
+|---|---|---|---|
+| Active | This weekend and anything coming up | Editable plans | `uploads` volume |
+| Archived | From the day after the service | Read-only, under **Archive**, searchable | `uploads` volume |
+| Cold | `ARCHIVE_AFTER_DAYS` (90) after the service | Same; files show **In the archive** | NAS folder |
+| Removed | Only if `PURGE_VIDEO_AFTER_DAYS` is set | Videos show **Removed to save space** | Deleted |
+
+The plan record itself (who served, songs, Bible texts, sermon, notes) is never deleted. Songs' `.pro` files and media library items never move.
+
+### Setting up cold storage on a NAS (Linux server + TerraMaster)
+
+1. On the NAS, make a shared folder, e.g. `CrewCallArchive`, with an account that can read and write it.
+2. On the server, mount it at boot. The API container runs as user `node` (uid 1000), so the mount is owned by 1000:
+
+   ```bash
+   sudo apt install cifs-utils
+   sudo mkdir -p /mnt/crewcall-archive
+   sudo sh -c 'printf "username=NAS_USER\npassword=NAS_PASSWORD\n" > /root/.nas-crewcall && chmod 600 /root/.nas-crewcall'
+   echo '//NAS_ADDRESS/CrewCallArchive /mnt/crewcall-archive cifs credentials=/root/.nas-crewcall,uid=1000,gid=1000,file_mode=0660,dir_mode=0770,nofail,_netdev,x-systemd.automount 0 0' | sudo tee -a /etc/fstab
+   sudo systemctl daemon-reload && sudo mount -a
+   ```
+
+   `nofail` keeps the server booting normally when the NAS is off.
+3. Mark the folder as Crew Call's archive (only once the share is mounted):
+
+   ```bash
+   touch /mnt/crewcall-archive/.crewcall-archive
+   ```
+
+4. In `.env`, set `ARCHIVE_HOST_DIR=/mnt/crewcall-archive`, then restart Crew Call with your usual `docker compose ... up -d`.
+5. As admin, open **Service plans → Media** and check the **Storage** card. **Run now** moves anything that's due.
+
+### Setting up cold storage on a NAS (Mac mini + TerraMaster)
+
+1. On the NAS, make a shared folder, e.g. `CrewCallArchive`, and give the Mac mini's account read/write access.
+2. On the Mac mini: **Finder → Go → Connect to Server**, enter `smb://<nas-address>/CrewCallArchive`, and sign in. To reconnect it after a restart, drag the mounted share into **System Settings → General → Login Items**.
+3. Mark the folder as Crew Call's archive:
+
+   ```bash
+   touch /Volumes/CrewCallArchive/.crewcall-archive
+   ```
+
+   Crew Call only uses a folder that contains this file. If the NAS isn't mounted, `/Volumes/CrewCallArchive` is just an empty local folder, and without the marker Crew Call won't fill your Mac's disk with files meant for the NAS.
+4. In `.env`:
+
+   ```env
+   ARCHIVE_HOST_DIR=/Volumes/CrewCallArchive
+   ARCHIVE_AFTER_DAYS=90
+   PURGE_VIDEO_AFTER_DAYS=0
+   ```
+
+5. Run `docker compose up -d`. Docker Desktop shares `/Volumes` by default; if it doesn't on your Mac, add it under **Settings → Resources → File sharing**.
+6. As admin, open **Service plans → Media**. The **Storage** card at the bottom shows how much is in the library, in recent services and in the archive. **Run now** moves anything that's due; otherwise it checks every 6 hours.
+
+If the NAS is off or unmounted, nothing breaks: files stay on the Mac mini until it's back, archived files say the NAS isn't reachable when opened, and **Copy to this week** tells you which files couldn't come across.
+
+To test the archive features against an empty database:
+
+```bash
+cd api && ARCHIVE_DIR=/tmp/cc-archive BASE_URL=http://localhost:4000 node test/archive.mjs
+# the API must run with the same ARCHIVE_DIR, plus ARCHIVE_AFTER_DAYS=90 PURGE_VIDEO_AFTER_DAYS=200
+```
+
 ## Project layout
 
 ```
@@ -254,11 +333,11 @@ api/src/
   index.js           Express app, routes, error handling
   auth.js            sign-in, first-run setup, invites, sessions (httpOnly cookie)
   models.js          User, Position, Event, Assignment, Unavailable, Request, Resource, Settings
-  routes/            events, weekend (auto-fill, copy, check, run sheet), activity, requests, people, groups, plans (plans, songs, media, guest links, approvals), guest (public upload page), misc
-  lib/               permissions, ICS builder, response shapes
+  routes/            events, weekend (auto-fill, copy, check, run sheet), activity, requests, people, groups, plans (plans, archive, copy, songs, media, guest links, approvals), library (media library, storage), guest (public upload page), misc
+  lib/               permissions, ICS builder, response shapes, archive.js (cold storage job)
 web/src/
   App.jsx            sign-in flow, tabs, shared context
-  pages/             Schedule, WeekendCheck, AutoFill, RunSheet, Activity, MyShifts, Plans, Songs, Guest, Requests, Groups, Team, Resources, Settings, Account, Auth
+  pages/             Schedule, WeekendCheck, AutoFill, RunSheet, Activity, MyShifts, Plans (plans + archive), Songs, Library (media library), Guest, Requests, Groups, Team, Resources, Settings, Account, Auth
   ui.jsx             Modal, WhatsApp sheet, icons, avatars
 ```
 

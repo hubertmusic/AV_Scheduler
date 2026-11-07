@@ -31,8 +31,13 @@ services:
       MAIL_FROM: ${MAIL_FROM:-}
       ACADEMY_URL: ${ACADEMY_URL:-}
       ACADEMY_SSO_SECRET: ${ACADEMY_SSO_SECRET:-}
+      # Cold storage is on only when ARCHIVE_HOST_DIR is set in .env (see README → Archive)
+      ARCHIVE_DIR: ${ARCHIVE_HOST_DIR:+/data/archive}
+      ARCHIVE_AFTER_DAYS: ${ARCHIVE_AFTER_DAYS:-90}
+      PURGE_VIDEO_AFTER_DAYS: ${PURGE_VIDEO_AFTER_DAYS:-0}
     volumes:
       - uploads:/data/uploads
+      - ${ARCHIVE_HOST_DIR:-./archive-off}:/data/archive
     depends_on:
       mongo:
         condition: service_healthy

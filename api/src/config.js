@@ -11,6 +11,12 @@ export const config = {
   uploadDir: env.UPLOAD_DIR || new URL('../uploads', import.meta.url).pathname,
   maxUploadMB: Number(env.MAX_UPLOAD_MB) || 80,
   guestLinkHours: Number(env.GUEST_LINK_HOURS) || 4,
+  // Cold storage for old service media, e.g. a NAS folder mounted into the container. Off when empty.
+  archiveDir: (env.ARCHIVE_DIR || '').trim(),
+  // Files from a service move to ARCHIVE_DIR this many days after it.
+  archiveAfterDays: Math.max(1, Number(env.ARCHIVE_AFTER_DAYS) || 90),
+  // Delete videos from services older than this many days (0 = keep forever). The plan record stays.
+  purgeVideoAfterDays: Math.max(0, Number(env.PURGE_VIDEO_AFTER_DAYS) || 0),
   smtpUrl: env.SMTP_URL || '',
   mailFrom: env.MAIL_FROM || 'Crew Call <no-reply@localhost>',
   // Booth Crew Academy single sign-on. Both apps must share the same secret.

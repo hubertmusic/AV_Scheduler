@@ -35,10 +35,11 @@ export async function api(path, { method = 'GET', body } = {}) {
 }
 
 // Multipart upload with progress (fetch can't report upload progress).
-export function uploadFiles(path, files, { field = 'files', onProgress } = {}) {
+export function uploadFiles(path, files, { field = 'files', onProgress, extra = {} } = {}) {
   if (viewAsId) return Promise.reject(Object.assign(new Error('This is a preview, so nothing is saved. Exit the preview to make changes.'), { status: 403, preview: true }));
   return new Promise((resolve, reject) => {
     const fd = new FormData();
+    for (const [k, v] of Object.entries(extra)) fd.append(k, v); // fields first, so the server has them with the files
     for (const f of files) fd.append(field, f, f.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api' + path);
@@ -105,6 +106,11 @@ export function fridayOf(s) {
 export function fmtDay(s) {
   const d = parseDay(s);
   return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+// "Nov 7, 2026"
+export function fmtDate(s) {
+  const d = parseDay(s);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
 }
 export const dowShort = (s) => SHORT[parseDay(s).getUTCDay()];
 export const dayNum = (s) => String(parseDay(s).getUTCDate());

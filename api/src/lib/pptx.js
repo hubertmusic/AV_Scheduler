@@ -1,10 +1,9 @@
 // A PowerPoint of a service plan: title, song lyrics, Bible texts and the plan's pictures.
 // Built for the screen: 16:9, white text on black. ProPresenter, Keynote and
 // PowerPoint all open it.
-import path from 'node:path';
 import pptxgen from 'pptxgenjs';
 import { imageSize } from 'image-size';
-import { config } from '../config.js';
+import { storedPath } from './media.js';
 import { isSectionLabel } from './propresenter.js';
 
 const W = 13.333;
@@ -158,8 +157,8 @@ export async function buildServicePptx(ev, plan, media, orgName = '') {
       skipped.push(name);
       continue;
     }
-    const file = path.join(config.uploadDir, m.storedName);
-    const box = fitImage(file);
+    const file = !m.purgedAt && storedPath(m); // '' when removed; a cold file may be unreachable
+    const box = file ? fitImage(file) : null;
     if (!box) {
       skipped.push(name);
       continue;

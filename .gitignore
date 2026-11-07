@@ -11,3 +11,4 @@ uploads/
 
 compose.override.yaml
 *.tgz
+archive-off/

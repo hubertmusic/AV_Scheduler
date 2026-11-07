@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 import { config } from './config.js';
+import { HttpError } from './lib/util.js';
 import { Settings, User } from './models.js';
 import { accountRouter, authRouter, requireAuth } from './auth.js';
 import { eventsRouter } from './routes/events.js';
@@ -11,12 +12,14 @@ import { peopleRouter } from './routes/people.js';
 import { groupsRouter } from './routes/groups.js';
 import { guestAdminRouter, mediaRouter, plansRouter, songsRouter, submissionsRouter } from './routes/plans.js';
 import { guestRouter } from './routes/guest.js';
+import { libraryRouter } from './routes/library.js';
 import { academyRouter } from './routes/academy.js';
 import { weekendRouter } from './routes/weekend.js';
 import { announcementsRouter } from './routes/announcements.js';
 import { activityRouter } from './routes/activity.js';
 import { changeLogger } from './lib/activity.js';
 import { startReminderJob } from './lib/reminders.js';
+import { startArchiveJob } from './lib/archive.js';
 import { bootstrapRouter, calRouter, meRouter, positionsRouter, resourcesRouter, settingsRouter } from './routes/misc.js';
 
 const app = express();
@@ -45,6 +48,7 @@ app.use('/api/groups', groupsRouter);
 app.use('/api/plans', plansRouter);
 app.use('/api/songs', songsRouter);
 app.use('/api/media', mediaRouter);
+app.use('/api/library', libraryRouter);
 app.use('/api/guest-links', guestAdminRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/weekend', weekendRouter);
@@ -61,8 +65,9 @@ app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON.' });
   if (err.code === 11000) return res.status(409).json({ error: 'That conflicts with something that already exists.' });
   const status = err.status || 500;
-  if (status >= 500) console.error(err);
-  res.status(status).json({ error: status >= 500 ? 'Something went wrong on the server.' : err.message });
+  if (status >= 500 && !(err instanceof HttpError)) console.error(err);
+  // Our own 5xx errors (e.g. "the NAS isn't reachable") carry a message meant for people.
+  res.status(status).json({ error: status >= 500 && !(err instanceof HttpError) ? 'Something went wrong on the server.' : err.message });
 });
 
 // One-time data updates, each applied once and remembered in Settings.
@@ -93,6 +98,7 @@ async function start() {
   await runMigrations();
   app.listen(config.port, () => console.log(`Crew Call API listening on :${config.port}`));
   startReminderJob();
+  startArchiveJob();
 }
 
 start().catch((e) => {

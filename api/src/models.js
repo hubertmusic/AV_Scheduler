@@ -6,6 +6,8 @@ const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
 export const EVENT_KINDS = ['service', 'soundcheck'];
 export const REQUEST_TYPES = ['swap', 'transfer', 'pickup', 'drop'];
+// Kinds of reusable files in the media library
+export const LIBRARY_CATEGORIES = ['Backgrounds', 'Countdowns', 'Logos & bumpers', 'Announcement loops', 'Other'];
 
 const userSchema = new Schema(
   {
@@ -249,6 +251,7 @@ const planSchema = new Schema(
     notes: { type: String, default: '' }, // pastor's notes
     scriptures: { type: [scriptureSchema], default: [] },
     songs: { type: [planSongSchema], default: [] },
+    assets: [ref('Media')], // media library items used in this service (backgrounds, countdowns…)
     updatedBy: ref('User'),
   },
   { timestamps: true }
@@ -263,6 +266,8 @@ const songSchema = new Schema(
     notes: { type: String, default: '' },
     proMedia: ref('Media'), // the ProPresenter .pro file, if one was uploaded
     lyricsUpdatedAt: Date,
+    // Hidden from the library and pickers but kept, because past services used it
+    retired: { type: Boolean, default: false },
     updatedBy: ref('User'),
   },
   { timestamps: true }
@@ -280,10 +285,20 @@ const mediaSchema = new Schema(
     uploadedBy: ref('User'),
     guest: ref('GuestLink'),
     status: { type: String, enum: ['approved', 'pending', 'rejected'], default: 'approved' },
+    // A reusable media library item, not owned by one service
+    library: { type: Boolean, default: false },
+    category: { type: String, default: '' },
+    sha256: { type: String, default: '' }, // fingerprint, to spot the same file uploaded twice
+    // hot = the uploads folder; cold = ARCHIVE_DIR, where files of long-past services are moved
+    location: { type: String, enum: ['hot', 'cold'], default: 'hot' },
+    movedAt: Date,
+    purgedAt: Date, // file deleted to save space; the record stays so the plan still lists it
   },
   { timestamps: true }
 );
 mediaSchema.index({ plan: 1 });
+mediaSchema.index({ library: 1 });
+mediaSchema.index({ sha256: 1 });
 
 // A 4-hour upload link for someone outside the team (guest speaker, visiting band).
 const guestLinkSchema = new Schema(
