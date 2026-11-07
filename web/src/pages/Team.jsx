@@ -391,7 +391,7 @@ function AddPerson({ onClose }) {
 }
 
 // Regular commitments: e.g. "2nd Sabbath of the month · Worship Service · any of their positions".
-// Auto-fill places regulars first; leaders can still move them to a different job any week.
+// Regulars are placed automatically on each weekend as it's built; leaders can still move them.
 function Regulars({ person }) {
   const app = useApp();
   const { posLabel, settings } = app;
@@ -403,9 +403,9 @@ function Regulars({ person }) {
   const save = async (next, msg) => {
     setBusy(true);
     try {
-      await api(`/people/${person.id}`, { method: 'PATCH', body: { regulars: next.map(({ id, ...r }) => r) } });
+      const r = await api(`/people/${person.id}`, { method: 'PATCH', body: { regulars: next.map(({ id, ...r }) => r) } });
       setList(next);
-      app.toast(msg);
+      app.toast(r?.regularsPlaced ? `${msg} · placed on ${r.regularsPlaced} upcoming weekend${r.regularsPlaced === 1 ? '' : 's'}` : msg);
       await app.reload();
     } catch (e) {
       app.toast(e.message);
@@ -418,7 +418,7 @@ function Regulars({ person }) {
   return (
     <fieldset className="fieldset">
       <legend>Regular schedule</legend>
-      <p className="muted small">For people who serve on a pattern. Auto-fill places them first; their job can change week to week, and you can still move them by hand.</p>
+      <p className="muted small">For people who serve on a pattern. They’re placed automatically on each matching weekend as soon as it’s built, so it’s on their calendar early. Their job can change week to week, and you can still move them by hand.</p>
       {list.length === 0 && <p className="small muted">No regular schedule.</p>}
       <ul className="req-mini">
         {list.map((r, i) => {

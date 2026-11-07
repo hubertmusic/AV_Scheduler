@@ -110,6 +110,7 @@ const assignmentSchema = new Schema(
     confirmedAt: Date,
     reminderEmailAt: Date, // email reminder sent
     waRemindedAt: Date, // a leader marked the WhatsApp reminder as sent
+    viaRegular: { type: String, default: '' }, // placed automatically by a regular schedule, e.g. "2nd Sabbath"
   },
   { timestamps: true }
 );
@@ -204,6 +205,8 @@ const settingsSchema = new Schema({
   weekendTemplate: { type: [templateItem], default: [] },
   reminderEmails: { type: Boolean, default: true },
   reminderDays: { type: Number, default: 2 },
+  calendarAlertDays: { type: Number, default: 5 }, // calendar alert this many days before a shift (0 = off)
+  autoBuildWeeks: { type: Number, default: 4 }, // build weekends from the template this many weeks ahead (0 = off)
   // Shown at the top of every shift until changed
   permanentNote: { type: String, default: '' },
   migrations: { type: [String], default: [] }, // one-time data updates already applied

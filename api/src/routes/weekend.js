@@ -7,6 +7,7 @@ import { announcementsFor } from './announcements.js';
 import { eventView, groupView, personView } from '../lib/views.js';
 import { awayByEvent, baseOf, isShadow, unavailableByEvent } from '../lib/availability.js';
 import { planAutofill } from '../lib/autofill.js';
+import { autoBuildAhead } from '../lib/regularsAuto.js';
 import { runReminders } from '../lib/reminders.js';
 import { mailerReady } from '../lib/mailer.js';
 import { dayName } from '../lib/activity.js';
@@ -51,6 +52,13 @@ weekendRouter.post('/autofill', requirePerm('edit'), wrap(async (req, res) => {
   }
   res.locals.activity = `Auto-filled ${applied} spot${applied === 1 ? '' : 's'} for the weekend of ${dayName(friday)}`;
   res.json({ applied, skipped: skipped.length });
+}));
+
+// Build the next weekends from the template now (the same thing the background job does).
+weekendRouter.post('/build-ahead', requirePerm('edit'), wrap(async (req, res) => {
+  const r = await autoBuildAhead();
+  res.locals.activity = r.built ? `Built upcoming weekends from the template (${r.built} services, ${r.placed} regulars placed)` : null;
+  res.json(r);
 }));
 
 // ---------- copy last weekend ----------

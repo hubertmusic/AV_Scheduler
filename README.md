@@ -16,7 +16,7 @@ What it does:
 - **Service plans.** Each service has:
   - a sermon title and speaker
   - the pastor's notes
-  - Bible texts (KJV, WEB and ASV look up automatically; any other version can be pasted)
+  - Bible texts. KJV, BSB (Berean Standard), WEB, ASV, YLT, Darby, BBE and Douay-Rheims look up automatically. **More translations…** searches 1,000+ more by language from the free bible.helloao.org service (for example, Spanish Reina-Valera 1909); the ones you pick are remembered on that device. Copyrighted versions (NKJV, NIV, ESV, NLT and others) are pasted. References like `1 Cor 13:4-7`, `Psalm 23` and `John 3:16-4:2` work; book names must be in English.
   - an ordered song list with keys
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
@@ -35,7 +35,8 @@ What it does:
   - **For this shift:** the important note on an individual service.
 
   Only the admin and leaders who edit the schedule can change announcements. **Share on WhatsApp** posts them to your crew group.
-- **Regular schedules.** On **Team & roles**, give someone a pattern, such as the 2nd Sabbath of the month, the last Sabbath, every weekend or every other weekend. Set which service it's for (or any) and which jobs (or any of their trained positions, so their job can change). Auto-fill places regulars first and lists any it couldn't place, for example because they're away. Crew see their regular schedule on My shifts.
+- **Regular schedules.** On **Team & roles**, give someone a pattern, such as the 2nd Sabbath of the month, the last Sabbath, every weekend or every other weekend. Set which service it's for (or any) and which jobs (or any of their trained positions, so their job can change). Regulars are placed **automatically** as soon as a matching weekend is built, and on weekends already built when you save their schedule, so the shift reaches their calendar early. A regular you take off by hand stays off, and anyone away or at their monthly limit is skipped (Auto-fill lists them with the reason). Crew see their regular schedule on My shifts, and their shifts are tagged Regular.
+- **Build weekends ahead.** In **Settings → Weekend template**, choose how far ahead weekends are built from the template automatically (default 4 weeks; Off to build by hand). Regulars are placed as each one is built. Skipped weekends and services stay skipped.
 - **Sync with template.** After you edit the weekend template in Settings, **Sync with template** on the Schedule adds missing services to a weekend that's already built. It lists services whose times or positions changed and offers to update them, and lists services you removed or turned off in the template and offers to take them off that weekend. Services you added by hand with **Add service** are never offered for removal.
 - **Skip a week.** To skip one service for one weekend (no Vespers this week), open it with the pencil and remove it. To skip a whole weekend, use **No services this weekend**. Skipped services show under **Not happening this weekend** with a **Bring back** button, and Sync with template won't put them back. Other weekends aren't affected.
 - **Turn template services on or off.** Each template service has an On/Off switch. An Off service keeps its settings but isn't built until you turn it back on.
@@ -53,6 +54,7 @@ What it does:
   - requests and guest uploads waiting for approval
   - stale availability
   - a WhatsApp reminder checklist that ticks people off as you message them
+- **Calendar alerts.** Each shift in a synced calendar has an alert a set number of days before (default 5, in **Settings → Shift reminders**), plus one an hour before call time. iPhone and Mac calendars can be set to drop alerts from subscribed calendars, and Google ignores them; **My shifts** shows each person how to fix that.
 - **Email reminders.** Each person gets one email per shift, sent automatically a set number of days before it. The email has the call time, crew, songs and a Confirm link. This needs an SMTP account (see below).
 - **Run sheets.** One printable page per service: crew with phones and confirmations, the linked sound check, songs and keys (lyrics optional), Bible texts, the pastor's notes and the media list.
 - **Copy last weekend.** Creates the same services and puts the same people back in empty spots. It skips anyone now away, unavailable or no longer trained, and says why.

@@ -50,6 +50,8 @@ const friday = d.toISOString().slice(0, 10);
 let r = ok(await admin('GET', '/api/auth/status'));
 assert.equal(r.needsSetup, true, 'database must be empty');
 ok(await admin('POST', '/api/auth/setup', { name: 'Hub M.', email: 'admin@example.com', password: 'adminpass1', orgName: 'Test Crew' }), 201);
+// Weekends are built ahead by a background job; keep it out of the way until it's tested below.
+ok(await admin('PATCH', '/api/settings', { autoBuildWeeks: 0 }));
 assert.equal(ok(await admin('POST', '/api/auth/setup', { name: 'x', email: 'x@x.com', password: 'xxxxxxxx' }), 403) !== undefined, true);
 step('first-run setup creates the admin once');
 
@@ -447,11 +449,12 @@ ok(await admin('POST', '/api/events/weekend', { friday: fri5 }));
 const sab5 = new Date(Date.parse(fri5) + 864e5);
 const nth5 = String(Math.ceil(sab5.getUTCDate() / 7));
 const otherNth = nth5 === '1' ? '2' : '1';
-ok(await admin('PATCH', `/api/people/${dev.id}`, { regulars: [{ week: nth5, service: 'Worship Service', positions: ['light', 'cam'] }, { week: 'bogus', service: '' }] }));
+ok(await ben.c('POST', '/api/me/blackouts', { from: fri5, to: sun5 }), 201);
+ok(await admin('PATCH', `/api/people/${ben.id}`, { regulars: [{ week: nth5, service: 'Vespers', positions: [] }] }));
+const devSaved = ok(await admin('PATCH', `/api/people/${dev.id}`, { regulars: [{ week: nth5, service: 'Worship Service', positions: ['light', 'cam'] }, { week: 'bogus', service: '' }] }));
+assert.ok(devSaved.regularsPlaced >= 1, 'saving a regular schedule places them on weekends already built');
 ok(await admin('PATCH', `/api/people/${cara.id}`, { regulars: [{ week: 'every', service: '', positions: [] }] }));
 ok(await admin('PATCH', `/api/people/${eli.id}`, { regulars: [{ week: otherNth, service: 'Worship Service', positions: [] }] }));
-ok(await admin('PATCH', `/api/people/${ben.id}`, { regulars: [{ week: nth5, service: 'Vespers', positions: [] }] }));
-ok(await ben.c('POST', '/api/me/blackouts', { from: fri5, to: sun5 }), 201);
 const devPerson = ok(await admin('GET', '/api/people')).find((p) => p.id === dev.id);
 assert.equal(devPerson.regulars.length, 2);
 assert.equal(devPerson.regulars[1].week, 'every', 'unknown week patterns fall back to every weekend');
@@ -459,16 +462,57 @@ assert.deepEqual(ok(await dev.c('GET', '/api/bootstrap')).me.regulars[0].positio
 ok(await crew1('PATCH', `/api/people/${dev.id}`, { regulars: [] }), 403);
 ev3 = ok(await admin('GET', `/api/events?from=${fri5}&to=${sun5}`));
 const worship5 = ev3.find((e) => e.title === 'Worship Service');
+const holds = (e, uid) => Object.entries(e.assignments).find(([, a]) => (a.userId || a.user?.id || a.id || a) === uid);
+assert.ok(holds(worship5, dev.id), JSON.stringify(worship5.assignments));
+assert.equal(holds(worship5, dev.id)[0], 'light', 'first listed position is preferred');
+assert.ok(ev3.some((e) => holds(e, cara.id)), 'every-weekend regular placed in any service');
+assert.ok(!ev3.some((e) => holds(e, eli.id)), 'rule for another week does not apply');
+assert.ok(!ev3.some((e) => holds(e, ben.id)), 'away regulars are not placed');
 const af5 = ok(await admin('GET', `/api/weekend/autofill?friday=${fri5}`));
-const devPick = af5.proposals.find((p) => p.userId === dev.id && p.regular);
-assert.ok(devPick, 'regular is placed');
-assert.equal(devPick.eventId, worship5.id);
-assert.equal(devPick.position, 'light', 'first listed position is preferred');
-assert.match(devPick.reason, new RegExp(`Regular: ${['', '1st', '2nd', '3rd', '4th', '5th'][Number(nth5)]} Sabbath`));
-assert.ok(af5.proposals.some((p) => p.userId === cara.id && p.regular), 'every-weekend regular placed in any service');
-assert.ok(!af5.proposals.some((p) => p.userId === eli.id && p.regular), 'rule for another week does not apply');
 assert.ok(af5.regularNotes.some((n) => n.userId === ben.id && /Away/.test(n.why)), 'away regulars are reported');
-step('regular schedules: nth-Sabbath and every-weekend rules, preferred or any position, away regulars reported');
+const devShift = ok(await dev.c('GET', '/api/me/overview')).shifts.find((x) => x.id === worship5.id);
+assert.match(devShift.regular, new RegExp(`${['', '1st', '2nd', '3rd', '4th', '5th'][Number(nth5)]} Sabbath`));
+const devFeed = await client()('GET', new URL(ok(await dev.c('GET', '/api/bootstrap')).me.calUrl).pathname);
+const devIcs = devFeed.data.replace(/\r\n /g, '');
+assert.match(devIcs, /This is your regular .*Sabbath.* shift/, 'calendar says it is their regular shift');
+assert.match(devIcs, /TRIGGER:-P5D/, 'calendar alert 5 days before');
+assert.match(devIcs, /You're on Lighting for Worship Service on Sabbath/);
+ok(await admin('PATCH', '/api/settings', { calendarAlertDays: 0 }));
+assert.doesNotMatch((await client()('GET', new URL(ok(await dev.c('GET', '/api/bootstrap')).me.calUrl).pathname)).data, /TRIGGER:-P\d+D/, 'alert can be turned off');
+ok(await admin('PATCH', '/api/settings', { calendarAlertDays: 5 }));
+step('regular schedules: placed automatically (nth-Sabbath and every-weekend, preferred or any position), away regulars reported, calendar alert and note');
+
+// A regular a leader takes off by hand isn't put back by Sync; a new weekend gets them straight away.
+{
+  ok(await admin('PUT', `/api/events/${worship5.id}/assign/light`, { userId: null }));
+  ok(await admin('POST', '/api/events/weekend', { friday: fri5 }));
+  assert.ok(!holds(ok(await admin('GET', `/api/events?from=${fri5}&to=${sun5}`)).find((e) => e.id === worship5.id), dev.id), 'sync leaves a removed regular off');
+  ok(await admin('PUT', `/api/events/${worship5.id}/assign/light`, { userId: dev.id }));
+  const plus = (iso, n) => new Date(Date.parse(iso) + n * 864e5).toISOString().slice(0, 10);
+  let f = plus(fri5, 7);
+  for (let i = 0; i < 10 && String(Math.ceil(new Date(Date.parse(f) + 864e5).getUTCDate() / 7)) !== nth5; i++) f = plus(f, 7);
+  const bw = ok(await admin('POST', '/api/events/weekend', { friday: f }));
+  assert.ok(bw.regularsPlaced >= 1, JSON.stringify(bw));
+  const built = ok(await admin('GET', `/api/events?from=${f}&to=${plus(f, 2)}`));
+  assert.ok(built.some((e) => e.title === 'Worship Service' && holds(e, dev.id)), `a freshly built weekend gets its regulars (${f})`);
+}
+// Build ahead: weekends a few weeks out are built and regulars placed without anyone pressing a button.
+{
+  ok(await admin('PATCH', '/api/settings', { autoBuildWeeks: 3 }));
+  const r = ok(await admin('POST', '/api/weekend/build-ahead'));
+  assert.ok(r.built >= 0);
+  const thisFri = friday;
+  for (let i = 0; i < 3; i++) {
+    const f = new Date(Date.parse(thisFri) + 7 * i * 864e5).toISOString().slice(0, 10);
+    const evs = ok(await admin('GET', `/api/events?from=${f}&to=${new Date(Date.parse(f) + 2 * 864e5).toISOString().slice(0, 10)}`));
+    assert.ok(evs.length > 0, `weekend of ${f} is built`);
+    assert.ok(evs.some((e) => holds(e, cara.id)), `every-weekend regular placed on ${f}`);
+  }
+  assert.equal(ok(await admin('POST', '/api/weekend/build-ahead')).built, 0, 'nothing built twice');
+  ok(await crew1('POST', '/api/weekend/build-ahead'), 403);
+  ok(await admin('PATCH', '/api/settings', { autoBuildWeeks: 0 }));
+}
+step('build ahead: upcoming weekends are built from the template with regulars placed; Sync never re-adds a regular taken off by hand');
 
 // Template changes reach weekends already built when you sync
 const t0 = ok(await admin('GET', '/api/bootstrap')).settings.weekendTemplate;

@@ -20,6 +20,8 @@ const settingsView = (s) => ({
   weekendTemplate: s.weekendTemplate,
   reminderEmails: s.reminderEmails,
   reminderDays: s.reminderDays,
+  calendarAlertDays: s.calendarAlertDays ?? 5,
+  autoBuildWeeks: s.autoBuildWeeks ?? 4,
   emailConfigured: mailerReady(),
 });
 
@@ -83,7 +85,7 @@ meRouter.get('/overview', wrap(async (req, res) => {
       const holder = slotHolder[key];
       if (holder === String(me._id)) {
         const a = mine[key];
-        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null });
+        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null });
       } else if (!isShadow(pos) && !holder && me.positions.includes(pos) && !unav.has(eid) && !isAway(eid) && !onEvent[eid]) {
         pickups.push({ ...eventView(e), position: pos, pending: pending[key] === 'pickup' });
       }
@@ -197,6 +199,8 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
   }
   if (b.reminderEmails !== undefined) s.reminderEmails = !!b.reminderEmails;
   if (b.reminderDays !== undefined) s.reminderDays = Math.max(1, Math.min(7, Math.round(Number(b.reminderDays) || 2)));
+  if (b.calendarAlertDays !== undefined) s.calendarAlertDays = Math.max(0, Math.min(14, Math.round(Number(b.calendarAlertDays) || 0)));
+  if (b.autoBuildWeeks !== undefined) s.autoBuildWeeks = Math.max(0, Math.min(12, Math.round(Number(b.autoBuildWeeks) || 0)));
   if (b.countryCode !== undefined) s.countryCode = String(b.countryCode).replace(/\D/g, '').slice(0, 4);
   if (b.groupLink !== undefined) {
     const link = normalizeUrl(str(b.groupLink, 300));
@@ -320,8 +324,9 @@ calRouter.get('/:file', wrap(async (req, res) => {
     crew: (crewBy[String(a.event._id)] || []).join(', '),
     groups: (a.event.groups || []).map((g) => g?.name).filter(Boolean).join(', '),
     updatedAt: a.updatedAt,
+    viaRegular: a.viaRegular || '',
   }));
-  const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s shifts`, tz: s.timezone, items, link: `${config.publicUrl}/#mine` });
+  const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s shifts`, tz: s.timezone, items, link: `${config.publicUrl}/#mine`, alertDays: s.calendarAlertDays ?? 5 });
   res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-cache, max-age=0', 'Content-Disposition': 'inline; filename="shifts.ics"' });
   res.send(body);
 }));

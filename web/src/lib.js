@@ -76,20 +76,6 @@ export function fmtDateTime(iso) {
 }
 
 // Public-domain translations from bible-api.com (it allows browser requests).
-export const BIBLE_VERSIONS = [
-  { id: 'kjv', label: 'KJV' },
-  { id: 'web', label: 'WEB' },
-  { id: 'asv', label: 'ASV' },
-  { id: 'ylt', label: 'YLT' },
-  { id: 'darby', label: 'Darby' },
-];
-export async function lookUpBible(reference, version = 'kjv') {
-  const res = await fetch(`https://bible-api.com/${encodeURIComponent(reference)}?translation=${version}`);
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.verses) throw new Error(data?.error || 'Couldn’t find that passage. Check the reference, e.g. John 3:16-17.');
-  const text = data.verses.map((v) => `${v.verse} ${v.text.replace(/\s+/g, ' ').trim()}`).join(' ');
-  return { reference: data.reference, text };
-}
 
 // ---------- dates (YYYY-MM-DD strings, treated as calendar days) ----------
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

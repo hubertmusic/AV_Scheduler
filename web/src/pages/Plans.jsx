@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addDays, api, BIBLE_VERSIONS, fmtDateTime, fmtDay, fmtSize, fmtTime, fridayOf, lookUpBible, todayISO, uploadFiles, weekendLabel } from '../lib.js';
+import { addDays, api, fmtDateTime, fmtDay, fmtSize, fmtTime, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
+import { BibleFields } from '../scripture.jsx';
 import { DropZone, Empty, Icon, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 
@@ -209,27 +210,8 @@ function Details({ plan, canEdit, onSave }) {
 function Scriptures({ plan, canEdit, onSave }) {
   const empty = { reference: '', version: 'KJV', text: '' };
   const [f, setF] = useState(empty);
-  const [looking, setLooking] = useState(false);
-  const [err, setErr] = useState('');
   const list = plan.scriptures;
 
-  const lookUp = async () => {
-    const v = BIBLE_VERSIONS.find((x) => x.label === f.version);
-    if (!v) {
-      setErr(`${f.version} can’t be looked up automatically (it’s copyrighted). Paste the text instead.`);
-      return;
-    }
-    setLooking(true);
-    setErr('');
-    try {
-      const r = await lookUpBible(f.reference, v.id);
-      setF({ ...f, reference: r.reference, text: r.text });
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setLooking(false);
-    }
-  };
   const add = async (e) => {
     e.preventDefault();
     await onSave({ scriptures: [...list, f] }, `Added ${f.reference}`);
@@ -271,29 +253,7 @@ function Scriptures({ plan, canEdit, onSave }) {
       ))}
       {canEdit && (
         <form className="stack divider-top" onSubmit={add}>
-          <div className="row-wrap fields-3">
-            <label className="field field-wide">
-              <span>Reference</span>
-              <input required value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder="e.g. John 4:13-14" />
-            </label>
-            <label className="field">
-              <span>Version</span>
-              <input value={f.version} onChange={(e) => setF({ ...f, version: e.target.value })} list="bible-versions" />
-              <datalist id="bible-versions">
-                {[...BIBLE_VERSIONS.map((v) => v.label), 'NKJV', 'NIV', 'ESV', 'NLT'].map((v) => (
-                  <option key={v} value={v} />
-                ))}
-              </datalist>
-            </label>
-            <button type="button" className="btn btn-outline self-end" onClick={lookUp} disabled={!f.reference || looking}>
-              {looking ? 'Looking up…' : 'Look up'}
-            </button>
-          </div>
-          <label className="field">
-            <span>Text</span>
-            <textarea rows={4} value={f.text} onChange={(e) => setF({ ...f, text: e.target.value })} placeholder="Look up KJV, WEB or ASV, or paste any version" />
-          </label>
-          {err && <div className="small danger">{err}</div>}
+          <BibleFields value={f} onChange={setF} />
           <button className="btn btn-primary self-start">Add Bible text</button>
         </form>
       )}
@@ -310,9 +270,20 @@ function Songs({ plan, canEdit, onSave, reload }) {
   const rows = plan.songs;
   const body = (list) => list.map((x) => ({ song: x.song.id, key: x.key, note: x.note }));
 
+  const [libLoaded, setLibLoaded] = useState(false);
+  const loadLibrary = useCallback(() => {
+    if (!canEdit) return;
+    api('/songs').then(
+      (l) => {
+        setLibrary(l);
+        setLibLoaded(true);
+      },
+      () => setLibLoaded(true)
+    );
+  }, [canEdit]);
   useEffect(() => {
-    if (canEdit) api('/songs').then(setLibrary, () => {});
-  }, [canEdit, plan.songs.length]);
+    loadLibrary();
+  }, [loadLibrary, plan.songs.length]);
 
   const move = (i, d) => {
     const next = [...rows];
@@ -382,12 +353,21 @@ function Songs({ plan, canEdit, onSave, reload }) {
         <div className="row-wrap divider-top">
           <label className="field grow">
             <span className="sr-only">Add a song from the library</span>
-            <select value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Add from the song library…</option>
-              {library.filter((s) => !inPlan.has(s.id)).map((s) => (
-                <option key={s.id} value={s.id}>
+            <select value={pick} onChange={(e) => setPick(e.target.value)} onFocus={loadLibrary} disabled={libLoaded && library.length === 0}>
+              <option value="">
+                {!libLoaded
+                  ? 'Loading the song library…'
+                  : library.length === 0
+                    ? 'The song library is empty — add one with New song'
+                    : library.every((x) => inPlan.has(x.id))
+                      ? 'Every song in the library is already in this service'
+                      : `Add from the song library (${library.length - library.filter((x) => inPlan.has(x.id)).length} available)…`}
+              </option>
+              {library.map((s) => (
+                <option key={s.id} value={s.id} disabled={inPlan.has(s.id)}>
                   {s.title}
                   {s.artist ? ` — ${s.artist}` : ''}
+                  {inPlan.has(s.id) ? ' (already in this service)' : ''}
                 </option>
               ))}
             </select>

@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { DateTime } from 'luxon';
 import { Assignment, Event, EVENT_KINDS, Group, Position, Request, Skip, Unavailable, User } from '../models.js';
 import { requirePerm } from '../auth.js';
-import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, str, TIME_RE, wrap } from '../lib/util.js';
+import { addDays, bad, DATE_RE, forbidden, fridayOf, getSettings, isId, notFound, str, TIME_RE, wrap } from '../lib/util.js';
 import { eventView } from '../lib/views.js';
 import { deletePlanFor } from './plans.js';
 import { awayByEvent, slotValid, touchAvailability } from '../lib/availability.js';
 import { dayName, evName, posName } from '../lib/activity.js';
+import { placeRegulars } from '../lib/regularsAuto.js';
 
 export const eventsRouter = Router();
 
@@ -100,6 +101,7 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
   const differs = [];
   const same = (a, b) => [...a].sort().join(',') === [...b].sort().join(',');
   const kept = new Set();
+  const createdIds = new Set();
   const skips = await Skip.find({ date: { $gte: friday, $lte: addDays(friday, 2) } }).lean();
   const isSkipped = (date, title) => skips.some((k) => k.date === date && k.title === title);
   for (const t of active) {
@@ -110,6 +112,7 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
     if (!ev) {
       ev = await Event.create({ date, title: t.title, ...want });
       kept.add(String(ev._id));
+      createdIds.add(String(ev._id));
       created++;
       continue;
     }
@@ -160,10 +163,12 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
       placed: await Assignment.countDocuments({ event: e._id }),
     });
   }
+  // People with a regular schedule go straight onto the services just created.
+  const regularsPlaced = createdIds.size ? (await placeRegulars(friday, { onlyEvents: createdIds })).length : 0;
   if (created || updated || removed) {
     res.locals.activity = `Synced the weekend of ${dayName(friday)} with the template (${[created && `${created} added`, updated && `${updated} updated`, removed && `${removed} removed`].filter(Boolean).join(', ')})`;
   }
-  res.json({ created, updated, cleared, removed, differs, extra, skipped: skips.map(skipView) });
+  res.json({ created, updated, cleared, removed, regularsPlaced, differs, extra, skipped: skips.map(skipView) });
 }));
 
 // POST /api/events/:id/soundcheck { call, start, end, needs, groups, copyCrew, notes }
@@ -252,6 +257,7 @@ eventsRouter.post('/skips/:id/restore', requirePerm('edit'), wrap(async (req, re
   let ev = await Event.findOne(probe);
   if (!ev && t) {
     ev = await Event.create({ date: k.date, title: k.title, start: t.start, call: t.call, end: t.end, needs: [...t.needs], kind: t.kind || 'service', groups: t.groups || [] });
+    await placeRegulars(fridayOf(k.date), { onlyEvents: new Set([String(ev._id)]) });
   }
   res.locals.activity = `Brought back ${k.title} (${dayName(k.date)})`;
   res.json(ev ? eventView(ev) : null);
@@ -293,7 +299,7 @@ eventsRouter.put('/:id/assign/:position', requirePerm('edit'), wrap(async (req, 
   if (existing && String(existing.user?._id) === String(user._id)) return res.json({ ok: true });
   if (existing) {
     // A new person has to confirm and be reminded again.
-    Object.assign(existing, { user: user._id, confirmedAt: null, reminderEmailAt: null, waRemindedAt: null });
+    Object.assign(existing, { user: user._id, confirmedAt: null, reminderEmailAt: null, waRemindedAt: null, viaRegular: '' });
     await existing.save();
   } else {
     await Assignment.create({ event: ev._id, position, user: user._id });

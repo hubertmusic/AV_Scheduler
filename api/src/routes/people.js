@@ -5,6 +5,7 @@ import { requirePerm } from '../auth.js';
 import { addDays, bad, conflict, forbidden, getSettings, isId, normalizePhone, notFound, str, todayIn, token, wrap } from '../lib/util.js';
 import { personView } from '../lib/views.js';
 import { cleanRegulars } from '../lib/regulars.js';
+import { applyRegularsFor } from '../lib/regularsAuto.js';
 
 export const peopleRouter = Router();
 
@@ -80,9 +81,12 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   if (b.phone !== undefined) user.phone = normalizePhone(b.phone, s.countryCode);
   if (b.positions !== undefined) user.positions = await cleanPositions(b.positions);
   if (b.trainee !== undefined) user.trainee = await cleanPositions(b.trainee);
+  let regularsChanged = false;
   if (b.regulars !== undefined) {
     const keys = new Set((await Position.find({}).lean()).map((p) => p.key));
+    const before = JSON.stringify(user.regulars || []);
     user.regulars = cleanRegulars(b.regulars, keys);
+    regularsChanged = JSON.stringify(user.regulars) !== before;
   }
   if (b.maxPerMonth !== undefined) user.maxPerMonth = Math.max(0, Math.min(31, Math.round(Number(b.maxPerMonth) || 0)));
 
@@ -121,7 +125,9 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   }
   await user.save();
   res.locals.activity = `Edited ${user.name}`;
-  res.json(personView(user, req.user));
+  // A new or changed regular schedule puts them on the weekends already built.
+  const regularsPlaced = regularsChanged && user.active ? await applyRegularsFor(user._id) : 0;
+  res.json({ ...personView(user, req.user), regularsPlaced });
 }));
 
 // GET /api/people/load — shifts per person: last 90 days, next 60 days

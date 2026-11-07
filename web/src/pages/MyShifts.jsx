@@ -85,6 +85,7 @@ export default function MyShifts() {
                     {s.kind === 'soundcheck' && <span className="chip chip-check">Sound check</span>}
                     {s.shadow && <span className="chip chip-check">Shadowing</span>}
                     {s.confirmed ? <span className="chip chip-approved">✓ Confirmed</span> : <span className="chip chip-pending">Not confirmed</span>}
+                    {s.regular && <span className="chip chip-regular" title={`Placed by your regular schedule: ${s.regular}`}>Regular</span>}
                   </div>
                   <div className="strong">
                     {posLabel(s.position)} · {s.title}
@@ -219,6 +220,15 @@ export default function MyShifts() {
                 <Icon name="copy" size={16} /> Copy link
               </button>
             </div>
+            <details className="small">
+              <summary>Not getting the calendar alerts?</summary>
+              <p className="muted">Each shift has an alert a few days before and one an hour before call time.</p>
+              <ul className="muted">
+                <li><strong>iPhone:</strong> Settings → Calendar → Accounts → Subscribed Calendars → this calendar → turn <em>Remove Alarms</em> off.</li>
+                <li><strong>Mac:</strong> in Calendar, right-click this calendar → Get Info → untick <em>Remove: Alerts</em>.</li>
+                <li><strong>Google Calendar:</strong> Google doesn’t use alerts from a subscribed calendar. On a computer, open Settings → this calendar → <em>Event notifications</em> and add one, such as 5 days before.</li>
+              </ul>
+            </details>
             {isLocal && <p className="small danger">This address only works on your network. Set PUBLIC_URL to your public https address so phones and Google can reach the feed.</p>}
             <button
               type="button"

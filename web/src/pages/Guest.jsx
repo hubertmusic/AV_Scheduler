@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, BIBLE_VERSIONS, fmtDateTime, fmtDay, fmtSize, fmtTime, lookUpBible, uploadFiles } from '../lib.js';
+import { api, fmtDateTime, fmtDay, fmtSize, fmtTime, uploadFiles } from '../lib.js';
+import { BibleFields } from '../scripture.jsx';
 import { DropZone } from '../ui.jsx';
 import { LYRICS_HINT } from './Songs.jsx';
 
@@ -166,48 +167,10 @@ function NoteForm({ token, onDone, fail }) {
 function ScriptureForm({ token, onDone, fail }) {
   const empty = { reference: '', version: 'KJV', text: '' };
   const [f, setF] = useState(empty);
-  const [looking, setLooking] = useState(false);
   const { busy, error, send } = useSend(token, onDone, fail);
-  const [hint, setHint] = useState('');
-  const lookUp = async () => {
-    const v = BIBLE_VERSIONS.find((x) => x.label === f.version);
-    if (!v) return setHint(`Paste the ${f.version} text below.`);
-    setLooking(true);
-    setHint('');
-    try {
-      const r = await lookUpBible(f.reference, v.id);
-      setF({ ...f, reference: r.reference, text: r.text });
-    } catch (e) {
-      setHint(e.message);
-    } finally {
-      setLooking(false);
-    }
-  };
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); send({ kind: 'scripture', ...f }, `Sent ${f.reference}`, () => setF({ ...empty, version: f.version })); }}>
-      <div className="row-wrap fields-3">
-        <label className="field field-wide">
-          <span>Reference</span>
-          <input required value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder="e.g. Psalm 23:1-4" />
-        </label>
-        <label className="field">
-          <span>Version</span>
-          <input value={f.version} onChange={(e) => setF({ ...f, version: e.target.value })} list="guest-versions" />
-          <datalist id="guest-versions">
-            {[...BIBLE_VERSIONS.map((v) => v.label), 'NKJV', 'NIV', 'ESV', 'NLT'].map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
-        </label>
-        <button type="button" className="btn btn-outline self-end" onClick={lookUp} disabled={!f.reference || looking}>
-          {looking ? 'Looking up…' : 'Look up'}
-        </button>
-      </div>
-      <label className="field">
-        <span>Text</span>
-        <textarea rows={5} value={f.text} onChange={(e) => setF({ ...f, text: e.target.value })} />
-      </label>
-      {hint && <div className="small danger">{hint}</div>}
+      <BibleFields value={f} onChange={setF} refPlaceholder="e.g. Psalm 23:1-4" rows={5} />
       {error && <div className="error" role="alert">{error}</div>}
       <button className="btn btn-primary self-start" disabled={busy}>Send Bible text</button>
     </form>

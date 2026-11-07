@@ -8,3 +8,6 @@ api/uploads/
 *.archive
 *.gz
 uploads/
+
+compose.override.yaml
+*.tgz

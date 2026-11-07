@@ -13,6 +13,7 @@ export async function buildFromTemplate(app, friday) {
   }
   const parts = [];
   if (r.created) parts.push(`added ${r.created} service${r.created === 1 ? '' : 's'}`);
+  if (r.regularsPlaced) parts.push(`placed ${r.regularsPlaced} regular${r.regularsPlaced === 1 ? '' : 's'}`);
   if (s.updated) parts.push(`updated ${s.updated} to match`);
   if (s.removed) parts.push(`removed ${s.removed}`);
   if (s.cleared) parts.push(`took ${s.cleared} ${s.cleared === 1 ? 'person' : 'people'} off removed positions`);

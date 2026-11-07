@@ -55,6 +55,7 @@ function Reminders() {
   const { settings } = app;
   const [on, setOn] = useState(settings.reminderEmails);
   const [days, setDays] = useState(settings.reminderDays);
+  const [alertDays, setAlertDays] = useState(settings.calendarAlertDays ?? 5);
   const { busy, error, run } = useSaver();
   const [note, setNote] = useState('');
   const test = async () => {
@@ -100,9 +101,21 @@ function Reminders() {
         </select>
       </label>
       <p className="muted small">Each person gets one email per shift: call time, crew, songs, a Confirm link and their Quick review link.</p>
+      <label className="field field-row">
+        <span className="small">Calendar alert</span>
+        <select value={alertDays} onChange={(e) => setAlertDays(Number(e.target.value))}>
+          <option value={0}>Off</option>
+          {[1, 2, 3, 4, 5, 6, 7, 10, 14].map((n) => (
+            <option key={n} value={n}>
+              {n} day{n === 1 ? '' : 's'} before
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">An alert on each shift in people’s synced calendars (“You’re on FOH Audio for Worship Service on Sabbath, Oct 31”), plus one an hour before call time.</p>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="row-wrap">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { reminderEmails: on, reminderDays: days } }), 'Reminder settings saved')}>
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { reminderEmails: on, reminderDays: days, calendarAlertDays: alertDays } }), 'Reminder settings saved')}>
           Save
         </button>
         {settings.emailConfigured && (
@@ -226,6 +239,34 @@ function Positions() {
   );
 }
 
+// Build weekends from the template ahead of time, so regulars land on calendars early.
+function PlanAhead() {
+  const app = useApp();
+  const [weeks, setWeeks] = useState(app.settings.autoBuildWeeks ?? 4);
+  const { busy, error, run } = useSaver();
+  const change = (n) => {
+    setWeeks(n);
+    run(() => api('/settings', { method: 'PATCH', body: { autoBuildWeeks: n } }), n ? `Weekends will be built ${n} week${n === 1 ? '' : 's'} ahead` : 'Weekends won’t be built automatically');
+  };
+  return (
+    <div className="plan-ahead stack-xs">
+      <label className="field field-row">
+        <span className="small strong">Build weekends automatically</span>
+        <select value={weeks} disabled={busy} onChange={(e) => change(Number(e.target.value))}>
+          <option value={0}>Off — build each one by hand</option>
+          {[1, 2, 3, 4, 6, 8, 12].map((n) => (
+            <option key={n} value={n}>
+              {n} week{n === 1 ? '' : 's'} ahead
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">Crew Call builds each weekend from this template that far ahead and places everyone with a regular schedule, so it shows on their calendar early. Everyone else is still placed by you or Auto-fill. Skipped weekends and services stay skipped.</p>
+      {error && <div className="error" role="alert">{error}</div>}
+    </div>
+  );
+}
+
 function Template() {
   const { settings, positions, groups } = useApp();
   const fromSettings = () => settings.weekendTemplate.map((t) => ({ ...t, kind: t.kind || 'service', needs: [...t.needs], groups: (t.groups || []).map(String), off: Boolean(t.off) }));
@@ -261,6 +302,7 @@ function Template() {
           “Build this weekend” on the Schedule creates these services and sound checks. Turn a service <strong>off</strong> to stop using it without losing its settings. For a weekend that’s already built, press <strong>Sync with template</strong> on the Schedule: it adds missing services, offers to update ones you changed here, and offers to take off ones you removed or turned off.
         </p>
       </div>
+      <PlanAhead />
       {dirty && (
         <div className="warn-box row-wrap spread">
           <span>You have unsaved changes to the template.</span>

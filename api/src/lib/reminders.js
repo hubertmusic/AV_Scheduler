@@ -6,6 +6,7 @@ import { mailerReady, sendMail } from './mailer.js';
 import { logActivity } from './activity.js';
 import { baseOf, isShadow } from './availability.js';
 import { noticeLinesFor } from '../routes/announcements.js';
+import { autoBuildAhead } from './regularsAuto.js';
 
 export function fmtDay(date) {
   return DateTime.fromISO(date).toFormat('cccc, LLL d').replace('Saturday', 'Sabbath');
@@ -33,7 +34,7 @@ async function reminderContent(a, labels, orgName) {
     `Hi ${first},`,
     '',
     ...(notices.length ? [...notices, ''] : []),
-    `You're on ${pos} for ${e.title} on ${fmtDay(e.date)}.`,
+    `You're on ${pos} for ${e.title} on ${fmtDay(e.date)}.${a.viaRegular ? ` (Your regular ${a.viaRegular} shift.)` : ''}`,
     `Call time: ${fmtTime(e.call)} (starts ${fmtTime(e.start)}).`,
     '',
     `Crew:\n  ${crewLine}`,
@@ -96,4 +97,8 @@ export function startReminderJob() {
   setInterval(() => pruneActivity().catch(() => {}), 24 * 3600 * 1000);
   setTimeout(tick, 30 * 1000);
   setInterval(tick, 15 * 60 * 1000);
+  // Build weekends ahead from the template and place regulars, so their shifts reach calendars early.
+  const build = () => autoBuildAhead().catch((e) => console.error('auto-build:', e.message));
+  setTimeout(build, 45 * 1000);
+  setInterval(build, 6 * 3600 * 1000);
 }

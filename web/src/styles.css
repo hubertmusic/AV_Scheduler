@@ -458,3 +458,6 @@ a.icon-btn { text-decoration: none; }
 .skip-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--surface); }
 .skip-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; background: var(--sunk); font-size: 14px; }
 .skip-name { text-decoration: line-through; text-decoration-color: var(--field); color: var(--muted); }
+
+/* Regular schedules */
+.plan-ahead { padding: 12px; border: 1px solid var(--blue-line); border-radius: 10px; background: var(--blue-soft); }
