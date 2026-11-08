@@ -10,6 +10,7 @@ import { announcementsFor, noticeLinesFor } from './announcements.js';
 import { buildCalendar } from '../lib/ics.js';
 import { awayByEvent, baseOf, isShadow, touchAvailability } from '../lib/availability.js';
 import { mailerReady, sendMail } from '../lib/mailer.js';
+import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
 
 const settingsView = (s) => ({
@@ -17,6 +18,7 @@ const settingsView = (s) => ({
   timezone: s.timezone,
   countryCode: s.countryCode,
   groupLink: s.groupLink,
+  logo: s.logo ? `/api/public/logo?v=${s.logoAt ? s.logoAt.getTime() : 0}` : '',
   weekendTemplate: s.weekendTemplate,
   reminderEmails: s.reminderEmails,
   reminderDays: s.reminderDays,
@@ -243,6 +245,33 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
 }));
 
 // Sign everyone except the admin out on every device
+// Church logo for the bulletin (PNG, JPEG or WebP, up to 3 MB)
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+settingsRouter.post('/logo', requireAdmin, uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
+  const [f] = filesOf(req);
+  if (!f) throw bad('Choose an image.');
+  if (!LOGO_TYPES.includes(f.mimetype) || f.size > 3 * 1024 * 1024) {
+    removeUploads([f]);
+    throw bad('Use a PNG, JPEG or WebP image up to 3 MB.');
+  }
+  const s = await getSettings();
+  if (s.logo) deleteStored(s.logo);
+  s.logo = f.filename;
+  s.logoAt = new Date();
+  await s.save();
+  res.locals.activity = 'Changed the bulletin logo';
+  res.json(settingsView(s));
+}));
+settingsRouter.delete('/logo', requireAdmin, wrap(async (req, res) => {
+  const s = await getSettings();
+  if (s.logo) deleteStored(s.logo);
+  s.logo = '';
+  s.logoAt = null;
+  await s.save();
+  res.locals.activity = 'Removed the bulletin logo';
+  res.json(settingsView(s));
+}));
+
 settingsRouter.post('/sign-out-everyone', requireAdmin, wrap(async (req, res) => {
   const n = await signOutUsers({ _id: { $ne: req.user._id } });
   await logActivity({ user: req.user, kind: 'system', action: `Signed everyone else out on all devices (${n} account${n === 1 ? '' : 's'})`, req });

@@ -22,10 +22,10 @@ function client() {
     return { status: res.status, data };
   };
   const call = (method, p, body) => send(method, p, body, false);
-  call.upload = (p, files, extra = {}) => {
+  call.upload = (p, files, extra = {}, field = 'files') => {
     const fd = new FormData();
     for (const [k, v] of Object.entries(extra)) fd.append(k, v);
-    for (const f of files) fd.append('files', new Blob([f.bytes], { type: f.type }), f.name);
+    for (const f of files) fd.append(field, new Blob([f.bytes], { type: f.type }), f.name);
     return send('POST', p, fd, true);
   };
   return call;
@@ -123,6 +123,21 @@ const r = ok(await admin('POST', `/api/plans/${viaCopy.id}/copy`, { from: svc.id
 assert.ok(r.copied.includes('order of service'));
 assert.equal(ok(await admin('GET', `/api/plans/${viaCopy.id}`)).order.length, 6);
 step('copy last week’s order, or copy it from any service');
+
+// Church logo on the bulletin
+const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex');
+ok(await crew.upload('/api/settings/logo', [{ name: 'logo.png', type: 'image/png', bytes: png }], {}, 'file'), 403);
+ok(await admin.upload('/api/settings/logo', [{ name: 'logo.svg', type: 'image/svg+xml', bytes: Buffer.from('<svg/>') }], {}, 'file'), 400);
+const withLogo = ok(await admin.upload('/api/settings/logo', [{ name: 'logo.png', type: 'image/png', bytes: png }], {}, 'file'));
+assert.match(withLogo.logo, /^\/api\/public\/logo\?v=\d+$/);
+const bl2 = ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`));
+assert.equal(bl2.logo, withLogo.logo);
+const img = ok(await anon('GET', bl2.logo));
+assert.equal(Buffer.compare(img, png), 0, 'the logo is served to anyone');
+ok(await admin('DELETE', '/api/settings/logo'));
+ok(await anon('GET', '/api/public/logo'), 404);
+assert.equal(ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`)).logo, '');
+step('church logo: admin uploads it (images only), it shows on the bulletin');
 
 ok(await admin('POST', '/api/plans/archive-weekend', { events: [svc.id], delete: true }));
 ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`), 404);

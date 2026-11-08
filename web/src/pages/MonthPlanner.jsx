@@ -2,7 +2,7 @@
 // on every service, and a draft of placements. Nothing reaches the schedule (or anyone's phone)
 // until Apply.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, fmtDay, fmtTime, todayISO } from '../lib.js';
+import { api, firstName, fmtDay, fmtTime, todayISO, waLink } from '../lib.js';
 import { Empty, useApp } from '../ui.jsx';
 
 const SHADOW = '+shadow';
@@ -28,6 +28,7 @@ export default function MonthPlanner() {
   const [notes, setNotes] = useState(null); // auto-fill results
   const [skipped, setSkipped] = useState([]);
   const [focus, setFocus] = useState(null); // person id
+  const [told, setTold] = useState(null); // after Apply: who to tell, and who's been messaged
 
   const load = useCallback(async () => {
     setD(null);
@@ -140,6 +141,7 @@ export default function MonthPlanner() {
       const r = await api('/planner/apply', { method: 'POST', body: { changes: m.changes } });
       app.toast(`Applied ${r.applied} change${r.applied === 1 ? '' : 's'} to the schedule`);
       setSkipped(r.skipped);
+      setTold({ month, people: whoToTell(d, m, r.skipped), sent: {} });
       await load();
     } catch (e) {
       app.toast(e.message);
@@ -183,6 +185,8 @@ export default function MonthPlanner() {
       {!d && <div className="loading-inline">Loading…</div>}
       {d && d.events.length === 0 && <Empty>Nothing is scheduled in {monthLabel(month)} yet. Build the weekends on the Schedule tab first.</Empty>}
 
+      {told && told.people.length > 0 && <TellPeople told={told} setTold={setTold} />}
+
       {d && d.events.length > 0 && (
         <>
           <div className="mp-tiles">
@@ -197,7 +201,7 @@ export default function MonthPlanner() {
               Some changes weren’t applied: {skipped.map((s) => `${m.posLabel[baseOf(s.position)] || s.position} on ${evName(s.eventId)} — ${s.why}`).join(' · ')}
             </div>
           )}
-          {notes && (notes.unfilled.length > 0 || notes.weekdaySkipped > 0 || notes.regularNotes.length > 0) && (
+          {notes && (notes.unfilled.length > 0 || notes.regularNotes.length > 0) && (
             <div className="card stack-sm mp-notes">
               {notes.unfilled.map((u, i) => (
                 <div key={i} className="small">
@@ -209,7 +213,6 @@ export default function MonthPlanner() {
                   {r.name} ({r.rule}): {r.why}
                 </div>
               ))}
-              {notes.weekdaySkipped > 0 && <div className="small muted">Weekday services ({notes.weekdaySkipped}) aren’t auto-filled; place people there by hand.</div>}
             </div>
           )}
 
@@ -391,5 +394,88 @@ function WhereTheyFit({ p, m, draft, onPlace }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// After Apply: each person whose shifts changed, what changed, and a WhatsApp message for them
+function whoToTell(d, m, skipped) {
+  const bad = new Set(skipped.map((s) => keyOf(s.eventId, s.position)));
+  const ev = Object.fromEntries(d.events.map((e) => [e.id, e]));
+  const out = {};
+  const entry = (uid) => (out[uid] ||= { person: m.person[uid], added: [], removed: [] });
+  for (const c of m.changes) {
+    const k = keyOf(c.eventId, c.position);
+    if (bad.has(k)) continue;
+    const before = m.saved[k];
+    const line = { event: ev[c.eventId], position: m.posLabel[baseOf(c.position)] || baseOf(c.position), shadow: isShadow(c.position) };
+    if (c.userId) entry(c.userId).added.push(line);
+    if (before && before !== c.userId) entry(before).removed.push(line);
+  }
+  const byDate = (a, b) => (a.event.date + a.event.start).localeCompare(b.event.date + b.event.start);
+  return Object.values(out)
+    .filter((x) => x.person)
+    .map((x) => ({ ...x, added: x.added.sort(byDate), removed: x.removed.sort(byDate) }))
+    .sort((a, b) => a.person.name.localeCompare(b.person.name));
+}
+
+const shiftLine = (l) => `• ${l.position}${l.shadow ? ' (shadowing)' : ''} — ${l.event.title}, ${fmtDay(l.event.date)}${l.event.call ? `, call ${fmtTime(l.event.call)}` : `, ${fmtTime(l.event.start)}`}`;
+
+function messageFor(x, month) {
+  const url = window.location.origin;
+  const parts = [`Hi ${firstName(x.person.name)}, the ${monthLabel(month)} AV schedule is updated.`];
+  if (x.added.length) parts.push(`You’re on:\n${x.added.map(shiftLine).join('\n')}`);
+  if (x.removed.length) parts.push(`No longer on:\n${x.removed.map(shiftLine).join('\n')}`);
+  if (x.added.length) parts.push(`Please tap Confirm in Crew Call: ${url}/#mine\nCan’t make one? Request a swap there. Thanks!`);
+  else parts.push('Thanks for being flexible!');
+  return parts.join('\n\n');
+}
+
+function TellPeople({ told, setTold }) {
+  const send = (x) => {
+    window.open(waLink(x.person.phone, messageFor(x, told.month)), '_blank', 'noopener');
+    setTold({ ...told, sent: { ...told.sent, [x.person.id]: true } });
+  };
+  const left = told.people.filter((x) => !told.sent[x.person.id] && x.person.phone).length;
+  return (
+    <section className="card stack" aria-label="Let people know">
+      <div className="section-head">
+        <div>
+          <h3>Let people know</h3>
+          <p className="small muted">
+            These {told.people.length} {told.people.length === 1 ? 'person’s' : 'people’s'} shifts changed. Each button opens WhatsApp with a message listing their changes; you press Send.
+            {left > 0 ? ` ${left} still to message.` : ' Everyone with a phone number has been messaged.'}
+          </p>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTold(null)}>
+          Done
+        </button>
+      </div>
+      <div className="mp-tell">
+        {told.people.map((x) => (
+          <div key={x.person.id} className={`mp-tell-row${told.sent[x.person.id] ? ' mp-tell-sent' : ''}`}>
+            <div className="stack-xs">
+              <strong>{x.person.name}</strong>
+              {x.added.map((l, i) => (
+                <span key={`a${i}`} className="small">
+                  + {shiftLine(l).slice(2)}
+                </span>
+              ))}
+              {x.removed.map((l, i) => (
+                <span key={`r${i}`} className="small muted">
+                  − {shiftLine(l).slice(2)}
+                </span>
+              ))}
+            </div>
+            {x.person.phone ? (
+              <button type="button" className={`btn btn-sm ${told.sent[x.person.id] ? 'btn-ghost' : 'btn-primary'}`} onClick={() => send(x)}>
+                {told.sent[x.person.id] ? 'Sent ✓ (again?)' : 'WhatsApp'}
+              </button>
+            ) : (
+              <span className="small muted">No phone number</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

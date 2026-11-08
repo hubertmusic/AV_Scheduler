@@ -332,6 +332,11 @@ function ShareBlock({ plan, which, title, badge, badgeTone, blurb, canPlans, set
         <a className="btn btn-outline btn-sm" href={`${url}?print=1`} target="_blank" rel="noopener noreferrer">
           <Icon name="doc" size={14} /> Print
         </a>
+        {which === 'bulletin' && (
+          <a className="btn btn-outline btn-sm" href={`${url}?print=half`} target="_blank" rel="noopener noreferrer">
+            Print half sheets
+          </a>
+        )}
         <button type="button" className="btn btn-ghost btn-sm" onClick={copy}>
           Copy link
         </button>

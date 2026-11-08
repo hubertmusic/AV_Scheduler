@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, unsaved } from '../lib.js';
+import { api, unsaved, uploadFiles } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
@@ -21,6 +21,7 @@ export default function Settings() {
           <Reminders />
           <SignIn />
           <General />
+          <BulletinLogo />
           <Positions />
         </div>
       </div>
@@ -233,6 +234,36 @@ function General() {
       <button type="button" className="btn btn-primary self-start" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: f }), 'Settings saved')}>
         Save
       </button>
+    </section>
+  );
+}
+
+// Church logo at the top of the congregation's bulletin
+function BulletinLogo() {
+  const { settings } = useApp();
+  const { busy, error, run } = useSaver();
+  const pick = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) run(() => uploadFiles('/settings/logo', [f], { field: 'file' }), 'Logo saved');
+  };
+  return (
+    <section className="card stack" aria-label="Bulletin logo">
+      <h2>Bulletin logo</h2>
+      <p className="muted small">Shown at the top of the congregation’s bulletin, on screen and printed. PNG, JPEG or WebP up to 3 MB; a wide logo on a white or clear background works best.</p>
+      {settings.logo ? <img className="logo-preview" src={settings.logo} alt="Current bulletin logo" /> : <div className="logo-preview logo-empty small muted">No logo yet</div>}
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="row-wrap">
+        <label className={`btn btn-outline btn-sm${busy ? ' disabled' : ''}`}>
+          {settings.logo ? 'Replace logo' : 'Upload logo'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={pick} />
+        </label>
+        {settings.logo && (
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => run(() => api('/settings/logo', { method: 'DELETE' }), 'Logo removed')}>
+            Remove
+          </button>
+        )}
+      </div>
     </section>
   );
 }

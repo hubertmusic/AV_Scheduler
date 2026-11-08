@@ -14,9 +14,12 @@ import { describeWeek, matchesWeek } from './regulars.js';
  * opts (used by the month planner, which plans on a draft instead of the saved schedule):
  *   draft:   [{ eventId, position, userId }] stands in for the saved assignments
  *   monthly: { 'YYYY-MM': { userId: shifts } } stands in for the saved monthly counts
+ *   dates:   [from, to] plans those days instead of the weekend (weekday services; regulars,
+ *            which are weekend rules, don't apply)
  */
 export async function planAutofill(friday, opts = {}) {
-  const events = await Event.find({ date: { $gte: friday, $lte: addDays(friday, 2) } }).sort({ date: 1, start: 1 }).lean();
+  const [from, to] = opts.dates || [friday, addDays(friday, 2)];
+  const events = await Event.find({ date: { $gte: from, $lte: to } }).sort({ date: 1, start: 1 }).lean();
   if (!events.length) return { proposals: [], unfilled: [], regularNotes: [] };
   const evIds = new Set(events.map((e) => String(e._id)));
   const [people, saved, unav, away, recent] = await Promise.all([
@@ -84,7 +87,7 @@ export async function planAutofill(friday, opts = {}) {
   //    Their job can vary: they get whichever of their positions is open (scarcest first),
   //    or the first open one from the positions the rule lists.
   const ruleEntries = [];
-  for (const p of people) for (const r of p.regulars || []) if (matchesWeek(r, friday)) ruleEntries.push({ p, r });
+  if (!opts.dates) for (const p of people) for (const r of p.regulars || []) if (matchesWeek(r, friday)) ruleEntries.push({ p, r });
   ruleEntries.sort((a, b) => (b.r.positions.length ? 1 : 0) - (a.r.positions.length ? 1 : 0));
   const services = events.filter((e) => (e.kind || 'service') === 'service');
   for (const { p, r } of ruleEntries) {

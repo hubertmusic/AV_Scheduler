@@ -192,22 +192,59 @@ export function RundownPage({ token }) {
 
 export function BulletinPage({ token }) {
   const [d, error] = usePublic('bulletin', token);
-  const onQr = useAutoPrint(!!d);
+  const wanted = new URLSearchParams(window.location.search).get('print');
+  const [half, setHalf] = useState(wanted === 'half');
+  const printed = useRef(false);
   useEffect(() => {
     if (d) document.title = `${d.event.title} · ${fmtDate(d.event.date)}`;
   }, [d]);
+  // Half sheets: two copies side by side on a landscape page, to cut in half
+  useEffect(() => {
+    if (!half) return;
+    const style = document.createElement('style');
+    style.textContent = '@page { size: letter landscape; margin: 0.35in; }';
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, [half]);
+  useEffect(() => {
+    const after = () => wanted !== 'half' && setHalf(false);
+    window.addEventListener('afterprint', after);
+    return () => window.removeEventListener('afterprint', after);
+  }, [wanted]);
+  const onQr = useCallback(() => {
+    if (!wanted || printed.current) return;
+    printed.current = true;
+    setTimeout(() => window.print(), 400);
+  }, [wanted]);
+  const printHalf = () => {
+    setHalf(true);
+    setTimeout(() => window.print(), 400);
+  };
   if (error) return <Problem error={error} />;
   if (!d) return <div className="loading">Loading…</div>;
-  const e = d.event;
 
   return (
-    <div className="bl">
+    <div className={half ? 'bl-two' : ''}>
       <div className="bl-tools no-print">
-        <button type="button" className="btn btn-outline btn-sm" onClick={() => window.print()}>
-          Print
+        <button type="button" className="btn btn-outline btn-sm" onClick={() => (setHalf(false), setTimeout(() => window.print(), 200))}>
+          Print full page
+        </button>
+        <button type="button" className="btn btn-outline btn-sm" onClick={printHalf}>
+          Print half sheets
         </button>
       </div>
+      <BulletinBody d={d} half={half} onQr={onQr} />
+      {half && <BulletinBody d={d} half copy />}
+    </div>
+  );
+}
+
+function BulletinBody({ d, half, copy, onQr }) {
+  const e = d.event;
+  return (
+    <div className={`bl${half ? ' bl-half' : ''}${copy ? ' bl-copy' : ''}`} aria-hidden={copy || undefined}>
       <header className="bl-head">
+        {d.logo && <img className="bl-logo" src={d.logo} alt={d.orgName ? `${d.orgName} logo` : 'Logo'} />}
         {d.orgName && <div className="bl-org">{d.orgName}</div>}
         <h1>{e.title}</h1>
         <div className="bl-date">
@@ -279,7 +316,7 @@ export function BulletinPage({ token }) {
       )}
 
       <footer className="bl-foot print-only">
-        <Qr value={window.location.origin + window.location.pathname} size={88} label="QR code for the digital bulletin" onReady={onQr} />
+        <Qr value={window.location.origin + window.location.pathname} size={half ? 64 : 88} label="QR code for the digital bulletin" onReady={onQr} />
         <span>Scan for the digital bulletin</span>
       </footer>
     </div>

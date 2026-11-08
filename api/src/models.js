@@ -210,6 +210,8 @@ const settingsSchema = new Schema({
   timezone: { type: String, default: 'America/New_York' },
   countryCode: { type: String, default: '1' },
   groupLink: { type: String, default: '' }, // WhatsApp group invite link, optional
+  logo: { type: String, default: '' }, // stored file name of the church logo (bulletin)
+  logoAt: { type: Date, default: null },
   weekendTemplate: { type: [templateItem], default: [] },
   reminderEmails: { type: Boolean, default: true },
   reminderDays: { type: Number, default: 2 },

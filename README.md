@@ -23,12 +23,12 @@ What it does:
   Everyone signed in can read and download a plan. People with the **Edit service plans** privilege can change it.
 - **Planning tab** (admin and team leaders):
   - **Flow charts:** shared boards of boxes, sticky notes, decisions, text and team members joined by lines, for sketching the week. Drag from the dots on a box to connect it; double-click to edit text. Boards save on their own, and if two people edit at once, the second is shown the newer version instead of overwriting it. **Week kickoff** starts with a ready-made outline.
-  - **Month planner (admin only):** every service in a month against every position, with who's available, who's unavailable and how many shifts each person has. Tiles show open spots, services without a Lead and people with room for more; select a person to see the open spots they could fill. **Fill open spots** drafts placements for the whole month (respecting monthly limits and unavailability, spreading shifts, preferring a Lead on each service). Nothing reaches the schedule until **Apply**.
+  - **Month planner (admin only):** every service in a month against every position, with who's available, who's unavailable and how many shifts each person has. Tiles show open spots, services without a Lead and people with room for more; select a person to see the open spots they could fill. **Fill open spots** drafts placements for the whole month, weekday services included (respecting monthly limits and unavailability, spreading shifts, preferring a Lead on each service). Nothing reaches the schedule until **Apply**. After Apply, **Let people know** lists everyone whose shifts changed, with a WhatsApp button that opens a message listing their new and removed shifts.
 - **Skill levels.** On Team & roles, each position is Learning (can shadow), Capable (trained) or Lead. Auto-fill prefers a Lead on any service that doesn't have one yet.
 - **Order of service (optional).** On each service plan: items in order with who and, if you want times, minutes. Crew Call works out each start time and warns when the service runs past its scheduled end. Start from a basic order, copy last week's, or add the plan's songs, Bible texts and sermon. Each line can carry cues for the team (rundown only) and can be left out of the bulletin.
 - **Rundown and bulletin (beta).** Two separate links, each with a QR code, a printable page and a phone-friendly page, no sign-in needed:
   - **Service rundown — platform & crew only:** the order with times, cues and who, songs with keys, Bible texts and AV positions (names only, no phone numbers). For speakers, worship leaders and the AV team.
-  - **Congregation bulletin:** the order without times or cues, sermon and speaker, Bible references, songs and the week's announcements.
+  - **Congregation bulletin:** the order without times or cues, sermon and speaker, Bible references, songs and the week's announcements, under your church logo (Settings → Bulletin logo). Print it full page, or as **half sheets**: two copies side by side on a landscape page, to cut in half.
   - **New link…** replaces either one; the old link and any printed QR code stop working.
 - **Archive.** Each weekend moves to the archive on Monday morning (the org's time zone). Archived services leave the planning page and become read-only, so last week's slides never get mixed into this week, but nothing is deleted.
   - **Archive this weekend…** at the bottom of the planning page does it right away, so the page is a clean slate for next weekend. Pick the services, then **Save to the archive** or, for the admin only, **Delete** (removes the plans, uploaded files and guest links; songs, media library items and the schedule of who served stay). Late guest items still waiting for approval are turned down and guest links close.
@@ -211,27 +211,59 @@ ACADEMY_SSO_SECRET=<openssl rand -hex 32>
 
 ## 8. Backups
 
-```bash
-# back up (writes into ./backups)
-docker compose exec mongo sh -c 'mongodump --quiet --archive=/backups/crewcall-$(date +%F).gz --gzip -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db crewcall'
+`scripts/backup.sh` backs up the database and a copy of `.env` (it holds the database password) every time it runs, plus the uploaded files (media and `.pro` files) once a week on Mondays. It keeps 30 days and deletes older copies. Files already in cold storage live on the NAS, so back those up with the NAS's own tools.
 
-# restore
-docker compose exec mongo sh -c 'mongorestore --drop --archive=/backups/crewcall-YYYY-MM-DD.gz --gzip -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin'
+### Nightly backups to the NAS
+
+1. On the NAS, make a shared folder, e.g. `CrewCallBackups`, with an account that can read and write it.
+2. On the server, mount it at boot (the same way as the cold-storage share, below), owned by your user:
+
+   ```bash
+   sudo apt install cifs-utils
+   sudo mkdir -p /mnt/crewcall-backups
+   sudo sh -c 'printf "username=NAS_USER\npassword=NAS_PASSWORD\n" > /root/.nas-crewcall-backups && chmod 600 /root/.nas-crewcall-backups'
+   echo "//NAS_ADDRESS/CrewCallBackups /mnt/crewcall-backups cifs credentials=/root/.nas-crewcall-backups,uid=$(id -u),gid=$(id -g),file_mode=0600,dir_mode=0700,nofail,_netdev,x-systemd.automount 0 0" | sudo tee -a /etc/fstab
+   sudo systemctl daemon-reload && sudo mount -a
+   touch /mnt/crewcall-backups/.crewcall-backups
+   ```
+
+   The `.crewcall-backups` file marks the real share. If the NAS isn't mounted, the script stops instead of filling the server's disk.
+3. In `.env`:
+
+   ```env
+   BACKUP_DEST=/mnt/crewcall-backups
+   BACKUP_KEEP_DAYS=30
+   BACKUP_UPLOADS=weekly
+   ```
+
+4. Check it, then run it once by hand:
+
+   ```bash
+   scripts/backup.sh --check
+   scripts/backup.sh
+   ```
+
+5. Run it every night at 3:30 AM: `crontab -e`, then add
+
+   ```
+   30 3 * * * /srv/stacks/org/crew-call/scripts/backup.sh >> /srv/stacks/org/crew-call/backups/backup.log 2>&1
+   ```
+
+   `last-backup.txt` in the backup folder shows when the last good backup finished, and `backups/backup.log` shows any errors.
+
+Without `BACKUP_DEST`, backups go to `./backups` on the server itself, which won't survive a dead disk.
+
+### Restoring
+
+```bash
+C="docker compose -f docker-compose.yml -f compose.override.yaml"
+# database (replaces what's there now)
+$C exec -T mongo sh -c 'mongorestore --drop --archive --gzip -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' < /mnt/crewcall-backups/crewcall-db-YYYY-MM-DD-HHMM.gz
+# uploaded files
+$C exec -T api tar xzf - -C /data/uploads < /mnt/crewcall-backups/crewcall-uploads-YYYY-MM-DD-HHMM.tgz
 ```
 
-Uploaded media and `.pro` files live in the `uploads` volume. Files already moved to cold storage live in the NAS folder instead (back that up with the NAS's own tools). To back up the `uploads` volume:
-
-```bash
-docker run --rm -v crew-call_uploads:/data -v "$PWD/backups":/backups alpine tar czf /backups/uploads-$(date +%F).tgz -C /data .
-```
-
-To restore them:
-
-```bash
-docker run --rm -v crew-call_uploads:/data -v "$PWD/backups":/backups alpine tar xzf /backups/uploads-YYYY-MM-DD.tgz -C /data
-```
-
-To back up automatically, add the backup commands to a nightly cron job on the host.
+If `.env` is lost or changed, copy back the matching `crewcall-env-*.txt`: the database only accepts the password it was first set up with.
 
 ## 9. Updating
 

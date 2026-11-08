@@ -41,8 +41,8 @@ plannerRouter.get('/month', wrap(async (req, res) => {
   res.json({
     month: req.query.month,
     positions: positions.map((p) => ({ key: p.key, label: p.label })),
-    events: events.map((e) => ({ id: String(e._id), date: e.date, title: e.title, kind: e.kind || 'service', start: e.start, needs: e.needs || [], forEvent: e.forEvent ? String(e.forEvent) : null })),
-    people: people.map((p) => ({ id: String(p._id), name: p.name, positions: p.positions || [], trainee: p.trainee || [], leads: (p.leads || []).filter((k) => (p.positions || []).includes(k)), maxPerMonth: p.maxPerMonth || 0, recent: recent.count[String(p._id)] || 0 })),
+    events: events.map((e) => ({ id: String(e._id), date: e.date, title: e.title, kind: e.kind || 'service', start: e.start, call: e.call, needs: e.needs || [], forEvent: e.forEvent ? String(e.forEvent) : null })),
+    people: people.map((p) => ({ id: String(p._id), name: p.name, phone: p.phone || '', positions: p.positions || [], trainee: p.trainee || [], leads: (p.leads || []).filter((k) => (p.positions || []).includes(k)), maxPerMonth: p.maxPerMonth || 0, recent: recent.count[String(p._id)] || 0 })),
     unavailable: off,
     assignments: asg.map((a) => ({ eventId: String(a.event), position: a.position, userId: String(a.user), confirmed: !!a.confirmedAt })),
   });
@@ -71,12 +71,18 @@ plannerRouter.post('/autofill', wrap(async (req, res) => {
   for (const a of savedHere) if (!isShadow(a.position)) counts[String(a.user)] = (counts[String(a.user)] || 0) - 1;
   for (const a of draft) if (!isShadow(a.position)) counts[a.userId] = (counts[a.userId] || 0) + 1;
 
-  const fridays = [...new Set(events.map((e) => fridayOf(e.date)))];
+  // Weekends (Fri–Sun) together, then each weekday service on its own day, in date order
+  const isWeekend = (d) => [5, 6, 7].includes(DateTime.fromISO(d).weekday);
+  const runs = [];
+  for (const e of events) {
+    const key = isWeekend(e.date) ? `w${fridayOf(e.date)}` : `d${e.date}`;
+    if (!runs.some((r) => r.key === key)) runs.push({ key, friday: fridayOf(e.date), dates: isWeekend(e.date) ? null : [e.date, e.date] });
+  }
   const proposals = [];
   const unfilled = [];
   const regularNotes = [];
-  for (const friday of fridays) {
-    const r = await planAutofill(friday, { draft, monthly: { [m]: counts } });
+  for (const { friday, dates } of runs) {
+    const r = await planAutofill(friday, { draft, monthly: { [m]: counts }, ...(dates ? { dates } : {}) });
     for (const p of r.proposals) {
       if (!evIds.has(p.eventId)) continue; // that weekend spills into the next month
       proposals.push(p);
@@ -86,8 +92,7 @@ plannerRouter.post('/autofill', wrap(async (req, res) => {
     unfilled.push(...r.unfilled.filter((u) => evIds.has(u.eventId)));
     regularNotes.push(...r.regularNotes.map((n) => ({ ...n, friday })));
   }
-  const weekday = events.filter((e) => !['5', '6', '7'].includes(String(DateTime.fromISO(e.date).weekday))).length;
-  res.json({ proposals: proposals.sort((a, b) => dateOf[a.eventId].localeCompare(dateOf[b.eventId])), unfilled, regularNotes, weekdaySkipped: weekday });
+  res.json({ proposals: proposals.sort((a, b) => dateOf[a.eventId].localeCompare(dateOf[b.eventId])), unfilled, regularNotes });
 }));
 
 // POST /api/planner/apply { changes: [{ eventId, position, userId | null }] }

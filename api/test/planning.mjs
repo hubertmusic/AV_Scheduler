@@ -113,8 +113,12 @@ assert.ok(mp.unavailable[ev2.id].includes(ben.id));
 assert.deepEqual(mp.people.find((p) => p.id === cy.id).trainee, ['foh']);
 assert.equal(mp.assignments.length, 0);
 
+// A weekday service (the Wednesday after the first Saturday)
+const wed = new Date(Date.UTC(Number(sats[0].slice(0, 4)), Number(sats[0].slice(5, 7)) - 1, Number(sats[0].slice(8)) + 4)).toISOString().slice(0, 10);
+const ev3 = ok(await admin('POST', '/api/events', { date: wed, title: 'Prayer Meeting', call: '18:30', start: '19:00', end: '20:00', needs: ['foh'] }), 201);
 const fill = ok(await admin('POST', '/api/planner/autofill', { month, draft: [] }));
-assert.equal(fill.proposals.length, 4, JSON.stringify(fill));
+assert.equal(fill.proposals.length, 5, JSON.stringify(fill));
+assert.ok(fill.proposals.some((p) => p.eventId === ev3.id && p.position === 'foh'), 'weekday services are filled too');
 assert.ok(!fill.proposals.some((p) => p.eventId === ev2.id && p.userId === ben.id), 'never someone who is unavailable');
 assert.ok(fill.proposals.filter((p) => p.userId === dee.id).length <= 1, 'monthly limit holds across weekends');
 assert.ok(fill.proposals.some((p) => p.userId === ava.id && p.position === 'foh' && /Lead/.test(p.reason)), 'a Lead is preferred when a service has none');
@@ -126,9 +130,10 @@ assert.ok(!around.proposals.some((p) => p.eventId === ev1.id && p.position === '
 assert.ok(!around.proposals.some((p) => p.eventId === ev1.id && p.userId === ava.id), 'not twice on one service');
 
 let ap = ok(await admin('POST', '/api/planner/apply', { changes: fill.proposals.map(({ eventId, position, userId }) => ({ eventId, position, userId })) }));
-assert.equal(ap.applied, 4);
+assert.equal(ap.applied, 5);
 mp = ok(await admin('GET', `/api/planner/month?month=${month}`));
-assert.equal(mp.assignments.length, 4);
+assert.equal(mp.assignments.length, 5);
+assert.ok(mp.events.every((e) => 'call' in e) && mp.people.every((p) => 'phone' in p), 'what the after-Apply messages need');
 step('month planner: availability, draft auto-fill (limits, Leads, unavailability), apply');
 
 const at = (pos, eid = ev1.id) => mp.assignments.find((a) => a.eventId === eid && a.position === pos)?.userId;
