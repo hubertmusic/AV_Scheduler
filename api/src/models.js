@@ -28,6 +28,7 @@ const userSchema = new Schema(
     },
     positions: { type: [String], default: [] },
     trainee: { type: [String], default: [] }, // positions they're learning (can shadow)
+    leads: { type: [String], default: [] }, // trained positions where they're the most experienced (Lead)
     // Regular commitments, e.g. 2nd Sabbath of the month at Worship Service (lib/regulars.js)
     regulars: {
       type: [
@@ -364,6 +365,20 @@ const submissionSchema = new Schema(
   { timestamps: true }
 );
 submissionSchema.index({ event: 1 });
+
+// A flow-chart board: boxes, notes and people joined by lines (Planning tab, admin and leaders)
+const boardSchema = new Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    nodes: { type: [Schema.Types.Mixed], default: [] },
+    edges: { type: [Schema.Types.Mixed], default: [] },
+    rev: { type: Number, default: 0 }, // bumps on every save, so two people can't overwrite each other unknowingly
+    createdBy: ref('User'),
+    updatedBy: ref('User'),
+  },
+  { timestamps: true, minimize: false }
+);
+export const Board = model('Board', boardSchema);
 
 export const Plan = model('Plan', planSchema);
 export const Song = model('Song', songSchema);

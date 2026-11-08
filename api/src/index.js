@@ -13,6 +13,8 @@ import { groupsRouter } from './routes/groups.js';
 import { guestAdminRouter, mediaRouter, plansRouter, songsRouter, submissionsRouter } from './routes/plans.js';
 import { guestRouter } from './routes/guest.js';
 import { publicRouter } from './routes/public.js';
+import { boardsRouter } from './routes/boards.js';
+import { plannerRouter } from './routes/planner.js';
 import { libraryRouter } from './routes/library.js';
 import { academyRouter } from './routes/academy.js';
 import { weekendRouter } from './routes/weekend.js';
@@ -59,6 +61,8 @@ app.use('/api/activity', activityRouter);
 app.use('/api/resources', resourcesRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/positions', positionsRouter);
+app.use('/api/boards', boardsRouter);
+app.use('/api/planner', plannerRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 

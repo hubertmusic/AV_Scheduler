@@ -21,6 +21,10 @@ What it does:
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
   Everyone signed in can read and download a plan. People with the **Edit service plans** privilege can change it.
+- **Planning tab** (admin and team leaders):
+  - **Flow charts:** shared boards of boxes, sticky notes, decisions, text and team members joined by lines, for sketching the week. Drag from the dots on a box to connect it; double-click to edit text. Boards save on their own, and if two people edit at once, the second is shown the newer version instead of overwriting it. **Week kickoff** starts with a ready-made outline.
+  - **Month planner (admin only):** every service in a month against every position, with who's available, who's unavailable and how many shifts each person has. Tiles show open spots, services without a Lead and people with room for more; select a person to see the open spots they could fill. **Fill open spots** drafts placements for the whole month (respecting monthly limits and unavailability, spreading shifts, preferring a Lead on each service). Nothing reaches the schedule until **Apply**.
+- **Skill levels.** On Team & roles, each position is Learning (can shadow), Capable (trained) or Lead. Auto-fill prefers a Lead on any service that doesn't have one yet.
 - **Order of service (optional).** On each service plan: items in order with who and, if you want times, minutes. Crew Call works out each start time and warns when the service runs past its scheduled end. Start from a basic order, copy last week's, or add the plan's songs, Bible texts and sermon. Each line can carry cues for the team (rundown only) and can be left out of the bulletin.
 - **Rundown and bulletin (beta).** Two separate links, each with a QR code, a printable page and a phone-friendly page, no sign-in needed:
   - **Service rundown — platform & crew only:** the order with times, cues and who, songs with keys, Bible texts and AV positions (names only, no phone numbers). For speakers, worship leaders and the AV team.

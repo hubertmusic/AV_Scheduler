@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { api, fridayOf, roleLabel, setViewAs, signalSignedOut, todayISO, unsaved } from './lib.js';
 import { AppCtx, Avatar, WaSheet } from './ui.jsx';
 import { PreviewBanner, PreviewPicker } from './pages/Preview.jsx';
@@ -17,6 +17,8 @@ import Account from './pages/Account.jsx';
 import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
 import RunSheet from './pages/RunSheet.jsx';
+// The flow-chart library is big, so the Planning tab loads only when opened
+const Planning = lazy(() => import('./pages/Planning.jsx'));
 import { BulletinPage, RundownPage } from './pages/Share.jsx';
 
 // Signs out after `minutes` without a click, tap or key press, and tells the server
@@ -186,6 +188,7 @@ const TABS = [
   { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message },
   { id: 'mine', label: 'My shifts', show: () => true },
   { id: 'plans', label: 'Service plans', show: () => true },
+  { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader' },
   { id: 'requests', label: 'Requests', show: (c) => c.approve },
   { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message },
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
@@ -351,6 +354,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'mine' && <MyShifts />}
         {tab === 'requests' && <Requests />}
         {tab === 'plans' && <Plans />}
+        {tab === 'planning' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Planning />
+          </Suspense>
+        )}
         {tab === 'groups' && <Groups />}
         {tab === 'team' && <Team />}
         {tab === 'resources' && <Resources />}

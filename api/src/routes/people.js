@@ -92,6 +92,8 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   if (b.phone !== undefined) user.phone = normalizePhone(b.phone, s.countryCode);
   if (b.positions !== undefined) user.positions = await cleanPositions(b.positions);
   if (b.trainee !== undefined) user.trainee = await cleanPositions(b.trainee);
+  if (b.leads !== undefined) user.leads = await cleanPositions(b.leads);
+  user.leads = (user.leads || []).filter((k) => user.positions.includes(k)); // Lead only where trained
   let regularsChanged = false;
   if (b.regulars !== undefined) {
     const keys = new Set((await Position.find({}).lean()).map((p) => p.key));
