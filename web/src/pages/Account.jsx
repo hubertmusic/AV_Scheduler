@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, prettyPhone } from '../lib.js';
+import { api, prettyPhone, signalSignedOut } from '../lib.js';
 import { Modal, useApp } from '../ui.jsx';
 
 export default function Account({ onClose }) {
@@ -50,6 +50,26 @@ export default function Account({ onClose }) {
         </label>
         <button className="btn btn-outline self-start" disabled={busy}>Change password</button>
       </form>
+      <div className="stack-sm divider-top">
+        <h3>Sign out on all devices</h3>
+        <p className="muted small">Signs you out everywhere you’re signed in: phones, tablets, the booth computer and this browser. Use it if you signed in somewhere you shouldn’t stay signed in.</p>
+        <button
+          type="button"
+          className="btn btn-outline self-start"
+          disabled={busy}
+          onClick={async () => {
+            if (!window.confirm('Sign out on every device, including this one?')) return;
+            try {
+              await api('/account/sign-out-everywhere', { method: 'POST' });
+              signalSignedOut('You’ve been signed out on all your devices.');
+            } catch (e) {
+              setError(e.message);
+            }
+          }}
+        >
+          Sign out everywhere
+        </button>
+      </div>
       {error && <div className="error" role="alert">{error}</div>}
     </Modal>
   );

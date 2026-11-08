@@ -26,7 +26,6 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       UPLOAD_DIR: /data/uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-80}
-      GUEST_LINK_HOURS: ${GUEST_LINK_HOURS:-4}
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-}
       ACADEMY_URL: ${ACADEMY_URL:-}

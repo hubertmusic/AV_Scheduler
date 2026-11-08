@@ -19,6 +19,7 @@ export default function Settings() {
         </div>
         <div className="side-col stack-lg">
           <Reminders />
+          <SignIn />
           <General />
           <Positions />
         </div>
@@ -48,6 +49,70 @@ function useSaver() {
     }
   };
   return { busy, error, run };
+}
+
+function SignIn() {
+  const app = useApp();
+  const { settings } = app;
+  const [idle, setIdle] = useState(String(settings.idleMinutes ?? 90));
+  const [onClose, setOnClose] = useState(settings.endOnBrowserClose ?? true);
+  const { busy, error, run } = useSaver();
+  const everyone = async () => {
+    if (!window.confirm('Sign everyone except you out on all their devices? They’ll need their passwords to sign in again.')) return;
+    try {
+      const r = await api('/settings/sign-out-everyone', { method: 'POST' });
+      app.toast(`Signed out ${r.signedOut} ${r.signedOut === 1 ? 'person' : 'people'}`);
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const choices = [
+    ['30', '30 minutes'],
+    ['60', '1 hour'],
+    ['90', '90 minutes'],
+    ['120', '2 hours'],
+    ['240', '4 hours'],
+    ['0', 'Never'],
+  ];
+  if (!choices.some(([v]) => v === idle)) choices.unshift([idle, `${idle} minutes`]);
+  return (
+    <section className="card stack" aria-label="Sign-in">
+      <h2>Sign-in</h2>
+      <label className="field">
+        <span>Sign people out after no activity for</span>
+        <select value={idle} onChange={(e) => setIdle(e.target.value)}>
+          {choices.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={onClose} onChange={(e) => setOnClose(e.target.checked)} />
+        Sign people out when they close the browser
+      </label>
+      <p className="muted small">
+        Some browsers reopen your last tabs after a restart and keep you signed in; the no-activity limit still signs those out. Changes apply the next time someone signs in or opens a page.
+      </p>
+      {error && <div className="error" role="alert">{error}</div>}
+      <button
+        type="button"
+        className="btn btn-primary self-start"
+        disabled={busy}
+        onClick={() => run(() => api('/settings', { method: 'PATCH', body: { idleMinutes: Number(idle), endOnBrowserClose: onClose } }), 'Sign-in settings saved')}
+      >
+        Save
+      </button>
+      <div className="stack-sm divider-top">
+        <h3>Sign everyone out</h3>
+        <p className="muted small">Signs every crew member and leader out on all their devices. You stay signed in. One person at a time: Team &amp; roles → their name → Sign out everywhere.</p>
+        <button type="button" className="btn btn-danger self-start" onClick={everyone}>
+          Sign everyone else out
+        </button>
+      </div>
+    </section>
+  );
 }
 
 function Reminders() {

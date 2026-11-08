@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
@@ -7,6 +8,7 @@ import { requirePerm } from '../auth.js';
 import { addDays, bad, DATE_RE, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
 import { isArchivedDate, orgToday } from '../lib/archive.js';
+import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
 import { buildServicePptx } from '../lib/pptx.js';
 import { eventView } from '../lib/views.js';
@@ -80,7 +82,21 @@ export function songView(s) {
   };
 }
 
-const guestView = (g) => ({ id: String(g._id), name: g.name, note: g.note, expiresAt: g.expiresAt, active: !g.revoked && g.expiresAt > new Date(), url: `${config.publicUrl}/guest/${g.token}` });
+const guestView = (g, counts = {}) => ({
+  id: String(g._id),
+  name: g.name,
+  note: g.note,
+  code: g.code || '',
+  codeLocked: (g.codeTries || 0) >= 8,
+  opensAt: g.opensAt || g.createdAt,
+  closesAt: g.closesAt || null,
+  expiresAt: g.expiresAt,
+  state: windowState(g),
+  active: !g.revoked && g.expiresAt > new Date(),
+  url: `${config.publicUrl}/guest/${g.token}`,
+  live: counts.live || 0, // items of theirs in the plan
+  waiting: counts.pending || 0, // late items waiting for approval
+});
 
 function submissionView(s) {
   return {
@@ -88,6 +104,8 @@ function submissionView(s) {
     kind: s.kind,
     status: s.status,
     data: s.data,
+    // a late change to something already in the plan: what it was before
+    replaces: s.replaces?._id ? { data: s.replaces.data } : null,
     media: s.media && s.media._id ? mediaView(s.media) : null,
     guestName: s.guest?.name || '',
     createdAt: s.createdAt,
@@ -135,9 +153,14 @@ async function fullPlan(ev, viewerCan) {
   if (viewerCan.plans) {
     const [guests, subs] = await Promise.all([
       GuestLink.find({ event: ev._id }).sort({ createdAt: -1 }).limit(20),
-      Submission.find({ event: ev._id }).sort({ createdAt: -1 }).limit(100).populate('guest', 'name').populate({ path: 'media', populate: { path: 'guest', select: 'name' } }),
+      Submission.find({ event: ev._id, status: { $ne: 'draft' } }).sort({ createdAt: -1 }).limit(200).populate('guest', 'name').populate('replaces', 'data').populate({ path: 'media', populate: { path: 'guest', select: 'name' } }),
     ]);
-    out.guests = guests.map(guestView);
+    const counts = {};
+    for (const x of subs) {
+      const c = (counts[String(x.guest?._id || x.guest)] ||= {});
+      c[x.status] = (c[x.status] || 0) + 1;
+    }
+    out.guests = guests.map((g) => guestView(g, counts[String(g._id)]));
     out.submissions = subs.map(submissionView);
   }
   return out;
@@ -631,15 +654,83 @@ guestAdminRouter.post('/:eventId', requirePerm('plans'), wrap(async (req, res) =
   await assertOpen(ev);
   const name = str(req.body.name, 80);
   if (!name) throw bad('Who is this link for?');
-  const g = await GuestLink.create({
-    token: token(24),
-    event: ev._id,
-    name,
-    note: str(req.body.note, 500),
-    createdBy: req.user._id,
-    expiresAt: new Date(Date.now() + config.guestLinkHours * 3600 * 1000),
-  });
+  const sched = defaultSchedule(ev, (await getSettings()).timezone);
+  const g = new GuestLink({ token: token(24), event: ev._id, name, note: str(req.body.note, 500), createdBy: req.user._id, code: newCode(), ...sched });
+  applySchedule(g, req.body);
+  await g.save();
+  res.locals.activity = `Made a guest link for ${name} · ${evName(ev)}`;
   res.status(201).json(guestView(g));
+}));
+
+const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+const dateIn = (v) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v) : null);
+
+// Set a link's window from { opensAt, closesAt } (ISO times). The link stays usable until at
+// least an hour after it locks, so late changes can still be sent for approval.
+function applySchedule(g, b = {}) {
+  const opens = dateIn(b.opensAt);
+  const closes = dateIn(b.closesAt);
+  if (opens) g.opensAt = opens;
+  if (closes) g.closesAt = closes;
+  if (g.closesAt <= g.opensAt) throw bad('The deadline has to be after the time it opens.');
+  const minEnd = new Date(g.closesAt.getTime() + 3600 * 1000);
+  if (g.expiresAt < minEnd) g.expiresAt = minEnd;
+}
+
+async function loadLinkForLeader(id) {
+  if (!isId(id)) throw notFound();
+  const g = await GuestLink.findById(id).populate('event');
+  if (!g || !g.event) throw notFound();
+  return g;
+}
+
+// Change the schedule or note: { opensAt, closesAt, note }
+guestAdminRouter.patch('/link/:id', requirePerm('plans'), wrap(async (req, res) => {
+  const g = await loadLinkForLeader(req.params.id);
+  if (!g.code) throw bad('This is an older link without a schedule. Make a new link instead.');
+  if (req.body.note !== undefined) g.note = str(req.body.note, 500);
+  applySchedule(g, req.body);
+  await g.save();
+  res.locals.activity = `Changed ${g.name}’s guest link schedule · ${evName(g.event)}`;
+  res.json(guestView(g));
+}));
+
+// Open it again for a while after the deadline: { minutes }
+guestAdminRouter.post('/link/:id/reopen', requirePerm('plans'), wrap(async (req, res) => {
+  const g = await loadLinkForLeader(req.params.id);
+  if (!g.code) throw bad('This is an older link without a schedule. Make a new link instead.');
+  const minutes = Math.max(15, Math.min(24 * 60, Math.round(Number(req.body.minutes) || 60)));
+  const now = new Date();
+  if (!g.opensAt || g.opensAt > now) g.opensAt = now;
+  g.closesAt = new Date(now.getTime() + minutes * 60 * 1000);
+  g.revoked = false;
+  applySchedule(g);
+  await g.save();
+  res.locals.activity = `Reopened ${g.name}’s guest link for ${minutes} minutes · ${evName(g.event)}`;
+  res.json(guestView(g));
+}));
+
+guestAdminRouter.post('/link/:id/lock', requirePerm('plans'), wrap(async (req, res) => {
+  const g = await loadLinkForLeader(req.params.id);
+  const now = new Date();
+  if (g.opensAt > now) g.opensAt = new Date(now.getTime() - 1000);
+  g.closesAt = now;
+  await g.save();
+  res.locals.activity = `Locked ${g.name}’s guest link · ${evName(g.event)}`;
+  res.json(guestView(g));
+}));
+
+// New code: the old one (and anyone signed in with it) stops working
+guestAdminRouter.post('/link/:id/new-code', requirePerm('plans'), wrap(async (req, res) => {
+  const g = await loadLinkForLeader(req.params.id);
+  g.code = newCode();
+  g.codeVersion = (g.codeVersion || 0) + 1;
+  g.codeTries = 0;
+  if (!g.opensAt) g.opensAt = g.createdAt;
+  if (!g.closesAt) g.closesAt = g.expiresAt;
+  await g.save();
+  res.locals.activity = `Made a new code for ${g.name}’s guest link · ${evName(g.event)}`;
+  res.json(guestView(g));
 }));
 
 guestAdminRouter.post('/link/:id/revoke', requirePerm('plans'), wrap(async (req, res) => {
@@ -660,28 +751,30 @@ async function loadPendingSubmission(id) {
   return s;
 }
 
+// Approving puts it in the plan (or applies the change to what's already there), the same
+// way it would have gone in while the guest's window was open.
 submissionsRouter.post('/:id/approve', requirePerm('plans'), wrap(async (req, res) => {
   const s = await loadPendingSubmission(req.params.id);
   const plan = await planFor(s.event);
   const who = s.guest?.name || 'a guest';
-  const d = s.data || {};
-  if (s.kind === 'note') {
-    plan.notes = [plan.notes, `— From ${who}:\n${d.text || ''}`].filter(Boolean).join('\n\n');
-  } else if (s.kind === 'scripture') {
-    plan.scriptures.push({ reference: d.reference, version: d.version || '', text: d.text || '' });
-  } else if (s.kind === 'song') {
-    const song = await Song.create({ title: d.title, artist: d.artist || '', lyrics: d.lyrics || '', notes: `Sent by ${who}`, lyricsUpdatedAt: new Date(), updatedBy: req.user._id });
-    plan.songs.push({ song: song._id, key: d.key || '', note: '' });
-  } else if (s.kind === 'media') {
-    if (s.media) {
-      s.media.status = 'approved';
-      s.media.plan = plan._id;
-      await s.media.save();
+  if (s.replaces) {
+    const original = await Submission.findById(s.replaces);
+    if (original && original.status === 'live') {
+      original.applied = await updateItem(plan, original, who, s.data || {});
+      original.data = s.data;
+      original.markModified('applied');
+      await original.save();
+    } else {
+      await applyItem(plan, s, who);
     }
+    s.status = 'approved';
+  } else {
+    s.applied = await applyItem(plan, s, who);
+    s.markModified('applied');
+    s.status = 'live'; // the guest can keep changing it if the window is reopened
   }
   plan.updatedBy = req.user._id;
   await plan.save();
-  s.status = 'approved';
   s.decidedBy = req.user._id;
   s.decidedAt = new Date();
   await s.save();

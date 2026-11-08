@@ -9,7 +9,14 @@ export function setViewAs(id) {
 }
 export const previewing = () => Boolean(viewAsId);
 
-export async function api(path, { method = 'GET', body } = {}) {
+// The server signed this browser out (idle timeout, "sign out everywhere", …). App.jsx shows sign-in.
+export function signalSignedOut(message) {
+  window.dispatchEvent(new CustomEvent('cc:signed-out', { detail: message || 'Please sign in again.' }));
+}
+
+// background: a check the app makes on its own (badges, live feed). It doesn't count as
+// activity, so it won't keep an idle session from timing out.
+export async function api(path, { method = 'GET', body, background = false } = {}) {
   if (viewAsId && method !== 'GET' && path !== '/activity/view') {
     const err = new Error('This is a preview, so nothing is saved. Exit the preview to make changes.');
     err.status = 403;
@@ -19,6 +26,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   if (viewAsId && path === '/activity/view') return null;
   const headers = body !== undefined ? { 'Content-Type': 'application/json' } : {};
   if (viewAsId) headers['X-View-As'] = viewAsId;
+  if (background) headers['X-Background'] = '1';
   const res = await fetch('/api' + path, {
     method,
     headers,
@@ -29,6 +37,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   if (!res.ok) {
     const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
+    if (res.status === 401 && !path.startsWith('/auth/') && !path.startsWith('/guest/') && path !== '/bootstrap') signalSignedOut(err.message);
     throw err;
   }
   return data;
@@ -54,6 +63,7 @@ export function uploadFiles(path, files, { field = 'files', onProgress, extra = 
       }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
       else {
+        if (xhr.status === 401 && !path.startsWith('/guest/')) signalSignedOut(data?.error);
         const msg = xhr.status === 413 && !data?.error ? 'That file is too big to upload.' : data?.error || `Upload failed (${xhr.status})`;
         const err = new Error(msg);
         err.status = xhr.status;
@@ -70,6 +80,11 @@ export function fmtSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+// "Fri, Nov 13, 6:00 PM"
+export function fmtWhen(iso) {
+  return new Date(iso).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 export function fmtDateTime(iso) {

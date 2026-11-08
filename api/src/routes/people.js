@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { Assignment, Event, PERMS, Position, Request, User } from '../models.js';
-import { requirePerm } from '../auth.js';
+import { requireAdmin, requirePerm, signOutUsers } from '../auth.js';
+import { logActivity } from '../lib/activity.js';
 import { addDays, bad, conflict, forbidden, getSettings, isId, normalizePhone, notFound, str, todayIn, token, wrap } from '../lib/util.js';
 import { personView } from '../lib/views.js';
 import { cleanRegulars } from '../lib/regulars.js';
@@ -59,6 +60,16 @@ async function loadEditable(req) {
   }
   return user;
 }
+
+// Admin: sign one person out on every device
+peopleRouter.post('/:id/sign-out', requireAdmin, wrap(async (req, res) => {
+  if (!isId(req.params.id)) throw notFound();
+  const user = await User.findById(req.params.id);
+  if (!user) throw notFound();
+  await signOutUsers({ _id: user._id });
+  await logActivity({ user: req.user, kind: 'system', action: `Signed ${user.name} out on all devices`, req });
+  res.status(204).end();
+}));
 
 peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   const user = await loadEditable(req);

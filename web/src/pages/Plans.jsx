@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addDays, api, fmtDate, fmtDateTime, fmtDay, fmtSize, fmtTime, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
+import { addDays, api, fmtDate, fmtDateTime, fmtDay, fmtSize, fmtTime, fmtWhen, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
 import { BibleFields } from '../scripture.jsx';
 import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
@@ -699,89 +699,219 @@ function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onCha
   );
 }
 
+// datetime-local input value (local time) <-> ISO
+const toLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const fromLocalInput = (v) => (v ? new Date(v).toISOString() : undefined);
+
+function scheduleLine(g) {
+  if (!g.active) return 'Turned off or expired';
+  if (!g.code) return `Older link · works until ${fmtWhen(g.expiresAt)} · everything needs approval`;
+  if (g.state === 'waiting') return `Opens ${fmtWhen(g.opensAt)} · locks ${fmtWhen(g.closesAt)}`;
+  if (g.state === 'open') return `Open now · locks ${fmtWhen(g.closesAt)}`;
+  return `Locked since ${fmtWhen(g.closesAt)} · late changes need approval until ${fmtWhen(g.expiresAt)}`;
+}
+
 function Guests({ plan, eventId, reload }) {
   const app = useApp();
-  const [f, setF] = useState({ name: '', note: '' });
+  const [f, setF] = useState({ name: '', note: '', opensAt: '', closesAt: '' });
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // link whose schedule is being changed
   const ev = plan.event;
 
-  const share = (g) =>
-    app.openWa({
-      title: `Send ${g.name} their upload link`,
-      text: `Hi ${g.name}, it’s ${app.me.name.split(' ')[0]} from ${app.settings.orgName}. Here’s your link to send your slides, videos, Bible texts and song lyrics for ${ev.title} on ${fmtDay(ev.date)}:\n\n${g.url}\n\nIt works for ${Math.round((new Date(g.expiresAt) - Date.now()) / 3600e3)} hours. Files up to 80 MB; for bigger videos, AirDrop or email them.${g.note ? `\n\n${g.note}` : ''}`,
-      recipients: [],
-      groupLink: '',
-    });
+  const message = (g) =>
+    `Hi ${g.name}, it’s ${app.me.name.split(' ')[0]} from ${app.settings.orgName}. Here’s your link to add your slides, videos, notes, Bible texts and song lyrics for ${ev.title} on ${fmtDay(ev.date)} at ${fmtTime(ev.start)}:\n\n${g.url}\n\nYour code: ${g.code}\n\nYou can add and change things until ${fmtWhen(g.closesAt)}. After that it locks, and changes go to the team for approval. Files up to 80 MB; for bigger videos, AirDrop or email them.${g.note ? `\n\n${g.note}` : ''}`;
+  const share = (g) => app.openWa({ title: `Send ${g.name} their link and code`, text: message(g), recipients: [], groupLink: '' });
+  const copy = (g) => navigator.clipboard.writeText(message(g)).then(() => app.toast('Link and code copied'), () => app.toast(g.url));
 
-  const create = async (e) => {
-    e.preventDefault();
+  const run = async (fn, msg) => {
     setBusy(true);
     try {
-      const g = await api(`/guest-links/${eventId}`, { method: 'POST', body: f });
-      setF({ name: '', note: '' });
+      const out = await fn();
+      if (msg) app.toast(typeof msg === 'function' ? msg(out) : msg);
       await reload();
-      share(g);
-    } catch (err) {
-      app.toast(err.message);
+      return out;
+    } catch (e) {
+      app.toast(e.message);
+      return null;
     } finally {
       setBusy(false);
     }
   };
-  const revoke = async (g) => {
-    await api(`/guest-links/link/${g.id}/revoke`, { method: 'POST' });
-    app.toast('Link turned off');
-    reload();
+  const create = async (e) => {
+    e.preventDefault();
+    const g = await run(() => api(`/guest-links/${eventId}`, { method: 'POST', body: { name: f.name, note: f.note, opensAt: fromLocalInput(f.opensAt), closesAt: fromLocalInput(f.closesAt) } }));
+    if (g) {
+      setF({ name: '', note: '', opensAt: '', closesAt: '' });
+      share(g);
+    }
   };
+  const post = (g, action, body, msg) => run(() => api(`/guest-links/link/${g.id}/${action}`, { method: 'POST', body }), msg);
 
   return (
-    <section className="card stack" aria-label="Guest uploads">
+    <section className="card stack" aria-label="Guest links">
       <div>
-        <h2>Guest upload links</h2>
-        <p className="muted small">For a guest speaker or visiting group: they can send files, notes, Bible texts and lyrics for this service only. Links stop working after 4 hours, and nothing reaches the plan until you approve it.</p>
+        <h2>Guest links</h2>
+        <p className="muted small">
+          For a guest speaker or visiting group. They open the link, enter the 6-digit code, and add files, notes, Bible texts and lyrics for this service. They only ever see what they sent. Until the deadline, what they submit goes straight into this plan and they can change it. After that it locks, and changes need your approval, or you can reopen it for a while.
+        </p>
       </div>
-      <form className="row-wrap fields-2" onSubmit={create}>
-        <label className="field">
-          <span>Who’s it for?</span>
-          <input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Pastor Daniels" />
-        </label>
-        <label className="field">
-          <span>Note to them (optional)</span>
-          <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Please send slides by Thursday" />
-        </label>
-        <button className="btn btn-primary self-end" disabled={busy}>
-          Make link
+      <form className="stack-sm" onSubmit={create}>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Who’s it for?</span>
+            <input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Pastor Daniels" />
+          </label>
+          <label className="field">
+            <span>Note to them (optional)</span>
+            <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Please include your sermon outline" />
+          </label>
+        </div>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Opens (optional)</span>
+            <input type="datetime-local" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>Deadline: locks at (optional)</span>
+            <input type="datetime-local" value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} />
+          </label>
+        </div>
+        <p className="muted small">Leave them blank to open it now and lock it at 6 PM the evening before the service.</p>
+        <button className="btn btn-primary self-start" disabled={busy}>
+          Make link and code
         </button>
       </form>
       {plan.guests?.length > 0 && (
-        <ul className="req-mini">
+        <ul className="guest-links">
           {plan.guests.map((g) => (
-            <li key={g.id}>
-              <span className="grow">
-                <strong>{g.name}</strong>
-                <span className="small muted">{g.active ? `Works until ${fmtDateTime(g.expiresAt)}` : 'Expired'}</span>
-              </span>
+            <li key={g.id} className={g.active ? '' : 'guest-off'}>
+              <div className="row-wrap spread">
+                <span className="stack-xs">
+                  <strong>{g.name}</strong>
+                  <span className="small muted">{scheduleLine(g)}</span>
+                  {(g.live > 0 || g.waiting > 0) && (
+                    <span className="small">
+                      {g.live} in the plan{g.waiting ? ` · ${g.waiting} waiting for approval` : ''}
+                    </span>
+                  )}
+                </span>
+                {g.active && g.code && (
+                  <span className="guest-code" aria-label={`Code ${g.code.split('').join(' ')}`}>
+                    <span className="label-sm">Code</span>
+                    <strong className="mono">{g.code}</strong>
+                  </span>
+                )}
+              </div>
+              {g.codeLocked && g.active && <div className="warn-box small">Too many wrong codes were tried. Make a new code and send it to {g.name}.</div>}
               {g.active && (
-                <>
-                  <button type="button" className="btn btn-green" onClick={() => share(g)}>
-                    Send
-                  </button>
+                <div className="row-wrap">
+                  {g.code && (
+                    <button type="button" className="btn btn-green" onClick={() => share(g)}>
+                      Send link + code
+                    </button>
+                  )}
+                  {g.code && (
+                    <button type="button" className="btn btn-ghost" onClick={() => copy(g)}>
+                      Copy
+                    </button>
+                  )}
+                  {g.code && g.state !== 'open' && (
+                    <label className="field field-inline">
+                      <span className="sr-only">Reopen for</span>
+                      <select
+                        value=""
+                        disabled={busy}
+                        onChange={(e) => e.target.value && post(g, 'reopen', { minutes: Number(e.target.value) }, (o) => `Open until ${fmtWhen(o.closesAt)}`)}
+                      >
+                        <option value="">Reopen for…</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                        <option value="120">2 hours</option>
+                        <option value="240">4 hours</option>
+                        <option value="1440">24 hours</option>
+                      </select>
+                    </label>
+                  )}
+                  {g.code && g.state === 'open' && (
+                    <button type="button" className="btn btn-outline" disabled={busy} onClick={() => post(g, 'lock', undefined, 'Locked. Changes now need approval.')}>
+                      Lock now
+                    </button>
+                  )}
+                  {g.code && (
+                    <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setEditing(g)}>
+                      Change schedule
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => navigator.clipboard.writeText(g.url).then(() => app.toast('Link copied'), () => app.toast(g.url))}
+                    disabled={busy}
+                    onClick={() => window.confirm(`Make a new code for ${g.name}? The old code stops working, and they’ll need the new one.`) && post(g, 'new-code', undefined, (o) => `New code: ${o.code}. Send it to ${g.name}.`)}
                   >
-                    Copy
+                    New code
                   </button>
-                  <button type="button" className="btn btn-danger" onClick={() => revoke(g)}>
+                  <button type="button" className="btn btn-danger" disabled={busy} onClick={() => window.confirm(`Turn off ${g.name}’s link? What they already added stays in the plan.`) && post(g, 'revoke', undefined, 'Link turned off')}>
                     Turn off
                   </button>
-                </>
+                </div>
               )}
             </li>
           ))}
         </ul>
       )}
+      {editing && (
+        <ScheduleModal
+          link={editing}
+          onClose={() => setEditing(null)}
+          onSave={async (body) => {
+            const out = await run(() => api(`/guest-links/link/${editing.id}`, { method: 'PATCH', body }), 'Schedule saved');
+            if (out) setEditing(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function ScheduleModal({ link, onClose, onSave }) {
+  const [opensAt, setOpensAt] = useState(toLocalInput(link.opensAt));
+  const [closesAt, setClosesAt] = useState(toLocalInput(link.closesAt));
+  const [note, setNote] = useState(link.note || '');
+  return (
+    <Modal title={`${link.name}’s schedule`} onClose={onClose}>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave({ opensAt: fromLocalInput(opensAt), closesAt: fromLocalInput(closesAt), note });
+        }}
+      >
+        <label className="field">
+          <span>Opens</span>
+          <input type="datetime-local" required value={opensAt} onChange={(e) => setOpensAt(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Deadline: locks at</span>
+          <input type="datetime-local" required value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Note to them</span>
+          <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+        <p className="muted small">Until the deadline, what they submit goes straight into the plan. After it, changes wait for your approval.</p>
+        <div className="row-wrap">
+          <button className="btn btn-primary">Save</button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -803,14 +933,19 @@ function Approvals({ plan, onDone }) {
     }
   };
   const label = { note: 'Note', scripture: 'Bible text', song: 'Song', media: 'File' };
+  const before = (x) => (x.kind === 'note' ? x.data.text : x.kind === 'scripture' ? `${x.data.reference}${x.data.version ? ` (${x.data.version})` : ''}` : x.kind === 'song' ? `${x.data.title}${x.data.key ? ` · key ${x.data.key}` : ''}` : '');
   return (
     <section className="card card-strong stack" aria-label="Waiting for approval">
-      <h2>Waiting for your approval ({pending.length})</h2>
+      <div>
+        <h2>Waiting for your approval ({pending.length})</h2>
+        <p className="muted small">Sent after the guest’s deadline. Approve to put it in the plan, or reopen their link if they need more time.</p>
+      </div>
       {pending.map((s) => (
         <div key={s.id} className="sub-item">
           <div className="section-head">
             <span>
-              <span className="eyebrow">{label[s.kind]}</span> <span className="muted small">from {s.guestName} · {fmtDateTime(s.createdAt)}</span>
+              <span className="eyebrow">{s.replaces ? `Change to a ${label[s.kind].toLowerCase()}` : `Late ${label[s.kind].toLowerCase()}`}</span>{' '}
+              <span className="muted small">from {s.guestName} · {fmtDateTime(s.createdAt)}</span>
             </span>
             <div className="row-wrap">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act(s, 'approve')}>
@@ -821,6 +956,11 @@ function Approvals({ plan, onDone }) {
               </button>
             </div>
           </div>
+          {s.replaces && (
+            <div className="small muted">
+              Was: <span className="strike-soft">{before({ kind: s.kind, data: s.replaces.data })}</span>
+            </div>
+          )}
           {s.kind === 'note' && <div className="notes-view small">{s.data.text}</div>}
           {s.kind === 'scripture' && (
             <div className="small">

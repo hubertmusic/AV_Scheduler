@@ -52,6 +52,7 @@ const userSchema = new Schema(
     calLastFetchedAt: Date,
     calClient: { type: String, default: '' },
     calToken: { type: String, index: true },
+    sessionVersion: { type: Number, default: 0 }, // raised to sign this person out on every device
     inviteToken: { type: String, index: true },
     inviteExpires: Date,
     active: { type: Boolean, default: true },
@@ -209,6 +210,8 @@ const settingsSchema = new Schema({
   reminderDays: { type: Number, default: 2 },
   calendarAlertDays: { type: Number, default: 5 }, // calendar alert this many days before a shift (0 = off)
   autoBuildWeeks: { type: Number, default: 4 }, // build weekends from the template this many weeks ahead (0 = off)
+  idleMinutes: { type: Number, default: 90 }, // sign people out after this long without activity (0 = never)
+  endOnBrowserClose: { type: Boolean, default: true }, // sign-in lasts only until the browser is closed
   // Shown at the top of every shift until changed
   permanentNote: { type: String, default: '' },
   migrations: { type: [String], default: [] }, // one-time data updates already applied
@@ -308,8 +311,16 @@ const guestLinkSchema = new Schema(
     name: { type: String, required: true },
     note: { type: String, default: '' },
     createdBy: ref('User'),
+    // Schedule: guests can add and change things from opensAt until closesAt. After that it's
+    // locked, and anything new or changed waits for a leader's approval, until expiresAt.
+    opensAt: Date,
+    closesAt: Date,
     expiresAt: { type: Date, required: true },
     revoked: { type: Boolean, default: false },
+    // 6-digit code the guest enters with the link ('' on links made before codes existed)
+    code: { type: String, default: '' },
+    codeVersion: { type: Number, default: 0 }, // raised with each new code, so earlier sign-ins stop working
+    codeTries: { type: Number, default: 0 }, // wrong codes in a row
   },
   { timestamps: true }
 );
@@ -322,7 +333,11 @@ const submissionSchema = new Schema(
     kind: { type: String, enum: ['note', 'scripture', 'song', 'media'], required: true },
     data: { type: Schema.Types.Mixed, default: {} },
     media: ref('Media'),
-    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
+    // draft: only the guest sees it · live: in the service plan · pending: sent after the
+    // window closed, waiting for a leader · approved (older links) · rejected
+    status: { type: String, enum: ['draft', 'live', 'pending', 'approved', 'rejected'], default: 'pending', index: true },
+    applied: { type: Schema.Types.Mixed, default: null }, // what it added to the plan, so edits can update it
+    replaces: ref('Submission'), // a late change to a live item, waiting for approval
     decidedBy: ref('User'),
     decidedAt: Date,
   },

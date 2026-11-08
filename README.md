@@ -37,10 +37,12 @@ What it does:
   - Each song's lyrics download as a `.txt` that ProPresenter 7 imports. Section labels such as Verse 1 or Chorus become groups.
   - You can store the song's real `.pro` file with it so anyone can download it. If the lyrics are edited after the `.pro` was uploaded, the app flags it.
   - **Download for ProPresenter** on a plan gives one zip with every song (`.txt`, plus `.pro` where stored), the Bible texts and the notes.
-- **Guest upload links.** For a guest speaker or visiting group:
-  - The link only lets them send files, notes, Bible texts and lyrics for that one service.
-  - It stops working after 4 hours. You can make another link any time.
-  - Nothing reaches the plan until a leader approves it.
+- **Guest links.** For a guest speaker or visiting group. The admin or any leader who can edit plans makes one on the service plan and sends it on WhatsApp.
+  - **Link + 6-digit code.** The guest opens the link and enters the code that came with it. Eight wrong codes lock it until a leader makes a new code.
+  - **Schedule.** Each link opens at a set time and locks at a deadline (by default 6 PM the evening before the service). The guest sees the service's date and times and the deadline.
+  - **Before the deadline**, what they submit goes straight into the plan. They can save drafts (private until submitted), edit what they submitted, or take it back out. Their edits update the plan in place.
+  - **After the deadline** it locks. New items and changes go to the leaders for approval. Or reopen the link for 30 minutes, an hour, or longer.
+  - Guests only ever see what they sent. No team files, no downloads, nothing else from the plan.
 - **Announcements.** Three levels, shown at the top of every shift (My shifts, the schedule, Weekend check, run sheets), in reminder emails and in everyone's calendar entries:
   - **Permanent:** stays until you change or clear it.
   - **Weekly:** only on that weekend's shifts, then drops off on its own.
@@ -164,8 +166,14 @@ Crew Call doesn't write `.pro` files itself. The format is undocumented, and gen
 ## 7. Accounts and guests
 
 - **Crew and leaders** each have their own account. Add people on **Team & roles**, send each one their invite link, and they set a password. Any number can be signed in at once.
-- **Outside guests** don't get accounts. On a service plan, use **Guest upload links**. Each link works for 4 hours (`GUEST_LINK_HOURS`) and can be turned off early. Guests see only their own uploads.
-- **Approving guest uploads.** The **Service plans** tab shows a badge when guest uploads are waiting for approval.
+- **Outside guests** don't get accounts. On a service plan, use **Guest links**: each comes with a 6-digit code, opens and locks on a schedule, and can be reopened, given a new code, or turned off. Guests see only what they sent.
+- **Approving late guest changes.** The **Service plans** tab shows a badge when something sent after a guest's deadline is waiting for approval.
+
+### Signing out
+
+- **Automatic.** People are signed out after 90 minutes without activity and when they close their browser. Change both on **Settings → Sign-in**. Background checks (badges, the live activity feed) don't count as activity. Some browsers reopen tabs after a restart and keep cookies; the no-activity limit still applies.
+- **Sign out everywhere.** Anyone can sign themselves out on every device from **Your account**. Changing your password signs out your other devices too.
+- **Admin.** Sign one person out on all devices from **Team & roles → their name → Sign out everywhere**, or everyone except you from **Settings → Sign-in → Sign everyone else out**.
 
 ### View as (admin)
 
@@ -350,4 +358,5 @@ web/src/
 - **Phone numbers.** Crew see leaders' phone numbers. Everyone else's numbers are visible only to people allowed to message the crew or manage people.
 - **Deactivation.** Deactivating someone signs them out, frees their upcoming shifts and cancels their open requests.
 - **Uploads.** Files are stored under random names and served with `nosniff`. Only images, video, audio and PDFs open in the browser; everything else (HTML, SVG, scripts) downloads instead of running.
-- **Guest links.** Each link is a long random token tied to one service. It expires (4 hours by default), is rate-limited, and is capped at 40 files and 60 notes or texts. Guest uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
+- **Guest links.** Each link is a long random token tied to one service, plus a 6-digit code (8 wrong tries lock it; tries are also rate-limited). The code unlocks a cookie that only works for that one link, and a new code signs out anyone using the old one. Links stop working at the end of the service day (or an hour after a later deadline), are rate-limited, and are capped at 40 files and 60 notes or texts. Late uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
+- **Sessions.** Each sign-in carries a per-person session version, so "sign out everywhere" and admin sign-outs take effect on the next request from every device.

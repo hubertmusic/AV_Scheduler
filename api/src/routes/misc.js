@@ -2,7 +2,7 @@ import { config } from '../config.js';
 import { Router } from 'express';
 import { IANAZone } from 'luxon';
 import { Assignment, Blackout, Event, EVENT_KINDS, Group, Position, Request, Resource, Unavailable, User } from '../models.js';
-import { requireAdmin, requirePerm } from '../auth.js';
+import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
 import { addDays, bad, conflict, DATE_RE, getSettings, isHttpUrl, isId, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { eventView, groupView, meView, personView, requestView } from '../lib/views.js';
 import { cleanGroupIds } from './events.js';
@@ -22,6 +22,8 @@ const settingsView = (s) => ({
   reminderDays: s.reminderDays,
   calendarAlertDays: s.calendarAlertDays ?? 5,
   autoBuildWeeks: s.autoBuildWeeks ?? 4,
+  idleMinutes: s.idleMinutes ?? 90,
+  endOnBrowserClose: s.endOnBrowserClose ?? true,
   emailConfigured: mailerReady(),
 });
 
@@ -202,6 +204,11 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
   if (b.calendarAlertDays !== undefined) s.calendarAlertDays = Math.max(0, Math.min(14, Math.round(Number(b.calendarAlertDays) || 0)));
   if (b.autoBuildWeeks !== undefined) s.autoBuildWeeks = Math.max(0, Math.min(12, Math.round(Number(b.autoBuildWeeks) || 0)));
   if (b.countryCode !== undefined) s.countryCode = String(b.countryCode).replace(/\D/g, '').slice(0, 4);
+  if (b.idleMinutes !== undefined) {
+    const n = Math.round(Number(b.idleMinutes) || 0);
+    s.idleMinutes = n <= 0 ? 0 : Math.max(15, Math.min(720, n));
+  }
+  if (b.endOnBrowserClose !== undefined) s.endOnBrowserClose = !!b.endOnBrowserClose;
   if (b.groupLink !== undefined) {
     const link = normalizeUrl(str(b.groupLink, 300));
     if (link && !isHttpUrl(link)) throw bad('The group link should start with https://');
@@ -231,7 +238,15 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
     s.weekendTemplate = rows;
   }
   await s.save();
+  forgetSessionRules();
   res.json(settingsView(s));
+}));
+
+// Sign everyone except the admin out on every device
+settingsRouter.post('/sign-out-everyone', requireAdmin, wrap(async (req, res) => {
+  const n = await signOutUsers({ _id: { $ne: req.user._id } });
+  await logActivity({ user: req.user, kind: 'system', action: `Signed everyone else out on all devices (${n} account${n === 1 ? '' : 's'})`, req });
+  res.json({ signedOut: n });
 }));
 
 settingsRouter.post('/test-email', requireAdmin, wrap(async (req, res) => {

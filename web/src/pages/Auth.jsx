@@ -34,7 +34,7 @@ function useSubmit(fn) {
   return { busy, error, submit };
 }
 
-export function Login({ orgName, onDone }) {
+export function Login({ orgName, notice, onDone }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { busy, error, submit } = useSubmit(async () => {
@@ -44,6 +44,11 @@ export function Login({ orgName, onDone }) {
   return (
     <AuthCard title="Sign in" sub={orgName ? `${orgName} AV scheduling` : null}>
       <form onSubmit={submit} className="stack">
+        {notice && (
+          <div className="warn-box" role="status">
+            {notice}
+          </div>
+        )}
         <label className="field">
           <span>Email</span>
           <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />

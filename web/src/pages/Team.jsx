@@ -139,6 +139,16 @@ function PersonPanel({ person, me, positions }) {
     }
   };
 
+  const signOutPerson = async () => {
+    if (!window.confirm(`Sign ${person.name} out on all their devices? They can sign in again with their password.`)) return;
+    try {
+      await api(`/people/${person.id}/sign-out`, { method: 'POST' });
+      app.toast(`${person.name} was signed out everywhere`);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   const newLink = async () => {
     setBusy(true);
     try {
@@ -265,6 +275,11 @@ function PersonPanel({ person, me, positions }) {
           {canInvite && (
             <button type="button" className="btn btn-outline" onClick={newLink} disabled={busy}>
               {person.invited ? 'New invite link' : 'Password reset link'}
+            </button>
+          )}
+          {me.role === 'admin' && person.id !== me.id && person.active && !person.invited && (
+            <button type="button" className="btn btn-ghost" onClick={signOutPerson} disabled={busy}>
+              Sign out everywhere
             </button>
           )}
           {person.id !== me.id && person.role !== 'admin' && (
