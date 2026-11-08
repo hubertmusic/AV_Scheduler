@@ -8,6 +8,7 @@ import { requirePerm } from '../auth.js';
 import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
 import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '../lib/archive.js';
+import { orderView, readOrder } from '../lib/serviceOrder.js';
 import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
 import { buildServicePptx } from '../lib/pptx.js';
@@ -133,6 +134,11 @@ async function readPlanSongs(list) {
 
 async function fullPlan(ev, viewerCan) {
   const plan = await planFor(ev._id);
+  if (!plan.rundownToken || !plan.bulletinToken) {
+    plan.rundownToken ||= token(18);
+    plan.bulletinToken ||= token(18);
+    await plan.save();
+  }
   await plan.populate({ path: 'songs.song', populate: { path: 'proMedia' } });
   await plan.populate('updatedBy', 'name');
   const mediaFilter = { plan: plan._id, status: viewerCan.plans ? { $in: ['approved', 'pending'] } : 'approved' };
@@ -151,6 +157,9 @@ async function fullPlan(ev, viewerCan) {
     scriptures: plan.scriptures,
     songs: plan.songs.filter((x) => x.song).map((x) => ({ key: x.key, note: x.note, song: songView(x.song) })),
     media: media.map(mediaView),
+    order: orderView(plan.order),
+    announcements: plan.announcements,
+    share: { rundown: plan.rundownToken, bulletin: plan.bulletinToken },
     updatedAt: plan.updatedAt,
     updatedBy: plan.updatedBy?.name || null,
   };
@@ -318,6 +327,35 @@ plansRouter.get('/:eventId', wrap(async (req, res) => {
   res.json(await fullPlan(ev, req.can));
 }));
 
+// POST /api/plans/:eventId/share/rundown|bulletin — replace a share link (the old link and QR stop working)
+plansRouter.post('/:eventId/share/:which', requirePerm('plans'), wrap(async (req, res) => {
+  const field = { rundown: 'rundownToken', bulletin: 'bulletinToken' }[req.params.which];
+  if (!field) throw notFound();
+  const ev = await loadEvent(req.params.eventId);
+  const plan = await planFor(ev._id);
+  plan[field] = token(18);
+  await plan.save();
+  res.locals.activity = `Made a new ${req.params.which} link · ${evName(ev)}`;
+  res.json(await fullPlan(ev, req.can));
+}));
+
+// POST /api/plans/:eventId/order/copy-last — start from the latest earlier service's order of
+// service, preferring one with the same name. Replaces an empty order; otherwise adds to it.
+plansRouter.post('/:eventId/order/copy-last', requirePerm('plans'), wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  await assertOpen(ev);
+  const withOrder = await Plan.find({ event: { $ne: ev._id }, 'order.0': { $exists: true } }, { event: 1 }).lean();
+  const earlier = await Event.find({ _id: { $in: withOrder.map((p) => p.event) }, date: { $lte: ev.date } }).sort({ date: -1, start: -1 }).limit(50).lean();
+  const src = earlier.find((e) => e.title === ev.title && e.kind === ev.kind) || earlier.find((e) => e.kind === ev.kind) || earlier[0];
+  if (!src) throw bad('No earlier service has an order of service yet.');
+  const [from, plan] = [await planFor(src._id), await planFor(ev._id)];
+  plan.order.push(...readOrder(from.order.map((x) => x.toObject())));
+  plan.updatedBy = req.user._id;
+  await plan.save();
+  res.locals.activity = `Copied the order of service from ${evName(src)} · ${evName(ev)}`;
+  res.json({ ...(await fullPlan(ev, req.can)), copiedFrom: { title: src.title, date: src.date } });
+}));
+
 // Put a service archived by hand back on the planning page (only until its Monday).
 plansRouter.post('/:eventId/unarchive', requirePerm('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
@@ -342,15 +380,18 @@ plansRouter.patch('/:eventId', requirePerm('plans'), wrap(async (req, res) => {
   if (b.scriptures !== undefined) plan.scriptures = readScriptures(b.scriptures);
   if (b.songs !== undefined) plan.songs = await readPlanSongs(b.songs);
   if (b.assets !== undefined) plan.assets = await readAssets(b.assets);
+  if (b.order !== undefined) plan.order = readOrder(b.order);
+  if (b.announcements !== undefined) plan.announcements = str(b.announcements, 5000);
   plan.updatedBy = req.user._id;
   await plan.save();
-  const what = ['sermonTitle', 'speaker', 'notes', 'scriptures', 'songs', 'assets'].filter((k) => b[k] !== undefined).map((k) => ({ sermonTitle: 'sermon title', speaker: 'speaker', notes: 'notes', scriptures: 'Bible texts', songs: 'songs', assets: 'library items' })[k]);
+  const names = { sermonTitle: 'sermon title', speaker: 'speaker', notes: 'notes', scriptures: 'Bible texts', songs: 'songs', assets: 'library items', order: 'order of service', announcements: 'announcements' };
+  const what = Object.keys(names).filter((k) => b[k] !== undefined).map((k) => names[k]);
   res.locals.activity = `Edited ${what.join(', ') || 'the plan'} · ${evName(ev)}`;
   res.json(await fullPlan(ev, req.can));
 }));
 
 // POST /api/plans/:eventId/copy — reuse parts of another (usually archived) service in this one.
-// Body: { from: eventId, sermon, notes, scriptures, songs, assets: booleans, media: [mediaId] }
+// Body: { from: eventId, order, sermon, notes, scriptures, songs, assets: booleans, media: [mediaId] }
 plansRouter.post('/:eventId/copy', requirePerm('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
   await assertOpen(ev);
@@ -360,6 +401,10 @@ plansRouter.post('/:eventId/copy', requirePerm('plans'), wrap(async (req, res) =
   const [from, plan] = [await planFor(src._id), await planFor(ev._id)];
   const done = [];
   const failed = [];
+  if (b.order && from.order.length) {
+    plan.order.push(...readOrder(from.order.map((x) => x.toObject())));
+    done.push('order of service');
+  }
   if (b.sermon && (from.sermonTitle || from.speaker)) {
     plan.sermonTitle = from.sermonTitle;
     plan.speaker = from.speaker;

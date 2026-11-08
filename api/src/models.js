@@ -250,6 +250,17 @@ const planSongSchema = new Schema(
   },
   { _id: false }
 );
+// One line of the order of service. Times come from the service start plus the minutes before it.
+export const ORDER_KINDS = ['item', 'song', 'scripture', 'prayer', 'sermon', 'heading'];
+const orderItemSchema = new Schema({
+  kind: { type: String, enum: ORDER_KINDS, default: 'item' },
+  title: { type: String, default: '' },
+  who: { type: String, default: '' },
+  minutes: { type: Number, default: 0 },
+  notes: { type: String, default: '' }, // cues for the platform and crew; never in the bulletin
+  bulletin: { type: Boolean, default: true }, // listed in the congregation's bulletin
+});
+
 const planSchema = new Schema(
   {
     event: { ...ref('Event'), required: true, unique: true },
@@ -259,6 +270,11 @@ const planSchema = new Schema(
     scriptures: { type: [scriptureSchema], default: [] },
     songs: { type: [planSongSchema], default: [] },
     assets: [ref('Media')], // media library items used in this service (backgrounds, countdowns…)
+    order: { type: [orderItemSchema], default: [] }, // order of service (optional)
+    announcements: { type: String, default: '' }, // bulletin only
+    // Share links: the rundown is for the platform and crew, the bulletin for the congregation.
+    rundownToken: { type: String, index: true, sparse: true },
+    bulletinToken: { type: String, index: true, sparse: true },
     updatedBy: ref('User'),
   },
   { timestamps: true }

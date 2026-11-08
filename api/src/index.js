@@ -12,6 +12,7 @@ import { peopleRouter } from './routes/people.js';
 import { groupsRouter } from './routes/groups.js';
 import { guestAdminRouter, mediaRouter, plansRouter, songsRouter, submissionsRouter } from './routes/plans.js';
 import { guestRouter } from './routes/guest.js';
+import { publicRouter } from './routes/public.js';
 import { libraryRouter } from './routes/library.js';
 import { academyRouter } from './routes/academy.js';
 import { weekendRouter } from './routes/weekend.js';
@@ -33,6 +34,7 @@ app.get('/api/health', (req, res) => res.json({ ok: mongoose.connection.readySta
 
 app.use('/api/auth', authRouter);
 app.use('/api/guest', guestRouter); // public, token-limited
+app.use('/api/public', publicRouter); // rundown and bulletin links
 app.use('/cal', calRouter);
 app.use('/api/academy', academyRouter); // checks the session itself and redirects
 

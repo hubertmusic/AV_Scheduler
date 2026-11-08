@@ -21,6 +21,11 @@ What it does:
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
   Everyone signed in can read and download a plan. People with the **Edit service plans** privilege can change it.
+- **Order of service (optional).** On each service plan: items in order with who and, if you want times, minutes. Crew Call works out each start time and warns when the service runs past its scheduled end. Start from a basic order, copy last week's, or add the plan's songs, Bible texts and sermon. Each line can carry cues for the team (rundown only) and can be left out of the bulletin.
+- **Rundown and bulletin (beta).** Two separate links, each with a QR code, a printable page and a phone-friendly page, no sign-in needed:
+  - **Service rundown — platform & crew only:** the order with times, cues and who, songs with keys, Bible texts and AV positions (names only, no phone numbers). For speakers, worship leaders and the AV team.
+  - **Congregation bulletin:** the order without times or cues, sermon and speaker, Bible references, songs and the week's announcements.
+  - **New link…** replaces either one; the old link and any printed QR code stop working.
 - **Archive.** Each weekend moves to the archive on Monday morning (the org's time zone). Archived services leave the planning page and become read-only, so last week's slides never get mixed into this week, but nothing is deleted.
   - **Archive this weekend…** at the bottom of the planning page does it right away, so the page is a clean slate for next weekend. Pick the services, then **Save to the archive** or, for the admin only, **Delete** (removes the plans, uploaded files and guest links; songs, media library items and the schedule of who served stay). Late guest items still waiting for approval are turned down and guest links close.
   - A service saved early can be **put back on the planning page** from the Archive until its Monday.
@@ -360,5 +365,6 @@ web/src/
 - **Phone numbers.** Crew see leaders' phone numbers. Everyone else's numbers are visible only to people allowed to message the crew or manage people.
 - **Deactivation.** Deactivating someone signs them out, frees their upcoming shifts and cancels their open requests.
 - **Uploads.** Files are stored under random names and served with `nosniff`. Only images, video, audio and PDFs open in the browser; everything else (HTML, SVG, scripts) downloads instead of running.
+- **Rundown and bulletin links** are long random tokens, rate-limited, kept out of search engines, and replaceable. The rundown shows names but never phone numbers or emails.
 - **Guest links.** Each link is a long random token tied to one service, plus a 6-digit code (8 wrong tries lock it; tries are also rate-limited). The code unlocks a cookie that only works for that one link, and a new code signs out anyone using the old one. Links stop working at the end of the service day (or an hour after a later deadline), are rate-limited, and are capped at 40 files and 60 notes or texts. Late uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
 - **Sessions.** Each sign-in carries a per-person session version, so "sign out everywhere" and admin sign-outs take effect on the next request from every device.

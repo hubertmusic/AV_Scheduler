@@ -4,6 +4,7 @@ import { BibleFields } from '../scripture.jsx';
 import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
+import { OrderOfService, ShareCard } from './ServiceOrder.jsx';
 
 const VIEWS = [
   { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
@@ -386,9 +387,11 @@ function PlanEditor({ eventId, onChanged }) {
         <Details plan={plan} canEdit={canEdit} onSave={patch} />
       </section>
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
+      <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} />
       <Scriptures plan={plan} canEdit={canEdit} onSave={patch} />
       <Songs plan={plan} canEdit={canEdit} onSave={patch} reload={load} />
       <MediaSection plan={plan} canEdit={canEdit} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
+      {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
       {canEdit && <Guests plan={plan} eventId={eventId} reload={load} />}
       {copying && <CopyModal plan={plan} onClose={() => setCopying(false)} />}
     </div>
@@ -403,6 +406,7 @@ function CopyModal({ plan, onClose }) {
   const [targets, setTargets] = useState(null);
   const [to, setTo] = useState('');
   const [pick, setPick] = useState({
+    order: plan.order.length > 0,
     sermon: false,
     notes: false,
     scriptures: plan.scriptures.length > 0,
@@ -426,6 +430,7 @@ function CopyModal({ plan, onClose }) {
   }, [src.title]);
 
   const options = [
+    ['order', 'Order of service', plan.order.length ? `${plan.order.length} item${plan.order.length === 1 ? '' : 's'}, added after any already there` : null],
     ['sermon', 'Sermon title and speaker', plan.sermonTitle || plan.speaker ? [plan.sermonTitle && `“${plan.sermonTitle}”`, plan.speaker].filter(Boolean).join(' — ') : null],
     ['notes', 'Pastor’s notes', plan.notes ? 'Added under any notes already there' : null],
     ['scriptures', 'Bible texts', plan.scriptures.length ? plan.scriptures.map((x) => x.reference).join(', ') : null],

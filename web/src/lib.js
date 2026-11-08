@@ -147,6 +147,21 @@ export function addMinutes(t, n) {
   const total = Math.min(23 * 60 + 59, Math.max(0, h * 60 + m + n));
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
+// Order of service: when each line starts (from the service start), when it all ends, total minutes
+export function orderTimes(start, items) {
+  let t = start || '00:00';
+  let total = 0;
+  const at = items.map((it) => {
+    const here = t;
+    const n = it.kind === 'heading' ? 0 : Number(it.minutes) || 0;
+    t = addMinutes(t, n);
+    total += n;
+    return here;
+  });
+  return { at, end: t, total };
+}
+export const fmtMinutes = (n) => (n >= 60 ? `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}` : `${n} min`);
+
 export function ago(iso) {
   if (!iso) return '';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
