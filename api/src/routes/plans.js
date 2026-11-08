@@ -3,11 +3,11 @@ import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
 import { config } from '../config.js';
-import { Event, GuestLink, Media, Plan, Song, Submission } from '../models.js';
+import { Event, GuestLink, Media, Plan, Song, Submission, User } from '../models.js';
 import { requirePerm } from '../auth.js';
-import { addDays, bad, DATE_RE, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
+import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
-import { isArchivedDate, orgToday } from '../lib/archive.js';
+import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '../lib/archive.js';
 import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
 import { buildServicePptx } from '../lib/pptx.js';
@@ -34,7 +34,7 @@ const ARCHIVED = 'This service is in the archive, so it can’t be changed. Use 
 export const escapeRx = (q) => q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function assertOpen(ev) {
-  if (isArchivedDate(ev.date, await orgToday())) throw bad(ARCHIVED);
+  if (isArchived(ev, await orgToday())) throw bad(ARCHIVED);
 }
 
 // Library items for a plan, in the plan's order
@@ -137,9 +137,13 @@ async function fullPlan(ev, viewerCan) {
   await plan.populate('updatedBy', 'name');
   const mediaFilter = { plan: plan._id, status: viewerCan.plans ? { $in: ['approved', 'pending'] } : 'approved' };
   const media = await Media.find(mediaFilter).sort({ createdAt: 1 }).populate('uploadedBy', 'name').populate('guest', 'name');
+  const today = await orgToday();
   const out = {
     event: eventView(ev),
-    archived: isArchivedDate(ev.date, await orgToday()),
+    archived: isArchived(ev, today),
+    // archived by hand before its Monday: it can still be put back on the planning page
+    archivedEarly: !!ev.archivedAt && !isArchivedDate(ev.date, today),
+    archivedBy: ev.archivedBy ? (await User.findById(ev.archivedBy, { name: 1 }).lean())?.name || null : null,
     assets: (await planAssets(plan)).map(mediaView),
     speaker: plan.speaker,
     sermonTitle: plan.sermonTitle,
@@ -213,7 +217,8 @@ plansRouter.get('/summary', wrap(async (req, res) => {
         songs: p?.songs?.length || 0,
         media: p ? (mediaCounts[String(p._id)] || 0) + (p.assets?.length || 0) : 0,
         pending: pendingBy[String(e._id)] || 0,
-        archived: isArchivedDate(e.date, today),
+        archived: isArchived(e, today),
+        planDeleted: !!e.planDeletedAt,
       };
     })
   );
@@ -221,7 +226,52 @@ plansRouter.get('/summary', wrap(async (req, res) => {
 
 // GET /api/plans/pending — count of guest submissions waiting, for the tab badge
 plansRouter.get('/pending', requirePerm('plans'), wrap(async (req, res) => {
-  res.json({ count: await Submission.countDocuments({ status: 'pending' }) });
+  const open = await Event.find(openQuery(await orgToday()), { _id: 1 }).lean();
+  res.json({ count: await Submission.countDocuments({ status: 'pending', event: { $in: open.map((e) => e._id) } }) });
+}));
+
+// Turn down what guests sent late and close their links (a service going into the archive).
+async function closeGuestsFor(eventId, by) {
+  await GuestLink.updateMany({ event: eventId, revoked: { $ne: true } }, { revoked: true });
+  const waiting = await Submission.find({ event: eventId, status: 'pending' }).populate('media');
+  for (const s of waiting) {
+    if (s.media) {
+      deleteStored(s.media.storedName);
+      s.media.status = 'rejected';
+      await s.media.save();
+    }
+    s.status = 'rejected';
+    s.decidedBy = by;
+    s.decidedAt = new Date();
+    await s.save();
+  }
+}
+
+// POST /api/plans/archive-weekend { events: [eventId], delete: bool }
+// Archive services now instead of waiting for Monday, so the planning page is a clean slate
+// for next weekend. Saved services go to the Archive, read-only. With delete (admin only),
+// their plans and files are deleted instead; the schedule of who served stays.
+plansRouter.post('/archive-weekend', requirePerm('plans'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const ids = Array.isArray(b.events) ? [...new Set(b.events.filter(isId))].slice(0, 30) : [];
+  if (!ids.length) throw bad('Pick the services to archive.');
+  const del = b.delete === true;
+  if (del && req.user.role !== 'admin') throw forbidden('Only the admin can delete service plans. Save them to the archive instead.');
+  const events = await Event.find({ _id: { $in: ids }, ...openQuery(await orgToday()) }).sort({ date: 1, start: 1 });
+  if (!events.length) throw bad('Those services are already in the archive.');
+  for (const ev of events) {
+    if (del) {
+      await deletePlanFor(ev._id);
+      ev.planDeletedAt = new Date();
+    } else {
+      await closeGuestsFor(ev._id, req.user._id);
+    }
+    ev.archivedAt = new Date();
+    ev.archivedBy = req.user._id;
+    await ev.save();
+  }
+  res.locals.activity = `${del ? 'Deleted the plans of' : 'Archived'} ${events.map(evName).join(', ')}`;
+  res.json({ archived: events.length, deleted: del });
 }));
 
 // GET /api/plans/archive?q=&page= — past services, newest first. q searches service and
@@ -230,7 +280,7 @@ plansRouter.get('/archive', wrap(async (req, res) => {
   const LIMIT = 25;
   const page = Math.min(400, Math.max(0, Math.floor(Number(req.query.page) || 0)));
   const q = str(req.query.q, 80);
-  const filter = { date: { $lt: await orgToday() }, kind: 'service' };
+  const filter = { kind: 'service', planDeletedAt: null, $and: [archivedQuery(await orgToday())] };
   if (q) {
     const rx = { $regex: escapeRx(q), $options: 'i' };
     const songIds = (await Song.find({ title: rx }, { _id: 1 }).lean()).map((x) => x._id);
@@ -238,7 +288,7 @@ plansRouter.get('/archive', wrap(async (req, res) => {
       { $or: [{ sermonTitle: rx }, { speaker: rx }, { notes: rx }, { 'scriptures.reference': rx }, ...(songIds.length ? [{ 'songs.song': { $in: songIds } }] : [])] },
       { event: 1 }
     ).lean();
-    filter.$or = [{ _id: { $in: hits.map((h) => h.event) } }, { title: rx }];
+    filter.$and.push({ $or: [{ _id: { $in: hits.map((h) => h.event) } }, { title: rx }] });
   }
   const events = await Event.find(filter).sort({ date: -1, start: -1 }).skip(page * LIMIT).limit(LIMIT + 1).lean();
   const more = events.length > LIMIT;
@@ -265,6 +315,19 @@ plansRouter.get('/archive', wrap(async (req, res) => {
 
 plansRouter.get('/:eventId', wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
+  res.json(await fullPlan(ev, req.can));
+}));
+
+// Put a service archived by hand back on the planning page (only until its Monday).
+plansRouter.post('/:eventId/unarchive', requirePerm('plans'), wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  if (!ev.archivedAt) throw bad('That service isn’t archived.');
+  if (ev.planDeletedAt) throw bad('That service’s plan was deleted, so there’s nothing to put back.');
+  if (isArchivedDate(ev.date, await orgToday())) throw bad('That service has passed, so it stays in the archive. Use Copy to this week to reuse anything from it.');
+  ev.archivedAt = null;
+  ev.archivedBy = undefined;
+  await ev.save();
+  res.locals.activity = `Put ${evName(ev)} back on the planning page`;
   res.json(await fullPlan(ev, req.can));
 }));
 
@@ -536,9 +599,9 @@ songsRouter.delete('/:id', requirePerm('plans'), wrap(async (req, res) => {
   if (!s) throw notFound();
   const today = await orgToday();
   const used = await Plan.find({ 'songs.song': s._id }, { event: 1 }).lean();
-  const past = used.length ? await Event.countDocuments({ _id: { $in: used.map((p) => p.event) }, date: { $lt: today } }) : 0;
+  const past = used.length ? await Event.countDocuments({ _id: { $in: used.map((p) => p.event) }, ...archivedQuery(today) }) : 0;
   if (past) {
-    const upcoming = await Event.find({ _id: { $in: used.map((p) => p.event) }, date: { $gte: today } }, { _id: 1 }).lean();
+    const upcoming = await Event.find({ _id: { $in: used.map((p) => p.event) }, ...openQuery(today) }, { _id: 1 }).lean();
     for (const p of await Plan.find({ event: { $in: upcoming.map((e) => e._id) }, 'songs.song': s._id })) {
       p.songs = p.songs.filter((x) => String(x.song) !== String(s._id));
       await p.save();
@@ -632,8 +695,8 @@ mediaRouter.delete('/:id', requirePerm('plans'), wrap(async (req, res) => {
   if (m.song) throw bad('Remove .pro files from the song instead.');
   if (m.library) throw bad('That’s in the media library. Take it out of the service instead, or delete it from the library.');
   const plan = m.plan ? await Plan.findById(m.plan, { event: 1 }).lean() : null;
-  const ev = plan ? await Event.findById(plan.event, { date: 1 }).lean() : null;
-  if (ev && isArchivedDate(ev.date, await orgToday())) {
+  const ev = plan ? await Event.findById(plan.event, { date: 1, archivedAt: 1 }).lean() : null;
+  if (ev && isArchived(ev, await orgToday())) {
     // Archived service: free the space but keep the record, so the plan shows what was used.
     if (!m.purgedAt) {
       deleteMediaFile(m);

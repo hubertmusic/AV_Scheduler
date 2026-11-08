@@ -127,7 +127,7 @@ ok(await admin.upload(`/api/plans/${old.id}/media`, [{ name: 'a.pdf', type: 'app
 ok(await admin('POST', `/api/guest-links/${old.id}`, { name: 'Guest' }), 400);
 const sum = ok(await admin('GET', `/api/plans/summary?from=${iso(-101)}&to=${iso(-99)}`));
 assert.equal(sum[0].archived, true);
-step('a service is archived from the day after: read-only, nothing deleted');
+step('a past service is archived: read-only, nothing deleted');
 
 let arc = ok(await crew('GET', '/api/plans/archive'));
 assert.equal(arc.items.length, 1);
@@ -229,7 +229,7 @@ ok(await admin('GET', `/api/media/${bumper.id}/file`), 410);
 step('old videos can be removed to save space; the plan record stays');
 
 // Library delete: used by a past service → file removed, record kept for history
-ok(await admin('PATCH', `/api/events/${next.id}`, { date: iso(-1) }));
+ok(await admin('PATCH', `/api/events/${next.id}`, { date: iso(-7) })); // always before the latest Monday
 const later = ok(await admin('POST', '/api/events', { date: iso(13), title: 'Worship Service', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
 ok(await admin('POST', `/api/plans/${later.id}/copy`, { from: next.id, assets: true }));
 ok(await admin('DELETE', `/api/library/${countdown.id}`), 204);
@@ -238,5 +238,66 @@ assert.equal(ok(await admin('GET', `/api/plans/${later.id}`)).assets.length, 1, 
 const pastAssets = ok(await admin('GET', `/api/plans/${next.id}`)).assets;
 assert.equal(pastAssets.find((a) => a.id === countdown.id).stored, 'removed', 'past service still shows it was used');
 step('deleting a library item keeps the history of past services');
+
+// ---------- Monday rule and "Archive this weekend" ----------
+// Services archive on the most recent Monday. Work it out the same way the API does.
+const today = iso(0);
+const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+const monday = iso(-((dow + 6) % 7));
+const sunBefore = iso(-((dow + 6) % 7) - 1);
+const edge = ok(await admin('POST', '/api/events', { date: monday, title: 'Monday Prayer', call: '18:00', start: '18:30', end: '19:30', needs: ['foh'] }), 201);
+const edge2 = ok(await admin('POST', '/api/events', { date: sunBefore, title: 'Sunday Night', call: '18:00', start: '18:30', end: '19:30', needs: ['foh'] }), 201);
+assert.equal(ok(await admin('GET', `/api/plans/${edge.id}`)).archived, false, 'this week’s services are open');
+assert.equal(ok(await admin('GET', `/api/plans/${edge2.id}`)).archived, true, 'last weekend archived on Monday morning');
+step('services archive on the Monday morning after them');
+
+const sat = ok(await admin('POST', '/api/events', { date: today, title: 'Weekend Worship', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const sun = ok(await admin('POST', '/api/events', { date: iso(1), title: 'Weekend Youth', call: '17:15', start: '18:00', end: '19:30', needs: ['foh'] }), 201);
+ok(await admin('PATCH', `/api/plans/${sat.id}`, { sermonTitle: 'Cleared Off Early', notes: 'Saturday notes' }));
+const libItem = ok(await admin('GET', '/api/library')).items[0];
+ok(await admin('PATCH', `/api/plans/${sun.id}`, { notes: 'Youth notes', assets: [libItem.id] }));
+const sunFile = ok(await admin.upload(`/api/plans/${sun.id}/media`, [{ name: 'youth loop.mp4', type: 'video/mp4', bytes: Buffer.from('youth loop video') }]), 201).media.find((m) => m.title.startsWith('youth loop'));
+const link = ok(await admin('POST', `/api/guest-links/${sat.id}`, { name: 'Pastor' }), 201);
+const linkToken = link.url.split('/guest/')[1];
+ok(await crew('POST', '/api/plans/archive-weekend', { events: [sat.id] }), 403);
+ok(await admin('POST', '/api/plans/archive-weekend', { events: [] }), 400);
+
+let aw = ok(await admin('POST', '/api/plans/archive-weekend', { events: [sat.id] }));
+assert.deepEqual(aw, { archived: 1, deleted: false });
+p = ok(await admin('GET', `/api/plans/${sat.id}`));
+assert.equal(p.archived, true);
+assert.equal(p.archivedEarly, true);
+assert.equal(p.archivedBy, 'Hub M.');
+assert.equal(p.sermonTitle, 'Cleared Off Early', 'saved, nothing deleted');
+ok(await admin('PATCH', `/api/plans/${sat.id}`, { notes: 'more' }), 400);
+let sumW = ok(await admin('GET', `/api/plans/summary?from=${today}&to=${iso(1)}`));
+assert.equal(sumW.find((x) => x.id === sat.id).archived, true);
+assert.equal(sumW.find((x) => x.id === sun.id).archived, false);
+assert.ok(ok(await admin('GET', '/api/plans/archive?q=Cleared%20Off')).items.some((x) => x.id === sat.id), 'in the Archive tab, searchable');
+ok(await admin('GET', `/api/guest/${linkToken}`), 410);
+ok(await admin('POST', '/api/plans/archive-weekend', { events: [sat.id] }), 400);
+step('archive this weekend early: saved read-only, in the Archive, guest links closed');
+
+p = ok(await admin('POST', `/api/plans/${sat.id}/unarchive`));
+assert.equal(p.archived, false);
+ok(await admin('PATCH', `/api/plans/${sat.id}`, { notes: 'Saturday notes, edited' }));
+ok(await admin('POST', `/api/plans/${edge2.id}/unarchive`), 400);
+ok(await admin('POST', '/api/plans/archive-weekend', { events: [sat.id] }));
+step('archived early by mistake: put it back until Monday');
+
+aw = ok(await admin('POST', '/api/plans/archive-weekend', { events: [sun.id], delete: true }));
+assert.deepEqual(aw, { archived: 1, deleted: true });
+p = ok(await admin('GET', `/api/plans/${sun.id}`));
+assert.equal(p.archived, true);
+assert.equal(p.notes, '');
+assert.equal(p.media.length, 0);
+assert.equal(p.assets.length, 0);
+ok(await admin('GET', `/api/media/${sunFile.id}/file`), 404);
+assert.ok(ok(await admin('GET', '/api/library')).items.length > 0, 'library items stay');
+assert.ok(!ok(await admin('GET', '/api/plans/archive')).items.some((x) => x.id === sun.id), 'deleted plans are not in the Archive');
+sumW = ok(await admin('GET', `/api/plans/summary?from=${today}&to=${iso(1)}`));
+assert.equal(sumW.find((x) => x.id === sun.id).planDeleted, true, 'the service itself (who served) stays');
+ok(await admin('POST', `/api/plans/${sun.id}/unarchive`), 400);
+step('or delete the weekend’s plans and files: gone from the Archive, schedule kept');
 
 console.log('\nAll archive checks passed.');

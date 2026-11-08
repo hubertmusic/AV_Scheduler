@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDays, api, fmtDate, fmtDateTime, fmtDay, fmtSize, fmtTime, fmtWhen, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
 import { BibleFields } from '../scripture.jsx';
 import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
@@ -6,7 +6,7 @@ import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
 
 const VIEWS = [
-  { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter.' },
+  { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
   { id: 'archive', tab: 'Archive', title: 'Archive', blurb: 'Past services, read-only. Search them, and copy anything you need into this week.' },
   { id: 'songs', tab: 'Songs', title: 'Song library', blurb: 'Every song the team uses, with lyrics, .pro files and when it was last sung.' },
   { id: 'media', tab: 'Media', title: 'Media library', blurb: 'Backgrounds, countdowns and logo loops you use every week. Services link to these instead of uploading them again.' },
@@ -30,7 +30,7 @@ export default function Plans() {
           ))}
         </div>
       </div>
-      {view === 'plans' && <PlanBrowser />}
+      {view === 'plans' && <PlanBrowser onOpenArchive={() => setView('archive')} />}
       {view === 'archive' && <ArchiveBrowser />}
       {view === 'songs' && <SongLibrary />}
       {view === 'media' && <MediaLibrary />}
@@ -65,7 +65,7 @@ function ArchiveBrowser() {
           <span className="sr-only">Search the archive</span>
           <input type="search" placeholder="Search sermon, song, speaker, verse" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        {items && items.length === 0 && <Empty>{q.trim() ? 'Nothing in the archive matches.' : 'No past services yet. A service moves here the day after it happens.'}</Empty>}
+        {items && items.length === 0 && <Empty>{q.trim() ? 'Nothing in the archive matches.' : 'No past services yet. Each weekend moves here on Monday morning, or when you archive it on the Plans tab.'}</Empty>}
         <div className="plan-list">
           {(items || []).map((r) => (
             <button key={r.id} type="button" className={`plan-item ${r.id === selId ? 'plan-on' : ''}`} aria-pressed={r.id === selId} onClick={() => setSelId(r.id)}>
@@ -88,25 +88,48 @@ function ArchiveBrowser() {
           </button>
         )}
       </aside>
-      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={() => {}} /> : items === null ? <div className="loading-inline">Loading…</div> : null}</div>
+      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={() => load(0, q.trim())} /> : items === null ? <div className="loading-inline">Loading…</div> : null}</div>
     </div>
   );
 }
 
-function PlanBrowser() {
-  const [fri, setFri] = useState(() => fridayOf(todayISO()));
-  const [list, setList] = useState(null);
+// One weekend at a time. Archived services leave this page (they're on the Archive tab), so once
+// a weekend is archived it's a clean slate for the next one.
+function PlanBrowser({ onOpenArchive }) {
+  const app = useApp();
+  const thisFri = fridayOf(todayISO());
+  const [fri, setFri] = useState(thisFri);
+  const [rows, setRows] = useState(null);
   const [selId, setSelId] = useState(null);
+  const [archiving, setArchiving] = useState(false);
+  const firstLoad = useRef(true);
 
   const load = useCallback(async () => {
-    const rows = await api(`/plans/summary?from=${fri}&to=${addDays(fri, 2)}`).catch(() => []);
-    setList(rows);
-    setSelId((cur) => (rows.some((r) => r.id === cur) ? cur : rows.find((r) => r.kind !== 'soundcheck')?.id || rows[0]?.id || null));
-  }, [fri]);
+    const all = await api(`/plans/summary?from=${fri}&to=${addDays(fri, 2)}`).catch(() => []);
+    const open = all.filter((r) => !r.archived);
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      // This weekend was already archived by hand: start on next weekend
+      if (fri === thisFri && all.length && !open.length) return setFri(addDays(fri, 7));
+    }
+    setRows(all);
+    setSelId((cur) => (open.some((r) => r.id === cur) ? cur : open.find((r) => r.kind !== 'soundcheck')?.id || open[0]?.id || null));
+  }, [fri, thisFri]);
   useEffect(() => {
-    setList(null);
+    setRows(null);
     load();
   }, [load]);
+
+  const list = rows ? rows.filter((r) => !r.archived) : null;
+  const saved = rows ? rows.filter((r) => r.archived && !r.planDeleted).length : 0;
+  const deleted = rows ? rows.filter((r) => r.planDeleted).length : 0;
+  const canArchive = app.can.plans && fri <= thisFri && list?.length > 0;
+  const archived = (r) => {
+    setArchiving(false);
+    app.toast(r.deleted ? `Deleted ${r.archived} plan${r.archived === 1 ? '' : 's'}` : `Saved ${r.archived} service${r.archived === 1 ? '' : 's'} to the archive`);
+    if (fri === thisFri) setFri(addDays(fri, 7));
+    else load();
+  };
 
   return (
     <div className="split">
@@ -123,7 +146,8 @@ function PlanBrowser() {
             <Icon name="chevR" />
           </button>
         </div>
-        {list && list.length === 0 && <Empty>Nothing scheduled this weekend. Build it on the Schedule tab first.</Empty>}
+        {rows && rows.length === 0 && <Empty>Nothing scheduled this weekend. Build it on the Schedule tab first.</Empty>}
+        {rows && rows.length > 0 && list.length === 0 && <Empty>This weekend is done and archived.</Empty>}
         <div className="plan-list">
           {(list || []).map((r) => (
             <button key={r.id} type="button" className={`plan-item ${r.id === selId ? 'plan-on' : ''}`} aria-pressed={r.id === selId} onClick={() => setSelId(r.id)}>
@@ -138,14 +162,131 @@ function PlanBrowser() {
                 {r.songs > 0 && <span>{r.songs} song{r.songs === 1 ? '' : 's'}</span>}
                 {r.media > 0 && <span>{r.media} file{r.media === 1 ? '' : 's'}</span>}
                 {r.pending > 0 && <span className="chip chip-pending">{r.pending} to approve</span>}
-                {r.archived && <span className="chip chip-archived">Archived</span>}
               </span>
             </button>
           ))}
         </div>
+        {(saved > 0 || deleted > 0) && (
+          <p className="small muted">
+            {saved > 0 && (
+              <>
+                {saved} service{saved === 1 ? ' is' : 's are'} in the Archive.{' '}
+                <button type="button" className="link-btn" onClick={onOpenArchive}>
+                  Open the Archive
+                </button>
+              </>
+            )}
+            {saved > 0 && deleted > 0 && ' '}
+            {deleted > 0 && `${deleted} plan${deleted === 1 ? ' was' : 's were'} deleted.`}
+          </p>
+        )}
+        {rows && fri !== thisFri && (
+          <button type="button" className="link-btn" onClick={() => setFri(thisFri)}>
+            Back to this weekend
+          </button>
+        )}
+        {canArchive && (
+          <button type="button" className="btn btn-outline" onClick={() => setArchiving(true)}>
+            <Icon name="archive" size={16} /> Archive this weekend…
+          </button>
+        )}
       </aside>
-      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={load} /> : !list ? <div className="loading-inline">Loading…</div> : null}</div>
+      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={load} /> : !rows ? <div className="loading-inline">Loading…</div> : null}</div>
+      {archiving && <ArchiveWeekendModal fri={fri} services={list} onClose={() => setArchiving(false)} onDone={archived} />}
     </div>
+  );
+}
+
+// "Archive this weekend": save the services to the archive (read-only, searchable) or, for the
+// admin, delete their plans and files. Either way the weekend leaves the planning page.
+function ArchiveWeekendModal({ fri, services, onClose, onDone }) {
+  const app = useApp();
+  const isAdmin = app.me.role === 'admin';
+  const today = todayISO();
+  const [pick, setPick] = useState(() => Object.fromEntries(services.map((s) => [s.id, true])));
+  const [mode, setMode] = useState('save');
+  const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const chosen = services.filter((s) => pick[s.id]);
+  const waiting = chosen.reduce((t, s) => t + (s.pending || 0), 0);
+  const del = mode === 'delete';
+  const n = chosen.length;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      onDone(await api('/plans/archive-weekend', { method: 'POST', body: { events: chosen.map((s) => s.id), delete: del } }));
+    } catch (err) {
+      app.toast(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Archive this weekend" onClose={onClose} wide>
+      <form className="stack" onSubmit={submit}>
+        <p className="muted small">
+          Takes the weekend of {weekendLabel(fri)} off the planning page so you start next weekend with a clean slate. If you don’t, it happens by itself on Monday morning.
+        </p>
+        <fieldset className="stack-sm plain-fieldset">
+          <legend className="label-sm">Services</legend>
+          {services.map((s) => (
+            <label key={s.id} className="check check-top">
+              <input type="checkbox" checked={!!pick[s.id]} onChange={(e) => setPick({ ...pick, [s.id]: e.target.checked })} />
+              <span>
+                <strong>{s.title}</strong>
+                <span className="small muted block">
+                  {fmtDay(s.date)} · {fmtTime(s.start)}
+                  {s.date > today ? ' · hasn’t happened yet' : ''}
+                  {s.sermonTitle ? ` · “${s.sermonTitle}”` : ''}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="stack-sm plain-fieldset">
+          <legend className="label-sm">What to do with them</legend>
+          <label className="check check-top">
+            <input type="radio" name="archive-mode" checked={!del} onChange={() => setMode('save')} />
+            <span>
+              <strong>Save to the archive</strong>
+              <span className="small muted block">Everything is kept: notes, Bible texts, songs and files. Read-only and searchable on the Archive tab, and you can copy anything into a later week.</span>
+            </span>
+          </label>
+          {isAdmin ? (
+            <label className="check check-top">
+              <input type="radio" name="archive-mode" checked={del} onChange={() => setMode('delete')} />
+              <span>
+                <strong>Delete</strong>
+                <span className="small muted block">Deletes the plans: notes, Bible texts, song lists, uploaded files and guest links. Songs stay in the song library and media library items stay in the library. The schedule of who served is kept.</span>
+              </span>
+            </label>
+          ) : (
+            <p className="small muted">Only the admin can delete plans instead of saving them.</p>
+          )}
+        </fieldset>
+        {waiting > 0 && (
+          <div className="warn-box" role="alert">
+            {waiting} item{waiting === 1 ? ' from a guest is' : 's from guests are'} still waiting for approval and will be turned down. Approve {waiting === 1 ? 'it' : 'them'} first if you want {waiting === 1 ? 'it' : 'them'}.
+          </div>
+        )}
+        {del && (
+          <label className="check">
+            <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+            <span>I understand the deleted plans and files can’t be brought back.</span>
+          </label>
+        )}
+        <div className="row-wrap">
+          <button className={`btn ${del ? 'btn-danger' : 'btn-primary'}`} disabled={busy || !n || (del && !sure)}>
+            {busy ? 'Working…' : del ? `Delete ${n} plan${n === 1 ? '' : 's'}` : `Save ${n} service${n === 1 ? '' : 's'} to the archive`}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -155,6 +296,19 @@ function PlanEditor({ eventId, onChanged }) {
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState('');
   const [copying, setCopying] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  const putBack = async () => {
+    setRestoring(true);
+    try {
+      setPlan(await api(`/plans/${eventId}/unarchive`, { method: 'POST' }));
+      app.toast('Back on the planning page');
+      onChanged();
+    } catch (e) {
+      app.toast(e.message);
+    }
+    setRestoring(false);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -190,12 +344,23 @@ function PlanEditor({ eventId, onChanged }) {
         <div className="archive-banner" role="note">
           <div>
             <strong>In the archive</strong>
-            <div className="small muted">This service has passed, so it’s read-only. Nothing in it was deleted.</div>
+            <div className="small muted">
+              {plan.archivedEarly
+                ? `Archived early${plan.archivedBy ? ` by ${plan.archivedBy}` : ''}, so it’s read-only. You can put it back until Monday.`
+                : 'This service has passed, so it’s read-only. Nothing in it was deleted.'}
+            </div>
           </div>
           {canPlans && (
-            <button type="button" className="btn btn-primary" onClick={() => setCopying(true)}>
-              <Icon name="copy" size={16} /> Copy to this week…
-            </button>
+            <div className="row-wrap">
+              {plan.archivedEarly && (
+                <button type="button" className="btn btn-outline" disabled={restoring} onClick={putBack}>
+                  Put back on the planning page
+                </button>
+              )}
+              <button type="button" className="btn btn-primary" onClick={() => setCopying(true)}>
+                <Icon name="copy" size={16} /> Copy to this week…
+              </button>
+            </div>
           )}
         </div>
       )}

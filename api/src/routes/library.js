@@ -6,7 +6,7 @@ import { Event, LIBRARY_CATEGORIES, Media, Plan } from '../models.js';
 import { requireAdmin, requirePerm } from '../auth.js';
 import { bad, isId, notFound, str, wrap } from '../lib/util.js';
 import { copyStoredFile, deleteMediaFile, fileHash, filesOf, mediaView, originalName, removeUploads, storedPath, unavailableReason, uploader } from '../lib/media.js';
-import { isArchivedDate, orgToday, runArchiveJobs, storageStatus } from '../lib/archive.js';
+import { isArchived, openQuery, orgToday, runArchiveJobs, storageStatus } from '../lib/archive.js';
 import { escapeRx } from './plans.js';
 
 export const libraryRouter = Router();
@@ -16,16 +16,17 @@ const category = (v) => (LIBRARY_CATEGORIES.includes(v) ? v : 'Other');
 // How often each library item is used: { id: { past, upcoming, lastUsed, nextUse } }
 async function usage(ids) {
   const plans = await Plan.find({ assets: { $in: ids } }, { event: 1, assets: 1 }).lean();
-  const events = await Event.find({ _id: { $in: plans.map((p) => p.event) } }, { date: 1 }).lean();
-  const dateOf = Object.fromEntries(events.map((e) => [String(e._id), e.date]));
+  const events = await Event.find({ _id: { $in: plans.map((p) => p.event) } }, { date: 1, archivedAt: 1 }).lean();
+  const evOf = Object.fromEntries(events.map((e) => [String(e._id), e]));
   const today = await orgToday();
   const out = {};
   for (const p of plans) {
-    const date = dateOf[String(p.event)];
-    if (!date) continue;
+    const ev = evOf[String(p.event)];
+    if (!ev) continue;
+    const { date } = ev;
     for (const a of p.assets) {
       const u = (out[String(a)] ||= { past: 0, upcoming: 0, lastUsed: null, nextUse: null });
-      if (isArchivedDate(date, today)) {
+      if (isArchived(ev, today)) {
         u.past++;
         if (!u.lastUsed || date > u.lastUsed) u.lastUsed = date;
       } else {
@@ -101,7 +102,7 @@ libraryRouter.delete('/:id', requirePerm('plans'), wrap(async (req, res) => {
   deleteMediaFile(m);
   if (u?.past) {
     const today = await orgToday();
-    const upcoming = await Event.find({ date: { $gte: today } }, { _id: 1 }).lean();
+    const upcoming = await Event.find(openQuery(today), { _id: 1 }).lean();
     await unlinkAsset(m._id, { event: { $in: upcoming.map((e) => e._id) } });
     m.purgedAt = new Date();
     await m.save();
@@ -123,8 +124,8 @@ libraryRouter.post('/from-media/:mediaId', requirePerm('plans'), wrap(async (req
   const why = unavailableReason(m);
   if (why) throw bad(`Can’t add it to the library: ${why}.`);
   const plan = await Plan.findById(m.plan);
-  const ev = plan ? await Event.findById(plan.event, { date: 1 }).lean() : null;
-  const open = ev && !isArchivedDate(ev.date, await orgToday());
+  const ev = plan ? await Event.findById(plan.event, { date: 1, archivedAt: 1 }).lean() : null;
+  const open = ev && !isArchived(ev, await orgToday());
   if (!m.sha256) {
     m.sha256 = await fileHash(storedPath(m));
     await m.save();

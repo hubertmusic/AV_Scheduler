@@ -21,7 +21,9 @@ What it does:
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
   Everyone signed in can read and download a plan. People with the **Edit service plans** privilege can change it.
-- **Archive.** A service moves to the archive the day after it happens. It becomes read-only, so last week's slides never get mixed into this week, but nothing is deleted.
+- **Archive.** Each weekend moves to the archive on Monday morning (the org's time zone). Archived services leave the planning page and become read-only, so last week's slides never get mixed into this week, but nothing is deleted.
+  - **Archive this weekend…** at the bottom of the planning page does it right away, so the page is a clean slate for next weekend. Pick the services, then **Save to the archive** or, for the admin only, **Delete** (removes the plans, uploaded files and guest links; songs, media library items and the schedule of who served stay). Late guest items still waiting for approval are turned down and guest links close.
+  - A service saved early can be **put back on the planning page** from the Archive until its Monday.
   - The **Archive** view lists past services, newest first. Search by sermon title, speaker, song, Bible text or service name.
   - **Copy to this week** on any archived service copies its songs (with keys), Bible texts, notes, sermon title, media library items or individual files into an upcoming service. Things already there aren't added twice.
   - Deleting a file from an archived service frees the space but keeps it listed, so you can still see what was used.
@@ -273,7 +275,7 @@ How a week's media is handled:
 | Stage | When | What crew see | Where files are |
 |---|---|---|---|
 | Active | This weekend and anything coming up | Editable plans | `uploads` volume |
-| Archived | From the day after the service | Read-only, under **Archive**, searchable | `uploads` volume |
+| Archived | Monday morning after the service, or **Archive this weekend** | Read-only, under **Archive**, searchable | `uploads` volume |
 | Cold | `ARCHIVE_AFTER_DAYS` (90) after the service | Same; files show **In the archive** | NAS folder |
 | Removed | Only if `PURGE_VIDEO_AFTER_DAYS` is set | Videos show **Removed to save space** | Deleted |
 

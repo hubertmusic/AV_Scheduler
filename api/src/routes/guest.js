@@ -7,6 +7,7 @@ import { bad, getSettings, HttpError, isId, notFound, str, wrap } from '../lib/u
 import { deleteStored, filesOf, originalName, removeUploads, uploader } from '../lib/media.js';
 import { applyItem, removeItem, updateItem, windowState } from '../lib/guestItems.js';
 import { planFor } from './plans.js';
+import { isArchived, orgToday } from '../lib/archive.js';
 import { evName, logActivity } from '../lib/activity.js';
 
 // Public routes for outside guests. A guest opens their link and enters the 6-digit code that
@@ -49,6 +50,7 @@ async function findLink(req) {
   const g = await GuestLink.findOne({ token: t }).populate('event');
   if (!g || !g.event) throw notFound('This link isn’t valid.');
   if (g.revoked || g.expiresAt < new Date()) throw new HttpError(410, 'This link has expired. Ask the team for a new one.');
+  if (isArchived(g.event, await orgToday())) throw new HttpError(410, 'This service is over and has been archived. Ask the team for a new link.');
   return g;
 }
 

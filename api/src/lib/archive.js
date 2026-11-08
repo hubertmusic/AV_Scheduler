@@ -1,8 +1,10 @@
 // Weekly media lifecycle.
 //
 //  - Active:   this weekend and anything coming up. Editable.
-//  - Archived: from the day after a service. Read-only and searchable; reuse anything with
-//              "Copy to this week". Nothing moves.
+//  - Archived: automatically on the Monday after a service (in the org's time zone), or earlier
+//              when a leader presses "Archive this weekend". Read-only and searchable; reuse
+//              anything with "Copy to this week". Nothing moves. (An admin can instead delete a
+//              weekend's plans and files; the schedule of who served stays.)
 //  - Cold:     ARCHIVE_AFTER_DAYS after a service, its uploaded files move to ARCHIVE_DIR (a NAS
 //              folder). The plan still lists them and they still open, a little slower.
 //  - Removed:  optional. PURGE_VIDEO_AFTER_DAYS deletes old videos (the biggest files) but keeps
@@ -18,8 +20,18 @@ import { addDays, getSettings, todayIn } from './util.js';
 import { ARCHIVE_MARKER, archiveReady, storedPath } from './media.js';
 import { logActivity } from './activity.js';
 
-// A service is archived from the day after it happens (dates are local to the org).
-export const isArchivedDate = (date, today) => date < today;
+// Services archive on Monday morning: everything dated before the most recent Monday.
+// Dates are YYYY-MM-DD, local to the org.
+export function archiveCutoff(today) {
+  const dow = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+  return addDays(today, -((dow + 6) % 7));
+}
+export const isArchivedDate = (date, today) => date < archiveCutoff(today);
+// ev needs date and archivedAt
+export const isArchived = (ev, today) => !!ev?.archivedAt || isArchivedDate(ev.date, today);
+// Event query parts for archived / still-open services
+export const archivedQuery = (today) => ({ $or: [{ date: { $lt: archiveCutoff(today) } }, { archivedAt: { $ne: null } }] });
+export const openQuery = (today) => ({ date: { $gte: archiveCutoff(today) }, archivedAt: null });
 
 export async function orgToday() {
   return todayIn((await getSettings()).timezone);

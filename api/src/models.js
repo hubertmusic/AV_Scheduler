@@ -79,6 +79,10 @@ const eventSchema = new Schema(
     groups: [ref('Group')], // outside groups taking part (e.g. praise team at a sound check)
     forEvent: ref('Event'), // sound check: the service it prepares for
     manual: { type: Boolean, default: false }, // added by hand, not from the template
+    // Archived before the Monday it would archive by itself ("Archive this weekend")
+    archivedAt: { type: Date, default: null },
+    archivedBy: ref('User'),
+    planDeletedAt: { type: Date, default: null }, // its plan and files were deleted when archived
   },
   { timestamps: true }
 );
