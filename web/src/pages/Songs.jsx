@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, fmtSize, uploadFiles } from '../lib.js';
+import { addDays, api, fmtDate, fmtSize, todayISO, uploadFiles } from '../lib.js';
 import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 
 export const LYRICS_HINT = `Put each section label on its own line, and leave a blank line between slides:
@@ -26,15 +26,25 @@ export function SongFiles({ song, compact }) {
   );
 }
 
+function usedLine(s) {
+  if (!s.lastUsed) return 'Not sung in a service yet';
+  return `Last sung ${fmtDate(s.lastUsed)} · ${s.usedThisYear}× in the past year`;
+}
+
 export default function SongLibrary() {
   const { can } = useApp();
   const [q, setQ] = useState('');
+  const [showRetired, setShowRetired] = useState(false);
   const [list, setList] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [report, setReport] = useState(false);
 
   const load = useCallback(async () => {
-    setList(await api(`/songs${q ? `?q=${encodeURIComponent(q)}` : ''}`).catch(() => []));
-  }, [q]);
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (showRetired) params.set('all', '1');
+    setList(await api(`/songs?${params}`).catch(() => []));
+  }, [q, showRetired]);
   useEffect(() => {
     const t = setTimeout(load, 200);
     return () => clearTimeout(t);
@@ -47,18 +57,32 @@ export default function SongLibrary() {
           <span className="sr-only">Search songs</span>
           <input type="search" placeholder="Search songs" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        {can.plans && (
-          <button type="button" className="btn btn-primary" onClick={() => setEditing({ title: '', artist: '', ccli: '', lyrics: '', notes: '' })}>
-            <Icon name="plus" /> New song
-          </button>
-        )}
+        <label className="check">
+          <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)} />
+          Show retired songs
+        </label>
+        <div className="row-wrap">
+          {can.plans && (
+            <button type="button" className="btn btn-outline" aria-expanded={report} onClick={() => setReport(!report)}>
+              CCLI usage report
+            </button>
+          )}
+          {can.plans && (
+            <button type="button" className="btn btn-primary" onClick={() => setEditing({ title: '', artist: '', ccli: '', lyrics: '', notes: '' })}>
+              <Icon name="plus" /> New song
+            </button>
+          )}
+        </div>
       </div>
+      {report && <UsageReport />}
       {list && list.length === 0 && <Empty>{q ? 'No songs match.' : 'No songs yet. Add songs here, or from a service plan.'}</Empty>}
       <div className="card-grid">
         {(list || []).map((s) => (
           <article key={s.id} className="card stack-sm">
             <div className="row spread">
-              <h3>{s.title}</h3>
+              <h3>
+                {s.title} {s.retired && <span className="chip chip-archived">Retired</span>}
+              </h3>
               {can.plans && (
                 <button type="button" className="icon-btn" aria-label={`Edit ${s.title}`} onClick={() => setEditing(s)}>
                   <Icon name="edit" />
@@ -69,6 +93,7 @@ export default function SongLibrary() {
               {[s.artist, s.ccli && `CCLI ${s.ccli}`].filter(Boolean).join(' · ') || '—'}
             </div>
             <div className="small">{s.pro ? (s.proOutdated ? '.pro stored — lyrics changed since' : '.pro stored') : 'No .pro file yet'}</div>
+            <div className="small muted">{usedLine(s)}</div>
             <div className="push-down">
               <SongFiles song={s} compact />
             </div>
@@ -89,6 +114,32 @@ export default function SongLibrary() {
         />
       )}
     </div>
+  );
+}
+
+// Songs sung between two dates, as a spreadsheet, for the church's CCLI report
+function UsageReport() {
+  const today = todayISO();
+  const [from, setFrom] = useState(addDays(today, -183));
+  const [to, setTo] = useState(today);
+  return (
+    <section className="card stack-sm" aria-label="CCLI usage report">
+      <h3>CCLI usage report</h3>
+      <p className="muted small">Every song sung in a service between these dates, how many times and when, as a spreadsheet (CSV). Use it when you report song usage to CCLI.</p>
+      <div className="row-wrap">
+        <label className="field">
+          <span>From</span>
+          <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>To</span>
+          <input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <a className="btn btn-primary self-end" href={`/api/songs/usage.csv?from=${from}&to=${to}`} download>
+          Download report
+        </a>
+      </div>
+    </section>
   );
 }
 
@@ -133,10 +184,18 @@ export function SongModal({ song: initial, onClose, onSaved, onCreated }) {
     setSong(await api(`/songs/${song.id}/pro`, { method: 'DELETE' }));
   };
   const remove = async () => {
-    if (!window.confirm(`Delete “${song.title}” from the library? It will be taken out of every service plan.`)) return;
-    await api(`/songs/${song.id}`, { method: 'DELETE' });
-    app.toast('Song deleted');
-    onSaved?.(null);
+    if (!window.confirm(`Delete “${song.title}”? It’s taken out of upcoming services. If past services used it, it’s retired instead: hidden from the library, but those services still list it.`)) return;
+    try {
+      const r = await api(`/songs/${song.id}`, { method: 'DELETE' });
+      app.toast(r?.retired ? 'Retired. Past services still list it.' : 'Song deleted');
+      onSaved?.(null);
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const bringBack = async () => {
+    setSong(await api(`/songs/${song.id}`, { method: 'PATCH', body: { retired: false } }));
+    app.toast('Back in the song library');
   };
 
   return (
@@ -173,11 +232,16 @@ export function SongModal({ song: initial, onClose, onSaved, onCreated }) {
               Cancel
             </button>
           </div>
-          {!isNew && (
-            <button type="button" className="btn btn-danger" onClick={remove}>
-              Delete song
-            </button>
-          )}
+          {!isNew &&
+            (song.retired ? (
+              <button type="button" className="btn btn-outline" onClick={bringBack}>
+                Bring back to the library
+              </button>
+            ) : (
+              <button type="button" className="btn btn-danger" onClick={remove}>
+                Delete song
+              </button>
+            ))}
         </div>
       </form>
       {!isNew && (

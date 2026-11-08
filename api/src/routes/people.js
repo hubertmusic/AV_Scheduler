@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { Assignment, Event, PERMS, Position, Request, User } from '../models.js';
-import { requirePerm } from '../auth.js';
+import { requireAdmin, requirePerm, signOutUsers } from '../auth.js';
+import { logActivity } from '../lib/activity.js';
 import { addDays, bad, conflict, forbidden, getSettings, isId, normalizePhone, notFound, str, todayIn, token, wrap } from '../lib/util.js';
 import { personView } from '../lib/views.js';
 import { cleanRegulars } from '../lib/regulars.js';
+import { applyRegularsFor } from '../lib/regularsAuto.js';
 
 export const peopleRouter = Router();
 
@@ -59,6 +61,16 @@ async function loadEditable(req) {
   return user;
 }
 
+// Admin: sign one person out on every device
+peopleRouter.post('/:id/sign-out', requireAdmin, wrap(async (req, res) => {
+  if (!isId(req.params.id)) throw notFound();
+  const user = await User.findById(req.params.id);
+  if (!user) throw notFound();
+  await signOutUsers({ _id: user._id });
+  await logActivity({ user: req.user, kind: 'system', action: `Signed ${user.name} out on all devices`, req });
+  res.status(204).end();
+}));
+
 peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   const user = await loadEditable(req);
   const isAdmin = req.user.role === 'admin';
@@ -80,9 +92,14 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   if (b.phone !== undefined) user.phone = normalizePhone(b.phone, s.countryCode);
   if (b.positions !== undefined) user.positions = await cleanPositions(b.positions);
   if (b.trainee !== undefined) user.trainee = await cleanPositions(b.trainee);
+  if (b.leads !== undefined) user.leads = await cleanPositions(b.leads);
+  user.leads = (user.leads || []).filter((k) => user.positions.includes(k)); // Lead only where trained
+  let regularsChanged = false;
   if (b.regulars !== undefined) {
     const keys = new Set((await Position.find({}).lean()).map((p) => p.key));
+    const before = JSON.stringify(user.regulars || []);
     user.regulars = cleanRegulars(b.regulars, keys);
+    regularsChanged = JSON.stringify(user.regulars) !== before;
   }
   if (b.maxPerMonth !== undefined) user.maxPerMonth = Math.max(0, Math.min(31, Math.round(Number(b.maxPerMonth) || 0)));
 
@@ -121,7 +138,9 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
   }
   await user.save();
   res.locals.activity = `Edited ${user.name}`;
-  res.json(personView(user, req.user));
+  // A new or changed regular schedule puts them on the weekends already built.
+  const regularsPlaced = regularsChanged && user.active ? await applyRegularsFor(user._id) : 0;
+  res.json({ ...personView(user, req.user), regularsPlaced });
 }));
 
 // GET /api/people/load — shifts per person: last 90 days, next 60 days

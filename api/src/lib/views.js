@@ -15,6 +15,7 @@ export function personView(u, viewer) {
     leaderTitle: u.leaderTitle,
     positions: u.positions,
     trainee: u.trainee || [],
+    leads: u.leads || [],
     active: u.active,
   };
   if (isSelf || vc.people || vc.edit) {

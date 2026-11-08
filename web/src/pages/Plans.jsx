@@ -1,45 +1,136 @@
-import { useCallback, useEffect, useState } from 'react';
-import { addDays, api, BIBLE_VERSIONS, fmtDateTime, fmtDay, fmtSize, fmtTime, fridayOf, lookUpBible, todayISO, uploadFiles, weekendLabel } from '../lib.js';
-import { DropZone, Empty, Icon, useApp } from '../ui.jsx';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { addDays, api, fmtDate, fmtDateTime, fmtDay, fmtSize, fmtTime, fmtWhen, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
+import { BibleFields } from '../scripture.jsx';
+import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
+import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
+import { OrderOfService, ShareCard } from './ServiceOrder.jsx';
+
+const VIEWS = [
+  { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
+  { id: 'archive', tab: 'Archive', title: 'Archive', blurb: 'Past services, read-only. Search them, and copy anything you need into this week.' },
+  { id: 'songs', tab: 'Songs', title: 'Song library', blurb: 'Every song the team uses, with lyrics, .pro files and when it was last sung.' },
+  { id: 'media', tab: 'Media', title: 'Media library', blurb: 'Backgrounds, countdowns and logo loops you use every week. Services link to these instead of uploading them again.' },
+];
 
 export default function Plans() {
   const [view, setView] = useState('plans');
+  const v = VIEWS.find((x) => x.id === view);
   return (
     <div className="stack-lg">
       <div className="page-head">
         <div>
-          <h1>{view === 'plans' ? 'Service plans' : 'Song library'}</h1>
-          <div className="muted">Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter.</div>
+          <h1>{v.title}</h1>
+          <div className="muted">{v.blurb}</div>
         </div>
         <div className="seg" role="group" aria-label="View">
-          <button type="button" aria-pressed={view === 'plans'} onClick={() => setView('plans')}>
-            Plans
-          </button>
-          <button type="button" aria-pressed={view === 'songs'} onClick={() => setView('songs')}>
-            Song library
-          </button>
+          {VIEWS.map((x) => (
+            <button key={x.id} type="button" aria-pressed={view === x.id} onClick={() => setView(x.id)}>
+              {x.tab}
+            </button>
+          ))}
         </div>
       </div>
-      {view === 'plans' ? <PlanBrowser /> : <SongLibrary />}
+      {view === 'plans' && <PlanBrowser onOpenArchive={() => setView('archive')} />}
+      {view === 'archive' && <ArchiveBrowser />}
+      {view === 'songs' && <SongLibrary />}
+      {view === 'media' && <MediaLibrary />}
     </div>
   );
 }
 
-function PlanBrowser() {
-  const [fri, setFri] = useState(() => fridayOf(todayISO()));
-  const [list, setList] = useState(null);
+// Past services, newest first, with search. Picking one opens it read-only on the right.
+function ArchiveBrowser() {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState(null);
+  const [more, setMore] = useState(false);
+  const [page, setPage] = useState(0);
   const [selId, setSelId] = useState(null);
 
-  const load = useCallback(async () => {
-    const rows = await api(`/plans/summary?from=${fri}&to=${addDays(fri, 2)}`).catch(() => []);
-    setList(rows);
-    setSelId((cur) => (rows.some((r) => r.id === cur) ? cur : rows.find((r) => r.kind !== 'soundcheck')?.id || rows[0]?.id || null));
-  }, [fri]);
+  const load = useCallback(async (pg, query) => {
+    const r = await api(`/plans/archive?page=${pg}${query ? `&q=${encodeURIComponent(query)}` : ''}`).catch(() => ({ items: [], more: false }));
+    setItems((cur) => (pg === 0 ? r.items : [...(cur || []), ...r.items]));
+    setMore(r.more);
+    setPage(pg);
+    if (pg === 0) setSelId(r.items[0]?.id || null);
+  }, []);
   useEffect(() => {
-    setList(null);
+    const t = setTimeout(() => load(0, q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q, load]);
+
+  return (
+    <div className="split">
+      <aside className="side-col stack" aria-label="Past services">
+        <label className="field">
+          <span className="sr-only">Search the archive</span>
+          <input type="search" placeholder="Search sermon, song, speaker, verse" value={q} onChange={(e) => setQ(e.target.value)} />
+        </label>
+        {items && items.length === 0 && <Empty>{q.trim() ? 'Nothing in the archive matches.' : 'No past services yet. Each weekend moves here on Monday morning, or when you archive it on the Plans tab.'}</Empty>}
+        <div className="plan-list">
+          {(items || []).map((r) => (
+            <button key={r.id} type="button" className={`plan-item ${r.id === selId ? 'plan-on' : ''}`} aria-pressed={r.id === selId} onClick={() => setSelId(r.id)}>
+              <span className="muted small strong">
+                {fmtDate(r.date)} · {r.title}
+              </span>
+              {r.sermonTitle ? <strong>“{r.sermonTitle}”</strong> : <strong className="muted">No sermon title</strong>}
+              {r.speaker && <span className="small">{r.speaker}</span>}
+              {r.songs.length > 0 && <span className="small muted ellipsis-2">{r.songs.join(' · ')}</span>}
+              <span className="plan-stats">
+                {r.scriptures.length > 0 && <span>{r.scriptures.join(', ')}</span>}
+                {r.media > 0 && <span>{r.media} file{r.media === 1 ? '' : 's'}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+        {more && (
+          <button type="button" className="btn btn-outline" onClick={() => load(page + 1, q.trim())}>
+            Show older services
+          </button>
+        )}
+      </aside>
+      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={() => load(0, q.trim())} /> : items === null ? <div className="loading-inline">Loading…</div> : null}</div>
+    </div>
+  );
+}
+
+// One weekend at a time. Archived services leave this page (they're on the Archive tab), so once
+// a weekend is archived it's a clean slate for the next one.
+function PlanBrowser({ onOpenArchive }) {
+  const app = useApp();
+  const thisFri = fridayOf(todayISO());
+  const [fri, setFri] = useState(thisFri);
+  const [rows, setRows] = useState(null);
+  const [selId, setSelId] = useState(null);
+  const [archiving, setArchiving] = useState(false);
+  const firstLoad = useRef(true);
+
+  const load = useCallback(async () => {
+    const all = await api(`/plans/summary?from=${fri}&to=${addDays(fri, 2)}`).catch(() => []);
+    const open = all.filter((r) => !r.archived);
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      // This weekend was already archived by hand: start on next weekend
+      if (fri === thisFri && all.length && !open.length) return setFri(addDays(fri, 7));
+    }
+    setRows(all);
+    setSelId((cur) => (open.some((r) => r.id === cur) ? cur : open.find((r) => r.kind !== 'soundcheck')?.id || open[0]?.id || null));
+  }, [fri, thisFri]);
+  useEffect(() => {
+    setRows(null);
     load();
   }, [load]);
+
+  const list = rows ? rows.filter((r) => !r.archived) : null;
+  const saved = rows ? rows.filter((r) => r.archived && !r.planDeleted).length : 0;
+  const deleted = rows ? rows.filter((r) => r.planDeleted).length : 0;
+  const canArchive = app.can.plans && fri <= thisFri && list?.length > 0;
+  const archived = (r) => {
+    setArchiving(false);
+    app.toast(r.deleted ? `Deleted ${r.archived} plan${r.archived === 1 ? '' : 's'}` : `Saved ${r.archived} service${r.archived === 1 ? '' : 's'} to the archive`);
+    if (fri === thisFri) setFri(addDays(fri, 7));
+    else load();
+  };
 
   return (
     <div className="split">
@@ -56,7 +147,8 @@ function PlanBrowser() {
             <Icon name="chevR" />
           </button>
         </div>
-        {list && list.length === 0 && <Empty>Nothing scheduled this weekend. Build it on the Schedule tab first.</Empty>}
+        {rows && rows.length === 0 && <Empty>Nothing scheduled this weekend. Build it on the Schedule tab first.</Empty>}
+        {rows && rows.length > 0 && list.length === 0 && <Empty>This weekend is done and archived.</Empty>}
         <div className="plan-list">
           {(list || []).map((r) => (
             <button key={r.id} type="button" className={`plan-item ${r.id === selId ? 'plan-on' : ''}`} aria-pressed={r.id === selId} onClick={() => setSelId(r.id)}>
@@ -75,17 +167,149 @@ function PlanBrowser() {
             </button>
           ))}
         </div>
+        {(saved > 0 || deleted > 0) && (
+          <p className="small muted">
+            {saved > 0 && (
+              <>
+                {saved} service{saved === 1 ? ' is' : 's are'} in the Archive.{' '}
+                <button type="button" className="link-btn" onClick={onOpenArchive}>
+                  Open the Archive
+                </button>
+              </>
+            )}
+            {saved > 0 && deleted > 0 && ' '}
+            {deleted > 0 && `${deleted} plan${deleted === 1 ? ' was' : 's were'} deleted.`}
+          </p>
+        )}
+        {rows && fri !== thisFri && (
+          <button type="button" className="link-btn" onClick={() => setFri(thisFri)}>
+            Back to this weekend
+          </button>
+        )}
+        {canArchive && (
+          <button type="button" className="btn btn-outline" onClick={() => setArchiving(true)}>
+            <Icon name="archive" size={16} /> Archive this weekend…
+          </button>
+        )}
       </aside>
-      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={load} /> : !list ? <div className="loading-inline">Loading…</div> : null}</div>
+      <div className="main-col">{selId ? <PlanEditor key={selId} eventId={selId} onChanged={load} /> : !rows ? <div className="loading-inline">Loading…</div> : null}</div>
+      {archiving && <ArchiveWeekendModal fri={fri} services={list} onClose={() => setArchiving(false)} onDone={archived} />}
     </div>
+  );
+}
+
+// "Archive this weekend": save the services to the archive (read-only, searchable) or, for the
+// admin, delete their plans and files. Either way the weekend leaves the planning page.
+function ArchiveWeekendModal({ fri, services, onClose, onDone }) {
+  const app = useApp();
+  const isAdmin = app.me.role === 'admin';
+  const today = todayISO();
+  const [pick, setPick] = useState(() => Object.fromEntries(services.map((s) => [s.id, true])));
+  const [mode, setMode] = useState('save');
+  const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const chosen = services.filter((s) => pick[s.id]);
+  const waiting = chosen.reduce((t, s) => t + (s.pending || 0), 0);
+  const del = mode === 'delete';
+  const n = chosen.length;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      onDone(await api('/plans/archive-weekend', { method: 'POST', body: { events: chosen.map((s) => s.id), delete: del } }));
+    } catch (err) {
+      app.toast(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Archive this weekend" onClose={onClose} wide>
+      <form className="stack" onSubmit={submit}>
+        <p className="muted small">
+          Takes the weekend of {weekendLabel(fri)} off the planning page so you start next weekend with a clean slate. If you don’t, it happens by itself on Monday morning.
+        </p>
+        <fieldset className="stack-sm plain-fieldset">
+          <legend className="label-sm">Services</legend>
+          {services.map((s) => (
+            <label key={s.id} className="check check-top">
+              <input type="checkbox" checked={!!pick[s.id]} onChange={(e) => setPick({ ...pick, [s.id]: e.target.checked })} />
+              <span>
+                <strong>{s.title}</strong>
+                <span className="small muted block">
+                  {fmtDay(s.date)} · {fmtTime(s.start)}
+                  {s.date > today ? ' · hasn’t happened yet' : ''}
+                  {s.sermonTitle ? ` · “${s.sermonTitle}”` : ''}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="stack-sm plain-fieldset">
+          <legend className="label-sm">What to do with them</legend>
+          <label className="check check-top">
+            <input type="radio" name="archive-mode" checked={!del} onChange={() => setMode('save')} />
+            <span>
+              <strong>Save to the archive</strong>
+              <span className="small muted block">Everything is kept: notes, Bible texts, songs and files. Read-only and searchable on the Archive tab, and you can copy anything into a later week.</span>
+            </span>
+          </label>
+          {isAdmin ? (
+            <label className="check check-top">
+              <input type="radio" name="archive-mode" checked={del} onChange={() => setMode('delete')} />
+              <span>
+                <strong>Delete</strong>
+                <span className="small muted block">Deletes the plans: notes, Bible texts, song lists, uploaded files and guest links. Songs stay in the song library and media library items stay in the library. The schedule of who served is kept.</span>
+              </span>
+            </label>
+          ) : (
+            <p className="small muted">Only the admin can delete plans instead of saving them.</p>
+          )}
+        </fieldset>
+        {waiting > 0 && (
+          <div className="warn-box" role="alert">
+            {waiting} item{waiting === 1 ? ' from a guest is' : 's from guests are'} still waiting for approval and will be turned down. Approve {waiting === 1 ? 'it' : 'them'} first if you want {waiting === 1 ? 'it' : 'them'}.
+          </div>
+        )}
+        {del && (
+          <label className="check">
+            <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+            <span>I understand the deleted plans and files can’t be brought back.</span>
+          </label>
+        )}
+        <div className="row-wrap">
+          <button className={`btn ${del ? 'btn-danger' : 'btn-primary'}`} disabled={busy || !n || (del && !sure)}>
+            {busy ? 'Working…' : del ? `Delete ${n} plan${n === 1 ? '' : 's'}` : `Save ${n} service${n === 1 ? '' : 's'} to the archive`}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 function PlanEditor({ eventId, onChanged }) {
   const app = useApp();
-  const canEdit = app.can.plans;
+  const canPlans = app.can.plans;
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState('');
+  const [copying, setCopying] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  const putBack = async () => {
+    setRestoring(true);
+    try {
+      setPlan(await api(`/plans/${eventId}/unarchive`, { method: 'POST' }));
+      app.toast('Back on the planning page');
+      onChanged();
+    } catch (e) {
+      app.toast(e.message);
+    }
+    setRestoring(false);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -112,9 +336,35 @@ function PlanEditor({ eventId, onChanged }) {
   if (error) return <div className="error" role="alert">{error}</div>;
   if (!plan) return <div className="loading-inline">Loading…</div>;
   const ev = plan.event;
+  // Past services are read-only. Anything in them can still be copied into an upcoming one.
+  const canEdit = canPlans && !plan.archived;
 
   return (
     <div className="stack-lg">
+      {plan.archived && (
+        <div className="archive-banner" role="note">
+          <div>
+            <strong>In the archive</strong>
+            <div className="small muted">
+              {plan.archivedEarly
+                ? `Archived early${plan.archivedBy ? ` by ${plan.archivedBy}` : ''}, so it’s read-only. You can put it back until Monday.`
+                : 'This service has passed, so it’s read-only. Nothing in it was deleted.'}
+            </div>
+          </div>
+          {canPlans && (
+            <div className="row-wrap">
+              {plan.archivedEarly && (
+                <button type="button" className="btn btn-outline" disabled={restoring} onClick={putBack}>
+                  Put back on the planning page
+                </button>
+              )}
+              <button type="button" className="btn btn-primary" onClick={() => setCopying(true)}>
+                <Icon name="copy" size={16} /> Copy to this week…
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <section className="card stack">
         <div className="section-head">
           <div>
@@ -137,11 +387,137 @@ function PlanEditor({ eventId, onChanged }) {
         <Details plan={plan} canEdit={canEdit} onSave={patch} />
       </section>
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
+      <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} />
       <Scriptures plan={plan} canEdit={canEdit} onSave={patch} />
       <Songs plan={plan} canEdit={canEdit} onSave={patch} reload={load} />
-      <MediaSection plan={plan} canEdit={canEdit} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
+      <MediaSection plan={plan} canEdit={canEdit} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
+      {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
       {canEdit && <Guests plan={plan} eventId={eventId} reload={load} />}
+      {copying && <CopyModal plan={plan} onClose={() => setCopying(false)} />}
     </div>
+  );
+}
+
+// Copy parts of an archived service into an upcoming one
+function CopyModal({ plan, onClose }) {
+  const app = useApp();
+  const src = plan.event;
+  const files = plan.media.filter((m) => m.status === 'approved' && m.stored !== 'removed');
+  const [targets, setTargets] = useState(null);
+  const [to, setTo] = useState('');
+  const [pick, setPick] = useState({
+    order: plan.order.length > 0,
+    sermon: false,
+    notes: false,
+    scriptures: plan.scriptures.length > 0,
+    songs: plan.songs.length > 0,
+    assets: plan.assets.some((a) => a.stored !== 'removed'),
+  });
+  const [media, setMedia] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState([]);
+
+  useEffect(() => {
+    const today = todayISO();
+    api(`/plans/summary?from=${today}&to=${addDays(today, 35)}`).then(
+      (rows) => {
+        const list = rows.filter((r) => !r.archived && r.kind !== 'soundcheck');
+        setTargets(list);
+        setTo((list.find((r) => r.title === src.title) || list[0])?.id || '');
+      },
+      () => setTargets([])
+    );
+  }, [src.title]);
+
+  const options = [
+    ['order', 'Order of service', plan.order.length ? `${plan.order.length} item${plan.order.length === 1 ? '' : 's'}, added after any already there` : null],
+    ['sermon', 'Sermon title and speaker', plan.sermonTitle || plan.speaker ? [plan.sermonTitle && `“${plan.sermonTitle}”`, plan.speaker].filter(Boolean).join(' — ') : null],
+    ['notes', 'Pastor’s notes', plan.notes ? 'Added under any notes already there' : null],
+    ['scriptures', 'Bible texts', plan.scriptures.length ? plan.scriptures.map((x) => x.reference).join(', ') : null],
+    ['songs', 'Songs, with their keys', plan.songs.length ? plan.songs.map((x) => x.song.title).join(' · ') : null],
+    ['assets', 'Media library items', plan.assets.filter((a) => a.stored !== 'removed').map((a) => a.title).join(' · ') || null],
+  ].filter(([, , detail]) => detail);
+  const chosenMedia = files.filter((m) => media[m.id]).map((m) => m.id);
+  const anything = options.some(([k]) => pick[k]) || chosenMedia.length > 0;
+
+  const copy = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setFailed([]);
+    try {
+      const r = await api(`/plans/${to}/copy`, { method: 'POST', body: { from: src.id, ...pick, media: chosenMedia } });
+      const target = targets.find((t) => t.id === to);
+      app.toast(r.copied.length ? `Copied ${r.copied.join(', ')} to ${target.title}, ${fmtDay(target.date)}` : 'Nothing new to copy — it’s already there');
+      if (r.failed.length) {
+        setFailed(r.failed);
+        setBusy(false);
+      } else onClose();
+    } catch (err) {
+      app.toast(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Copy to an upcoming service" onClose={onClose} wide>
+      <form className="stack" onSubmit={copy}>
+        <p className="muted small">
+          From {src.title}, {fmtDate(src.date)}. This archived service stays as it is; things already in the other service aren’t added twice.
+        </p>
+        {targets && targets.length === 0 ? (
+          <Empty>No upcoming services in the next five weeks. Build the weekend on the Schedule tab first.</Empty>
+        ) : (
+          <label className="field">
+            <span>Copy into</span>
+            <select value={to} onChange={(e) => setTo(e.target.value)} disabled={!targets}>
+              {(targets || []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {fmtDay(t.date)} · {fmtTime(t.start)} · {t.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <fieldset className="stack-sm plain-fieldset">
+          <legend className="label-sm">What to copy</legend>
+          {options.map(([k, label, detail]) => (
+            <label key={k} className="check check-top">
+              <input type="checkbox" checked={pick[k]} onChange={(e) => setPick({ ...pick, [k]: e.target.checked })} />
+              <span>
+                <strong>{label}</strong>
+                <span className="small muted block">{detail}</span>
+              </span>
+            </label>
+          ))}
+          {files.map((m) => (
+            <label key={m.id} className="check check-top">
+              <input type="checkbox" checked={!!media[m.id]} onChange={(e) => setMedia({ ...media, [m.id]: e.target.checked })} />
+              <span>
+                <strong>{m.title}</strong>
+                <span className="small muted block">
+                  File · {fmtSize(m.size)}
+                  {m.stored === 'cold' ? ' · comes back from the NAS archive' : ''}
+                </span>
+              </span>
+            </label>
+          ))}
+          {!options.length && !files.length && <p className="muted small">This service has nothing to copy.</p>}
+        </fieldset>
+        {failed.length > 0 && (
+          <div className="warn-box" role="alert">
+            Some files couldn’t be copied: {failed.join('; ')}
+          </div>
+        )}
+        <div className="row-wrap">
+          <button className="btn btn-primary" disabled={busy || !to || !anything}>
+            {busy ? 'Copying…' : 'Copy'}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            {failed.length ? 'Close' : 'Cancel'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -209,27 +585,8 @@ function Details({ plan, canEdit, onSave }) {
 function Scriptures({ plan, canEdit, onSave }) {
   const empty = { reference: '', version: 'KJV', text: '' };
   const [f, setF] = useState(empty);
-  const [looking, setLooking] = useState(false);
-  const [err, setErr] = useState('');
   const list = plan.scriptures;
 
-  const lookUp = async () => {
-    const v = BIBLE_VERSIONS.find((x) => x.label === f.version);
-    if (!v) {
-      setErr(`${f.version} can’t be looked up automatically (it’s copyrighted). Paste the text instead.`);
-      return;
-    }
-    setLooking(true);
-    setErr('');
-    try {
-      const r = await lookUpBible(f.reference, v.id);
-      setF({ ...f, reference: r.reference, text: r.text });
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setLooking(false);
-    }
-  };
   const add = async (e) => {
     e.preventDefault();
     await onSave({ scriptures: [...list, f] }, `Added ${f.reference}`);
@@ -271,29 +628,7 @@ function Scriptures({ plan, canEdit, onSave }) {
       ))}
       {canEdit && (
         <form className="stack divider-top" onSubmit={add}>
-          <div className="row-wrap fields-3">
-            <label className="field field-wide">
-              <span>Reference</span>
-              <input required value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder="e.g. John 4:13-14" />
-            </label>
-            <label className="field">
-              <span>Version</span>
-              <input value={f.version} onChange={(e) => setF({ ...f, version: e.target.value })} list="bible-versions" />
-              <datalist id="bible-versions">
-                {[...BIBLE_VERSIONS.map((v) => v.label), 'NKJV', 'NIV', 'ESV', 'NLT'].map((v) => (
-                  <option key={v} value={v} />
-                ))}
-              </datalist>
-            </label>
-            <button type="button" className="btn btn-outline self-end" onClick={lookUp} disabled={!f.reference || looking}>
-              {looking ? 'Looking up…' : 'Look up'}
-            </button>
-          </div>
-          <label className="field">
-            <span>Text</span>
-            <textarea rows={4} value={f.text} onChange={(e) => setF({ ...f, text: e.target.value })} placeholder="Look up KJV, WEB or ASV, or paste any version" />
-          </label>
-          {err && <div className="small danger">{err}</div>}
+          <BibleFields value={f} onChange={setF} />
           <button className="btn btn-primary self-start">Add Bible text</button>
         </form>
       )}
@@ -310,9 +645,20 @@ function Songs({ plan, canEdit, onSave, reload }) {
   const rows = plan.songs;
   const body = (list) => list.map((x) => ({ song: x.song.id, key: x.key, note: x.note }));
 
+  const [libLoaded, setLibLoaded] = useState(false);
+  const loadLibrary = useCallback(() => {
+    if (!canEdit) return;
+    api('/songs').then(
+      (l) => {
+        setLibrary(l);
+        setLibLoaded(true);
+      },
+      () => setLibLoaded(true)
+    );
+  }, [canEdit]);
   useEffect(() => {
-    if (canEdit) api('/songs').then(setLibrary, () => {});
-  }, [canEdit, plan.songs.length]);
+    loadLibrary();
+  }, [loadLibrary, plan.songs.length]);
 
   const move = (i, d) => {
     const next = [...rows];
@@ -382,12 +728,21 @@ function Songs({ plan, canEdit, onSave, reload }) {
         <div className="row-wrap divider-top">
           <label className="field grow">
             <span className="sr-only">Add a song from the library</span>
-            <select value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Add from the song library…</option>
-              {library.filter((s) => !inPlan.has(s.id)).map((s) => (
-                <option key={s.id} value={s.id}>
+            <select value={pick} onChange={(e) => setPick(e.target.value)} onFocus={loadLibrary} disabled={libLoaded && library.length === 0}>
+              <option value="">
+                {!libLoaded
+                  ? 'Loading the song library…'
+                  : library.length === 0
+                    ? 'The song library is empty — add one with New song'
+                    : library.every((x) => inPlan.has(x.id))
+                      ? 'Every song in the library is already in this service'
+                      : `Add from the song library (${library.length - library.filter((x) => inPlan.has(x.id)).length} available)…`}
+              </option>
+              {library.map((s) => (
+                <option key={s.id} value={s.id} disabled={inPlan.has(s.id)}>
                   {s.title}
                   {s.artist ? ` — ${s.artist}` : ''}
+                  {inPlan.has(s.id) ? ' (already in this service)' : ''}
                 </option>
               ))}
             </select>
@@ -419,142 +774,314 @@ function Songs({ plan, canEdit, onSave, reload }) {
   );
 }
 
-const ext = (name) => (name.includes('.') ? name.split('.').pop().slice(0, 5) : 'file');
-
-function MediaSection({ plan, canEdit, eventId, setPlan, reload, onChanged }) {
+function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onChanged }) {
   const app = useApp();
+  const [saving, setSaving] = useState(null);
   const upload = async (files, onProgress) => {
-    setPlan(await uploadFiles(`/plans/${eventId}/media`, files, { onProgress }));
-    app.toast(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
+    const out = await uploadFiles(`/plans/${eventId}/media`, files, { onProgress });
+    setPlan(out);
+    const linked = out.linked || [];
+    const stored = files.length - linked.length;
+    app.toast(
+      linked.length
+        ? `${linked.join(', ')} ${linked.length === 1 ? 'is' : 'are'} already in the media library, so ${linked.length === 1 ? 'it’s' : 'they’re'} linked instead${stored ? `. Uploaded ${stored} other${stored === 1 ? '' : 's'}.` : '.'}`
+        : `Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`
+    );
     onChanged();
   };
   const remove = async (m) => {
-    if (!window.confirm(`Delete ${m.title}?`)) return;
+    const msg = plan.archived ? `Delete “${m.title}” to free up space? This service will still list it.` : `Delete ${m.title}?`;
+    if (!window.confirm(msg)) return;
     await api(`/media/${m.id}`, { method: 'DELETE' }).catch((e) => app.toast(e.message));
     reload();
     onChanged();
   };
+  const setAssets = async (ids, msg) => {
+    try {
+      setPlan(await api(`/plans/${eventId}`, { method: 'PATCH', body: { assets: ids } }));
+      app.toast(msg);
+      onChanged();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const assets = plan.assets || [];
+  const showLibrary = assets.length > 0 || canEdit;
+
   return (
     <section className="card stack" aria-label="Media">
       <div>
         <h2>Media</h2>
-        {plan.media?.length > 0 && <div className="muted small">Download for ProPresenter includes all of these. Pictures also go into the PowerPoint.</div>}
+        {(plan.media.length > 0 || assets.length > 0) && <div className="muted small">Download for ProPresenter includes all of these. Pictures also go into the PowerPoint.</div>}
       </div>
-      {canEdit && <DropZone onFiles={upload} />}
-      {plan.media.length === 0 && !canEdit && <Empty>No media yet.</Empty>}
-      <div className="media-grid">
-        {plan.media.map((m) => (
-          <div key={m.id} className="media-card">
-            <a className="media-thumb" href={m.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${m.title}`}>
-              {/^image\/(png|jpeg|gif|webp)$/.test(m.mime) ? <img src={m.url} alt="" loading="lazy" /> : ext(m.originalName)}
-            </a>
-            <div className="media-body">
-              <strong className="small ellipsis" title={m.title}>{m.title}</strong>
-              <span className="muted small">
-                {fmtSize(m.size)} · {m.guestName ? `from ${m.guestName}` : m.uploadedBy || ''}
-              </span>
-              {m.status === 'pending' && <span className="chip chip-pending self-start">Waiting for approval</span>}
-              <div className="row-wrap push-down">
-                <a className="btn btn-outline" href={`${m.url}?download=1`} download>
-                  Download
-                </a>
-                {canEdit && m.status !== 'pending' && (
-                  <button type="button" className="icon-btn" aria-label={`Delete ${m.title}`} onClick={() => remove(m)}>
+      {showLibrary && (
+        <div className="stack-sm">
+          <h3>From the media library</h3>
+          {assets.length === 0 && <p className="muted small">Backgrounds, countdowns and logo loops you use every week. Pick them here instead of uploading them again.</p>}
+          <div className="media-grid">
+            {assets.map((a) => (
+              <MediaCard key={a.id} m={a} sub={`${a.category || 'Library'} · ${fmtSize(a.size)}`}>
+                {canEdit && (
+                  <button type="button" className="icon-btn" aria-label={`Take ${a.title} out of this service`} onClick={() => setAssets(assets.filter((x) => x.id !== a.id).map((x) => x.id), 'Taken out of this service')}>
                     <Icon name="close" size={16} />
                   </button>
                 )}
-              </div>
-            </div>
+              </MediaCard>
+            ))}
           </div>
-        ))}
+          {canEdit && <AssetPicker have={assets} onAdd={(item) => setAssets([...assets.map((x) => x.id), item.id], `Added ${item.title}`)} />}
+        </div>
+      )}
+      <div className="stack-sm">
+        {showLibrary && <h3>Uploaded for this service</h3>}
+        {canEdit && <DropZone onFiles={upload} hint="Sermon slides, videos, announcements — up to 80 MB each. Files already in the media library get linked, not stored twice." />}
+        {plan.media.length === 0 && !canEdit && <Empty>{assets.length ? 'No other files.' : 'No media yet.'}</Empty>}
+        <div className="media-grid">
+          {plan.media.map((m) => (
+            <MediaCard key={m.id} m={m}>
+              {canPlans && m.status === 'approved' && m.stored !== 'removed' && (
+                <button type="button" className="link-btn small" onClick={() => setSaving(m)} title="Keep it in the media library to reuse in other services">
+                  Save to library
+                </button>
+              )}
+              {canPlans && m.status !== 'pending' && m.stored !== 'removed' && (
+                <button type="button" className="icon-btn" aria-label={`Delete ${m.title}`} onClick={() => remove(m)}>
+                  <Icon name="close" size={16} />
+                </button>
+              )}
+            </MediaCard>
+          ))}
+        </div>
       </div>
+      {saving && (
+        <SaveToLibrary
+          media={saving}
+          archived={plan.archived}
+          onClose={() => setSaving(null)}
+          onSaved={() => {
+            setSaving(null);
+            reload();
+            onChanged();
+          }}
+        />
+      )}
     </section>
   );
 }
 
+// datetime-local input value (local time) <-> ISO
+const toLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const fromLocalInput = (v) => (v ? new Date(v).toISOString() : undefined);
+
+function scheduleLine(g) {
+  if (!g.active) return 'Turned off or expired';
+  if (!g.code) return `Older link · works until ${fmtWhen(g.expiresAt)} · everything needs approval`;
+  if (g.state === 'waiting') return `Opens ${fmtWhen(g.opensAt)} · locks ${fmtWhen(g.closesAt)}`;
+  if (g.state === 'open') return `Open now · locks ${fmtWhen(g.closesAt)}`;
+  return `Locked since ${fmtWhen(g.closesAt)} · late changes need approval until ${fmtWhen(g.expiresAt)}`;
+}
+
 function Guests({ plan, eventId, reload }) {
   const app = useApp();
-  const [f, setF] = useState({ name: '', note: '' });
+  const [f, setF] = useState({ name: '', note: '', opensAt: '', closesAt: '' });
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // link whose schedule is being changed
   const ev = plan.event;
 
-  const share = (g) =>
-    app.openWa({
-      title: `Send ${g.name} their upload link`,
-      text: `Hi ${g.name}, it’s ${app.me.name.split(' ')[0]} from ${app.settings.orgName}. Here’s your link to send your slides, videos, Bible texts and song lyrics for ${ev.title} on ${fmtDay(ev.date)}:\n\n${g.url}\n\nIt works for ${Math.round((new Date(g.expiresAt) - Date.now()) / 3600e3)} hours. Files up to 80 MB; for bigger videos, AirDrop or email them.${g.note ? `\n\n${g.note}` : ''}`,
-      recipients: [],
-      groupLink: '',
-    });
+  const message = (g) =>
+    `Hi ${g.name}, it’s ${app.me.name.split(' ')[0]} from ${app.settings.orgName}. Here’s your link to add your slides, videos, notes, Bible texts and song lyrics for ${ev.title} on ${fmtDay(ev.date)} at ${fmtTime(ev.start)}:\n\n${g.url}\n\nYour code: ${g.code}\n\nYou can add and change things until ${fmtWhen(g.closesAt)}. After that it locks, and changes go to the team for approval. Files up to 80 MB; for bigger videos, AirDrop or email them.${g.note ? `\n\n${g.note}` : ''}`;
+  const share = (g) => app.openWa({ title: `Send ${g.name} their link and code`, text: message(g), recipients: [], groupLink: '' });
+  const copy = (g) => navigator.clipboard.writeText(message(g)).then(() => app.toast('Link and code copied'), () => app.toast(g.url));
 
-  const create = async (e) => {
-    e.preventDefault();
+  const run = async (fn, msg) => {
     setBusy(true);
     try {
-      const g = await api(`/guest-links/${eventId}`, { method: 'POST', body: f });
-      setF({ name: '', note: '' });
+      const out = await fn();
+      if (msg) app.toast(typeof msg === 'function' ? msg(out) : msg);
       await reload();
-      share(g);
-    } catch (err) {
-      app.toast(err.message);
+      return out;
+    } catch (e) {
+      app.toast(e.message);
+      return null;
     } finally {
       setBusy(false);
     }
   };
-  const revoke = async (g) => {
-    await api(`/guest-links/link/${g.id}/revoke`, { method: 'POST' });
-    app.toast('Link turned off');
-    reload();
+  const create = async (e) => {
+    e.preventDefault();
+    const g = await run(() => api(`/guest-links/${eventId}`, { method: 'POST', body: { name: f.name, note: f.note, opensAt: fromLocalInput(f.opensAt), closesAt: fromLocalInput(f.closesAt) } }));
+    if (g) {
+      setF({ name: '', note: '', opensAt: '', closesAt: '' });
+      share(g);
+    }
   };
+  const post = (g, action, body, msg) => run(() => api(`/guest-links/link/${g.id}/${action}`, { method: 'POST', body }), msg);
 
   return (
-    <section className="card stack" aria-label="Guest uploads">
+    <section className="card stack" aria-label="Guest links">
       <div>
-        <h2>Guest upload links</h2>
-        <p className="muted small">For a guest speaker or visiting group: they can send files, notes, Bible texts and lyrics for this service only. Links stop working after 4 hours, and nothing reaches the plan until you approve it.</p>
+        <h2>Guest links</h2>
+        <p className="muted small">
+          For a guest speaker or visiting group. They open the link, enter the 6-digit code, and add files, notes, Bible texts and lyrics for this service. They only ever see what they sent. Until the deadline, what they submit goes straight into this plan and they can change it. After that it locks, and changes need your approval, or you can reopen it for a while.
+        </p>
       </div>
-      <form className="row-wrap fields-2" onSubmit={create}>
-        <label className="field">
-          <span>Who’s it for?</span>
-          <input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Pastor Daniels" />
-        </label>
-        <label className="field">
-          <span>Note to them (optional)</span>
-          <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Please send slides by Thursday" />
-        </label>
-        <button className="btn btn-primary self-end" disabled={busy}>
-          Make link
+      <form className="stack-sm" onSubmit={create}>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Who’s it for?</span>
+            <input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Pastor Daniels" />
+          </label>
+          <label className="field">
+            <span>Note to them (optional)</span>
+            <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Please include your sermon outline" />
+          </label>
+        </div>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Opens (optional)</span>
+            <input type="datetime-local" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>Deadline: locks at (optional)</span>
+            <input type="datetime-local" value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} />
+          </label>
+        </div>
+        <p className="muted small">Leave them blank to open it now and lock it at 6 PM the evening before the service.</p>
+        <button className="btn btn-primary self-start" disabled={busy}>
+          Make link and code
         </button>
       </form>
       {plan.guests?.length > 0 && (
-        <ul className="req-mini">
+        <ul className="guest-links">
           {plan.guests.map((g) => (
-            <li key={g.id}>
-              <span className="grow">
-                <strong>{g.name}</strong>
-                <span className="small muted">{g.active ? `Works until ${fmtDateTime(g.expiresAt)}` : 'Expired'}</span>
-              </span>
+            <li key={g.id} className={g.active ? '' : 'guest-off'}>
+              <div className="row-wrap spread">
+                <span className="stack-xs">
+                  <strong>{g.name}</strong>
+                  <span className="small muted">{scheduleLine(g)}</span>
+                  {(g.live > 0 || g.waiting > 0) && (
+                    <span className="small">
+                      {g.live} in the plan{g.waiting ? ` · ${g.waiting} waiting for approval` : ''}
+                    </span>
+                  )}
+                </span>
+                {g.active && g.code && (
+                  <span className="guest-code" aria-label={`Code ${g.code.split('').join(' ')}`}>
+                    <span className="label-sm">Code</span>
+                    <strong className="mono">{g.code}</strong>
+                  </span>
+                )}
+              </div>
+              {g.codeLocked && g.active && <div className="warn-box small">Too many wrong codes were tried. Make a new code and send it to {g.name}.</div>}
               {g.active && (
-                <>
-                  <button type="button" className="btn btn-green" onClick={() => share(g)}>
-                    Send
-                  </button>
+                <div className="row-wrap">
+                  {g.code && (
+                    <button type="button" className="btn btn-green" onClick={() => share(g)}>
+                      Send link + code
+                    </button>
+                  )}
+                  {g.code && (
+                    <button type="button" className="btn btn-ghost" onClick={() => copy(g)}>
+                      Copy
+                    </button>
+                  )}
+                  {g.code && g.state !== 'open' && (
+                    <label className="field field-inline">
+                      <span className="sr-only">Reopen for</span>
+                      <select
+                        value=""
+                        disabled={busy}
+                        onChange={(e) => e.target.value && post(g, 'reopen', { minutes: Number(e.target.value) }, (o) => `Open until ${fmtWhen(o.closesAt)}`)}
+                      >
+                        <option value="">Reopen for…</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                        <option value="120">2 hours</option>
+                        <option value="240">4 hours</option>
+                        <option value="1440">24 hours</option>
+                      </select>
+                    </label>
+                  )}
+                  {g.code && g.state === 'open' && (
+                    <button type="button" className="btn btn-outline" disabled={busy} onClick={() => post(g, 'lock', undefined, 'Locked. Changes now need approval.')}>
+                      Lock now
+                    </button>
+                  )}
+                  {g.code && (
+                    <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setEditing(g)}>
+                      Change schedule
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => navigator.clipboard.writeText(g.url).then(() => app.toast('Link copied'), () => app.toast(g.url))}
+                    disabled={busy}
+                    onClick={() => window.confirm(`Make a new code for ${g.name}? The old code stops working, and they’ll need the new one.`) && post(g, 'new-code', undefined, (o) => `New code: ${o.code}. Send it to ${g.name}.`)}
                   >
-                    Copy
+                    New code
                   </button>
-                  <button type="button" className="btn btn-danger" onClick={() => revoke(g)}>
+                  <button type="button" className="btn btn-danger" disabled={busy} onClick={() => window.confirm(`Turn off ${g.name}’s link? What they already added stays in the plan.`) && post(g, 'revoke', undefined, 'Link turned off')}>
                     Turn off
                   </button>
-                </>
+                </div>
               )}
             </li>
           ))}
         </ul>
       )}
+      {editing && (
+        <ScheduleModal
+          link={editing}
+          onClose={() => setEditing(null)}
+          onSave={async (body) => {
+            const out = await run(() => api(`/guest-links/link/${editing.id}`, { method: 'PATCH', body }), 'Schedule saved');
+            if (out) setEditing(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function ScheduleModal({ link, onClose, onSave }) {
+  const [opensAt, setOpensAt] = useState(toLocalInput(link.opensAt));
+  const [closesAt, setClosesAt] = useState(toLocalInput(link.closesAt));
+  const [note, setNote] = useState(link.note || '');
+  return (
+    <Modal title={`${link.name}’s schedule`} onClose={onClose}>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave({ opensAt: fromLocalInput(opensAt), closesAt: fromLocalInput(closesAt), note });
+        }}
+      >
+        <label className="field">
+          <span>Opens</span>
+          <input type="datetime-local" required value={opensAt} onChange={(e) => setOpensAt(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Deadline: locks at</span>
+          <input type="datetime-local" required value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Note to them</span>
+          <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+        <p className="muted small">Until the deadline, what they submit goes straight into the plan. After it, changes wait for your approval.</p>
+        <div className="row-wrap">
+          <button className="btn btn-primary">Save</button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -576,14 +1103,19 @@ function Approvals({ plan, onDone }) {
     }
   };
   const label = { note: 'Note', scripture: 'Bible text', song: 'Song', media: 'File' };
+  const before = (x) => (x.kind === 'note' ? x.data.text : x.kind === 'scripture' ? `${x.data.reference}${x.data.version ? ` (${x.data.version})` : ''}` : x.kind === 'song' ? `${x.data.title}${x.data.key ? ` · key ${x.data.key}` : ''}` : '');
   return (
     <section className="card card-strong stack" aria-label="Waiting for approval">
-      <h2>Waiting for your approval ({pending.length})</h2>
+      <div>
+        <h2>Waiting for your approval ({pending.length})</h2>
+        <p className="muted small">Sent after the guest’s deadline. Approve to put it in the plan, or reopen their link if they need more time.</p>
+      </div>
       {pending.map((s) => (
         <div key={s.id} className="sub-item">
           <div className="section-head">
             <span>
-              <span className="eyebrow">{label[s.kind]}</span> <span className="muted small">from {s.guestName} · {fmtDateTime(s.createdAt)}</span>
+              <span className="eyebrow">{s.replaces ? `Change to a ${label[s.kind].toLowerCase()}` : `Late ${label[s.kind].toLowerCase()}`}</span>{' '}
+              <span className="muted small">from {s.guestName} · {fmtDateTime(s.createdAt)}</span>
             </span>
             <div className="row-wrap">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act(s, 'approve')}>
@@ -594,6 +1126,11 @@ function Approvals({ plan, onDone }) {
               </button>
             </div>
           </div>
+          {s.replaces && (
+            <div className="small muted">
+              Was: <span className="strike-soft">{before({ kind: s.kind, data: s.replaces.data })}</span>
+            </div>
+          )}
           {s.kind === 'note' && <div className="notes-view small">{s.data.text}</div>}
           {s.kind === 'scripture' && (
             <div className="small">

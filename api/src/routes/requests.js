@@ -129,7 +129,7 @@ async function apply(r) {
       const target = await User.findById(r.targetUser);
       if (!target || !target.active) return 'The person taking the shift is no longer active.';
       if (await Assignment.findOne({ event: r.event, user: r.targetUser })) return `${target.name} is already on that service.`;
-      Object.assign(a, { user: r.targetUser, confirmedAt: null, reminderEmailAt: null, waRemindedAt: null });
+      Object.assign(a, { user: r.targetUser, confirmedAt: null, reminderEmailAt: null, waRemindedAt: null, viaRegular: '' });
       await a.save();
       return null;
     }
@@ -147,7 +147,7 @@ async function apply(r) {
       if (await Assignment.findOne({ event: r.targetEvent, user: r.from, position: { $ne: r.targetPosition } })) return 'The requester is already on the other service.';
       if (await Assignment.findOne({ event: r.event, user: r.targetUser, position: { $ne: r.position } })) return 'The other person is already on this service.';
       // Avoid a temporary duplicate by writing both sides.
-      const fresh = { confirmedAt: null, reminderEmailAt: null, waRemindedAt: null };
+      const fresh = { confirmedAt: null, reminderEmailAt: null, waRemindedAt: null, viaRegular: '' };
       Object.assign(a, { user: r.targetUser, ...fresh });
       Object.assign(b, { user: r.from, ...fresh });
       await a.save();

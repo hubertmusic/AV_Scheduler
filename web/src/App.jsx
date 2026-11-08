@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, fridayOf, roleLabel, setViewAs, todayISO, unsaved } from './lib.js';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
+import { api, fridayOf, roleLabel, setViewAs, signalSignedOut, todayISO, unsaved } from './lib.js';
 import { AppCtx, Avatar, WaSheet } from './ui.jsx';
 import { PreviewBanner, PreviewPicker } from './pages/Preview.jsx';
 import SyncDialog from './pages/SyncDialog.jsx';
@@ -17,14 +17,49 @@ import Account from './pages/Account.jsx';
 import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
 import RunSheet from './pages/RunSheet.jsx';
+// The flow-chart library is big, so the Planning tab loads only when opened
+const Planning = lazy(() => import('./pages/Planning.jsx'));
+import { BulletinPage, RundownPage } from './pages/Share.jsx';
+
+// Signs out after `minutes` without a click, tap or key press, and tells the server
+// someone's still here while they work on a page without saving.
+function useIdleSignOut(minutes) {
+  useEffect(() => {
+    if (!minutes) return undefined;
+    let last = Date.now();
+    let lastPing = Date.now();
+    const mark = () => {
+      last = Date.now();
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    const id = setInterval(() => {
+      const t = Date.now();
+      if (t - last > minutes * 60000) {
+        api('/auth/logout', { method: 'POST' }).catch(() => {});
+        signalSignedOut(`You were signed out after ${minutes} minutes without activity. Please sign in again.`);
+      } else if (t - last < 5 * 60000 && t - lastPing > 5 * 60000) {
+        lastPing = t;
+        api('/account/ping').catch(() => {});
+      }
+    }, 30000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, mark));
+      clearInterval(id);
+    };
+  }, [minutes]);
+}
 
 export default function App() {
   const inviteToken = useMemo(() => window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const guestToken = useMemo(() => window.location.pathname.match(/^\/guest\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
+  // Public rundown / bulletin links (no sign-in)
+  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin)\/([A-Za-z0-9_-]+)/), []);
   const [phase, setPhase] = useState(inviteToken ? 'invite' : 'loading');
   const [boot, setBoot] = useState(null);
   const [orgName, setOrgName] = useState('');
+  const [notice, setNotice] = useState(''); // why they were signed out
   // "View as": who the admin is previewing, and the admin's own roster to pick from.
   const [viewAs, setViewAsState] = useState(null);
   const [roster, setRoster] = useState([]);
@@ -64,8 +99,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!inviteToken && !guestToken) load();
-  }, [inviteToken, guestToken, load]);
+    if (!inviteToken && !guestToken && !shared) load();
+  }, [inviteToken, guestToken, shared, load]);
+
+  // The server ended this session (idle timeout, signed out everywhere, …): back to sign-in.
+  useEffect(() => {
+    const onOut = (e) => {
+      unsaved.clear();
+      viewAsRef.current = null;
+      setViewAs(null);
+      setViewAsState(null);
+      setBoot(null);
+      setNotice(e.detail || '');
+      setPhase('login');
+      api('/auth/status').then((st) => setOrgName(st.orgName), () => {});
+    };
+    window.addEventListener('cc:signed-out', onOut);
+    return () => window.removeEventListener('cc:signed-out', onOut);
+  }, []);
+
+  useIdleSignOut(phase === 'app' ? boot?.settings?.idleMinutes || 0 : 0);
 
   function isPreviewing() {
     return Boolean(viewAsRef.current);
@@ -93,9 +146,20 @@ export default function App() {
   };
 
   if (guestToken) return <Guest token={guestToken} />;
+  if (shared) return shared[1] === 'rundown' ? <RundownPage token={shared[2]} /> : <BulletinPage token={shared[2]} />;
   if (phase === 'invite') return <Invite token={inviteToken} onDone={finishInvite} />;
   if (phase === 'setup') return <Setup onDone={load} />;
-  if (phase === 'login') return <Login orgName={orgName} onDone={load} />;
+  if (phase === 'login')
+    return (
+      <Login
+        orgName={orgName}
+        notice={notice}
+        onDone={() => {
+          setNotice('');
+          load();
+        }}
+      />
+    );
   if (phase === 'error')
     return (
       <div className="auth-wrap">
@@ -124,6 +188,7 @@ const TABS = [
   { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message },
   { id: 'mine', label: 'My shifts', show: () => true },
   { id: 'plans', label: 'Service plans', show: () => true },
+  { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader' },
   { id: 'requests', label: 'Requests', show: (c) => c.approve },
   { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message },
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
@@ -191,10 +256,10 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   const refreshPending = useCallback(async () => {
     try {
       if (can.approve) {
-        const list = await api('/requests');
+        const list = await api('/requests', { background: true });
         setPending(list.filter((r) => r.status === 'pending').length);
       }
-      if (can.plans) setPendingPlans((await api('/plans/pending')).count);
+      if (can.plans) setPendingPlans((await api('/plans/pending', { background: true })).count);
     } catch {
       /* badges are best-effort */
     }
@@ -289,6 +354,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'mine' && <MyShifts />}
         {tab === 'requests' && <Requests />}
         {tab === 'plans' && <Plans />}
+        {tab === 'planning' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Planning />
+          </Suspense>
+        )}
         {tab === 'groups' && <Groups />}
         {tab === 'team' && <Team />}
         {tab === 'resources' && <Resources />}

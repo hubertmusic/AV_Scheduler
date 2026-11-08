@@ -92,6 +92,7 @@ function PersonPanel({ person, me, positions }) {
     phone: prettyPhone(person.phone || ''),
     positions: person.positions,
     trainee: person.trainee || [],
+    leads: person.leads || [],
     maxPerMonth: person.maxPerMonth ? String(person.maxPerMonth) : '',
     role: person.role,
     leaderTitle: person.leaderTitle || '',
@@ -103,6 +104,7 @@ function PersonPanel({ person, me, positions }) {
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const togglePos = (k) => setF({ ...f, positions: f.positions.includes(k) ? f.positions.filter((x) => x !== k) : [...f.positions, k] });
+  const toggleLead = (k) => setF({ ...f, leads: f.leads.includes(k) ? f.leads.filter((x) => x !== k) : [...f.leads, k] });
   const toggleTrainee = (k) => setF({ ...f, trainee: f.trainee.includes(k) ? f.trainee.filter((x) => x !== k) : [...f.trainee, k] });
   const togglePerm = (k) => setF({ ...f, perms: { ...f.perms, [k]: !f.perms[k] } });
 
@@ -110,7 +112,7 @@ function PersonPanel({ person, me, positions }) {
     setBusy(true);
     setError('');
     try {
-      const body = { name: f.name, phone: f.phone, positions: f.positions, trainee: f.trainee, maxPerMonth: Number(f.maxPerMonth) || 0 };
+      const body = { name: f.name, phone: f.phone, positions: f.positions, trainee: f.trainee, leads: f.leads.filter((k) => f.positions.includes(k)), maxPerMonth: Number(f.maxPerMonth) || 0 };
       if (f.email && f.email !== person.email) body.email = f.email;
       if (isAdmin && person.role !== 'admin') {
         body.role = f.role;
@@ -136,6 +138,16 @@ function PersonPanel({ person, me, positions }) {
     } catch (e) {
       setError(e.message);
       setBusy(false);
+    }
+  };
+
+  const signOutPerson = async () => {
+    if (!window.confirm(`Sign ${person.name} out on all their devices? They can sign in again with their password.`)) return;
+    try {
+      await api(`/people/${person.id}/sign-out`, { method: 'POST' });
+      app.toast(`${person.name} was signed out everywhere`);
+    } catch (e) {
+      setError(e.message);
     }
   };
 
@@ -197,6 +209,22 @@ function PersonPanel({ person, me, positions }) {
               ))}
             </div>
           </fieldset>
+          {f.positions.length > 0 && (
+            <fieldset className="fieldset">
+              <legend>Lead (most experienced)</legend>
+              <div className="check-grid">
+                {positions
+                  .filter((p) => f.positions.includes(p.key))
+                  .map((p) => (
+                    <label key={p.key} className="check">
+                      <input type="checkbox" checked={f.leads.includes(p.key)} onChange={() => toggleLead(p.key)} />
+                      <span>{p.label}</span>
+                    </label>
+                  ))}
+              </div>
+              <p className="muted small">Skill levels: Learning (shadows), Capable (trained) and Lead. The month planner checks every service has a Lead.</p>
+            </fieldset>
+          )}
           <fieldset className="fieldset">
             <legend>Learning (can shadow)</legend>
             <div className="check-grid">
@@ -265,6 +293,11 @@ function PersonPanel({ person, me, positions }) {
           {canInvite && (
             <button type="button" className="btn btn-outline" onClick={newLink} disabled={busy}>
               {person.invited ? 'New invite link' : 'Password reset link'}
+            </button>
+          )}
+          {me.role === 'admin' && person.id !== me.id && person.active && !person.invited && (
+            <button type="button" className="btn btn-ghost" onClick={signOutPerson} disabled={busy}>
+              Sign out everywhere
             </button>
           )}
           {person.id !== me.id && person.role !== 'admin' && (
@@ -391,7 +424,7 @@ function AddPerson({ onClose }) {
 }
 
 // Regular commitments: e.g. "2nd Sabbath of the month · Worship Service · any of their positions".
-// Auto-fill places regulars first; leaders can still move them to a different job any week.
+// Regulars are placed automatically on each weekend as it's built; leaders can still move them.
 function Regulars({ person }) {
   const app = useApp();
   const { posLabel, settings } = app;
@@ -403,9 +436,9 @@ function Regulars({ person }) {
   const save = async (next, msg) => {
     setBusy(true);
     try {
-      await api(`/people/${person.id}`, { method: 'PATCH', body: { regulars: next.map(({ id, ...r }) => r) } });
+      const r = await api(`/people/${person.id}`, { method: 'PATCH', body: { regulars: next.map(({ id, ...r }) => r) } });
       setList(next);
-      app.toast(msg);
+      app.toast(r?.regularsPlaced ? `${msg} · placed on ${r.regularsPlaced} upcoming weekend${r.regularsPlaced === 1 ? '' : 's'}` : msg);
       await app.reload();
     } catch (e) {
       app.toast(e.message);
@@ -418,7 +451,7 @@ function Regulars({ person }) {
   return (
     <fieldset className="fieldset">
       <legend>Regular schedule</legend>
-      <p className="muted small">For people who serve on a pattern. Auto-fill places them first; their job can change week to week, and you can still move them by hand.</p>
+      <p className="muted small">For people who serve on a pattern. They’re placed automatically on each matching weekend as soon as it’s built, so it’s on their calendar early. Their job can change week to week, and you can still move them by hand.</p>
       {list.length === 0 && <p className="small muted">No regular schedule.</p>}
       <ul className="req-mini">
         {list.map((r, i) => {

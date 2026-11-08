@@ -6,6 +6,8 @@ const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
 export const EVENT_KINDS = ['service', 'soundcheck'];
 export const REQUEST_TYPES = ['swap', 'transfer', 'pickup', 'drop'];
+// Kinds of reusable files in the media library
+export const LIBRARY_CATEGORIES = ['Backgrounds', 'Countdowns', 'Logos & bumpers', 'Announcement loops', 'Other'];
 
 const userSchema = new Schema(
   {
@@ -26,6 +28,7 @@ const userSchema = new Schema(
     },
     positions: { type: [String], default: [] },
     trainee: { type: [String], default: [] }, // positions they're learning (can shadow)
+    leads: { type: [String], default: [] }, // trained positions where they're the most experienced (Lead)
     // Regular commitments, e.g. 2nd Sabbath of the month at Worship Service (lib/regulars.js)
     regulars: {
       type: [
@@ -50,6 +53,7 @@ const userSchema = new Schema(
     calLastFetchedAt: Date,
     calClient: { type: String, default: '' },
     calToken: { type: String, index: true },
+    sessionVersion: { type: Number, default: 0 }, // raised to sign this person out on every device
     inviteToken: { type: String, index: true },
     inviteExpires: Date,
     active: { type: Boolean, default: true },
@@ -76,6 +80,10 @@ const eventSchema = new Schema(
     groups: [ref('Group')], // outside groups taking part (e.g. praise team at a sound check)
     forEvent: ref('Event'), // sound check: the service it prepares for
     manual: { type: Boolean, default: false }, // added by hand, not from the template
+    // Archived before the Monday it would archive by itself ("Archive this weekend")
+    archivedAt: { type: Date, default: null },
+    archivedBy: ref('User'),
+    planDeletedAt: { type: Date, default: null }, // its plan and files were deleted when archived
   },
   { timestamps: true }
 );
@@ -110,6 +118,7 @@ const assignmentSchema = new Schema(
     confirmedAt: Date,
     reminderEmailAt: Date, // email reminder sent
     waRemindedAt: Date, // a leader marked the WhatsApp reminder as sent
+    viaRegular: { type: String, default: '' }, // placed automatically by a regular schedule, e.g. "2nd Sabbath"
   },
   { timestamps: true }
 );
@@ -201,9 +210,15 @@ const settingsSchema = new Schema({
   timezone: { type: String, default: 'America/New_York' },
   countryCode: { type: String, default: '1' },
   groupLink: { type: String, default: '' }, // WhatsApp group invite link, optional
+  logo: { type: String, default: '' }, // stored file name of the church logo (bulletin)
+  logoAt: { type: Date, default: null },
   weekendTemplate: { type: [templateItem], default: [] },
   reminderEmails: { type: Boolean, default: true },
   reminderDays: { type: Number, default: 2 },
+  calendarAlertDays: { type: Number, default: 5 }, // calendar alert this many days before a shift (0 = off)
+  autoBuildWeeks: { type: Number, default: 4 }, // build weekends from the template this many weeks ahead (0 = off)
+  idleMinutes: { type: Number, default: 90 }, // sign people out after this long without activity (0 = never)
+  endOnBrowserClose: { type: Boolean, default: true }, // sign-in lasts only until the browser is closed
   // Shown at the top of every shift until changed
   permanentNote: { type: String, default: '' },
   migrations: { type: [String], default: [] }, // one-time data updates already applied
@@ -238,6 +253,17 @@ const planSongSchema = new Schema(
   },
   { _id: false }
 );
+// One line of the order of service. Times come from the service start plus the minutes before it.
+export const ORDER_KINDS = ['item', 'song', 'scripture', 'prayer', 'sermon', 'heading'];
+const orderItemSchema = new Schema({
+  kind: { type: String, enum: ORDER_KINDS, default: 'item' },
+  title: { type: String, default: '' },
+  who: { type: String, default: '' },
+  minutes: { type: Number, default: 0 },
+  notes: { type: String, default: '' }, // cues for the platform and crew; never in the bulletin
+  bulletin: { type: Boolean, default: true }, // listed in the congregation's bulletin
+});
+
 const planSchema = new Schema(
   {
     event: { ...ref('Event'), required: true, unique: true },
@@ -246,6 +272,12 @@ const planSchema = new Schema(
     notes: { type: String, default: '' }, // pastor's notes
     scriptures: { type: [scriptureSchema], default: [] },
     songs: { type: [planSongSchema], default: [] },
+    assets: [ref('Media')], // media library items used in this service (backgrounds, countdowns…)
+    order: { type: [orderItemSchema], default: [] }, // order of service (optional)
+    announcements: { type: String, default: '' }, // bulletin only
+    // Share links: the rundown is for the platform and crew, the bulletin for the congregation.
+    rundownToken: { type: String, index: true, sparse: true },
+    bulletinToken: { type: String, index: true, sparse: true },
     updatedBy: ref('User'),
   },
   { timestamps: true }
@@ -260,6 +292,8 @@ const songSchema = new Schema(
     notes: { type: String, default: '' },
     proMedia: ref('Media'), // the ProPresenter .pro file, if one was uploaded
     lyricsUpdatedAt: Date,
+    // Hidden from the library and pickers but kept, because past services used it
+    retired: { type: Boolean, default: false },
     updatedBy: ref('User'),
   },
   { timestamps: true }
@@ -277,10 +311,20 @@ const mediaSchema = new Schema(
     uploadedBy: ref('User'),
     guest: ref('GuestLink'),
     status: { type: String, enum: ['approved', 'pending', 'rejected'], default: 'approved' },
+    // A reusable media library item, not owned by one service
+    library: { type: Boolean, default: false },
+    category: { type: String, default: '' },
+    sha256: { type: String, default: '' }, // fingerprint, to spot the same file uploaded twice
+    // hot = the uploads folder; cold = ARCHIVE_DIR, where files of long-past services are moved
+    location: { type: String, enum: ['hot', 'cold'], default: 'hot' },
+    movedAt: Date,
+    purgedAt: Date, // file deleted to save space; the record stays so the plan still lists it
   },
   { timestamps: true }
 );
 mediaSchema.index({ plan: 1 });
+mediaSchema.index({ library: 1 });
+mediaSchema.index({ sha256: 1 });
 
 // A 4-hour upload link for someone outside the team (guest speaker, visiting band).
 const guestLinkSchema = new Schema(
@@ -290,8 +334,16 @@ const guestLinkSchema = new Schema(
     name: { type: String, required: true },
     note: { type: String, default: '' },
     createdBy: ref('User'),
+    // Schedule: guests can add and change things from opensAt until closesAt. After that it's
+    // locked, and anything new or changed waits for a leader's approval, until expiresAt.
+    opensAt: Date,
+    closesAt: Date,
     expiresAt: { type: Date, required: true },
     revoked: { type: Boolean, default: false },
+    // 6-digit code the guest enters with the link ('' on links made before codes existed)
+    code: { type: String, default: '' },
+    codeVersion: { type: Number, default: 0 }, // raised with each new code, so earlier sign-ins stop working
+    codeTries: { type: Number, default: 0 }, // wrong codes in a row
   },
   { timestamps: true }
 );
@@ -304,13 +356,31 @@ const submissionSchema = new Schema(
     kind: { type: String, enum: ['note', 'scripture', 'song', 'media'], required: true },
     data: { type: Schema.Types.Mixed, default: {} },
     media: ref('Media'),
-    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
+    // draft: only the guest sees it · live: in the service plan · pending: sent after the
+    // window closed, waiting for a leader · approved (older links) · rejected
+    status: { type: String, enum: ['draft', 'live', 'pending', 'approved', 'rejected'], default: 'pending', index: true },
+    applied: { type: Schema.Types.Mixed, default: null }, // what it added to the plan, so edits can update it
+    replaces: ref('Submission'), // a late change to a live item, waiting for approval
     decidedBy: ref('User'),
     decidedAt: Date,
   },
   { timestamps: true }
 );
 submissionSchema.index({ event: 1 });
+
+// A flow-chart board: boxes, notes and people joined by lines (Planning tab, admin and leaders)
+const boardSchema = new Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    nodes: { type: [Schema.Types.Mixed], default: [] },
+    edges: { type: [Schema.Types.Mixed], default: [] },
+    rev: { type: Number, default: 0 }, // bumps on every save, so two people can't overwrite each other unknowingly
+    createdBy: ref('User'),
+    updatedBy: ref('User'),
+  },
+  { timestamps: true, minimize: false }
+);
+export const Board = model('Board', boardSchema);
 
 export const Plan = model('Plan', planSchema);
 export const Song = model('Song', songSchema);

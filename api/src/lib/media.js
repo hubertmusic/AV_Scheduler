@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
@@ -6,12 +7,15 @@ import { HttpError, token } from './util.js';
 
 fs.mkdirSync(config.uploadDir, { recursive: true });
 
+// Random name on disk, keeping a cleaned-up extension
+export function newStoredName(original = '') {
+  const ext = path.extname(original).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
+  return `${Date.now()}-${token(12)}${ext}`;
+}
+
 const storage = multer.diskStorage({
   destination: config.uploadDir,
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
-    cb(null, `${Date.now()}-${token(12)}${ext}`);
-  },
+  filename: (req, file, cb) => cb(null, newStoredName(file.originalname || '')),
 });
 
 const maxBytes = config.maxUploadMB * 1024 * 1024;
@@ -50,11 +54,71 @@ export function deleteStored(storedName) {
   fs.promises.unlink(path.join(config.uploadDir, storedName)).catch(() => {});
 }
 
+// ---------- archive (cold storage) ----------
+// The archive folder must hold this file. If the NAS isn't mounted, the folder is just an
+// empty directory on the local disk, so without the marker nothing is moved or looked up there.
+export const ARCHIVE_MARKER = '.crewcall-archive';
+
+export function archiveReady() {
+  if (!config.archiveDir) return false;
+  try {
+    return fs.existsSync(path.join(config.archiveDir, ARCHIVE_MARKER));
+  } catch {
+    return false;
+  }
+}
+
+const safeName = (n) => typeof n === 'string' && n && !n.includes('/') && !n.includes('\\') && !n.includes('..');
+
+// Where a media file lives on disk ('' if it can't be known)
+export function storedPath(m) {
+  if (!safeName(m?.storedName)) return '';
+  const dir = m.location === 'cold' ? config.archiveDir : config.uploadDir;
+  return dir ? path.join(dir, m.storedName) : '';
+}
+
+// Delete a media record's file, wherever it lives
+export function deleteMediaFile(m) {
+  if (!m || m.purgedAt) return;
+  const file = storedPath(m);
+  if (file) fs.promises.unlink(file).catch(() => {});
+}
+
+export function fileHash(file) {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    fs.createReadStream(file)
+      .on('error', reject)
+      .on('data', (d) => h.update(d))
+      .on('end', () => resolve(h.digest('hex')));
+  });
+}
+
+// Why a stored file can't be read right now, or '' if it can
+export function unavailableReason(m) {
+  if (m.purgedAt) return 'it was removed to save space';
+  if (m.location === 'cold' && !archiveReady()) return 'it’s in the archive on the NAS, which isn’t reachable right now';
+  const file = storedPath(m);
+  if (!file || !fs.existsSync(file)) return 'the file is missing from the server';
+  return '';
+}
+
+// Copy a stored file to a new name in the uploads folder (for reusing it in another plan)
+export async function copyStoredFile(m) {
+  const why = unavailableReason(m);
+  if (why) throw new HttpError(m.purgedAt ? 410 : m.location === 'cold' ? 503 : 404, why);
+  const name = newStoredName(m.originalName);
+  await fs.promises.copyFile(storedPath(m), path.join(config.uploadDir, name));
+  return name;
+}
+
 const INLINE = /^(image\/(png|jpeg|gif|webp|heic|heif)|video\/(mp4|quicktime|webm)|audio\/.+|application\/pdf)$/;
 
 export function sendStored(res, media, { download = false } = {}) {
-  const file = path.join(config.uploadDir, media.storedName);
-  if (!fs.existsSync(file)) throw new HttpError(404, 'That file is missing from the server.');
+  if (media.purgedAt) throw new HttpError(410, 'That file was removed to save space. The plan still lists it so you know it was used.');
+  if (media.location === 'cold' && !archiveReady()) throw new HttpError(503, 'That file is in the archive on the NAS, which isn’t reachable right now. Try again once the NAS is back on.');
+  const file = storedPath(media);
+  if (!file || !fs.existsSync(file)) throw new HttpError(404, 'That file is missing from the server.');
   const inline = !download && INLINE.test(media.mime);
   const encoded = encodeURIComponent(media.originalName);
   res.set({
@@ -79,5 +143,9 @@ export function mediaView(m) {
     uploadedBy: m.uploadedBy?.name || null,
     guestName: m.guest?.name || null,
     url: `/api/media/${m._id}/file`,
+    library: !!m.library,
+    category: m.category || '',
+    // where the file is: 'hot' (ready), 'cold' (archive on the NAS) or 'removed' (deleted to save space)
+    stored: m.purgedAt ? 'removed' : m.location === 'cold' ? 'cold' : 'hot',
   };
 }

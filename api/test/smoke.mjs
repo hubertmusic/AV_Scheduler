@@ -1,6 +1,7 @@
 // End-to-end check against a running API with an EMPTY database.
 //   BASE_URL=http://localhost:4000 node test/smoke.mjs
 import assert from 'node:assert/strict';
+import jwt from 'jsonwebtoken';
 
 const BASE = process.env.BASE_URL || 'http://localhost:4000';
 
@@ -23,6 +24,8 @@ function client() {
   };
   const call = (method, path, body) => send(method, path, body, false);
   call.as = (id) => (method, path, body) => send(method, path, body, false, { 'X-View-As': id });
+  call.bg = (method, path, body) => send(method, path, body, false, { 'X-Background': '1' });
+  call.cookie = (c) => (c === undefined ? cookie : (cookie = c));
   // upload(path, [{ name, type, bytes }], field)
   call.upload = (path, files, field = 'files') => {
     const fd = new FormData();
@@ -50,6 +53,8 @@ const friday = d.toISOString().slice(0, 10);
 let r = ok(await admin('GET', '/api/auth/status'));
 assert.equal(r.needsSetup, true, 'database must be empty');
 ok(await admin('POST', '/api/auth/setup', { name: 'Hub M.', email: 'admin@example.com', password: 'adminpass1', orgName: 'Test Crew' }), 201);
+// Weekends are built ahead by a background job; keep it out of the way until it's tested below.
+ok(await admin('PATCH', '/api/settings', { autoBuildWeeks: 0 }));
 assert.equal(ok(await admin('POST', '/api/auth/setup', { name: 'x', email: 'x@x.com', password: 'xxxxxxxx' }), 403) !== undefined, true);
 step('first-run setup creates the admin once');
 
@@ -293,41 +298,116 @@ step('PowerPoint download of the service');
 // ---------- guest links ----------
 ok(await crew1('POST', `/api/guest-links/${worship.id}`, { name: 'Guest' }), 403);
 const gl = ok(await crew2('POST', `/api/guest-links/${worship.id}`, { name: 'Guest Speaker', note: 'Slides and your text please' }), 201);
-const hours = (Date.parse(gl.expiresAt) - Date.now()) / 3600e3;
-assert.ok(hours > 3.9 && hours <= 4, `expires in ${hours} h`);
+assert.match(gl.code, /^\d{6}$/, 'a 6-digit code leaders can send');
+assert.equal(gl.state, 'open');
+assert.ok(Date.parse(gl.closesAt) > Date.now() && Date.parse(gl.closesAt) < Date.parse(gl.expiresAt), 'locks before the link stops working');
 const gtoken = gl.url.split('/guest/')[1];
 const guest = client();
-const gpage = ok(await guest('GET', `/api/guest/${gtoken}`));
+let gpage = ok(await guest('GET', `/api/guest/${gtoken}`));
+assert.equal(gpage.needsCode, true);
+assert.equal(gpage.event, undefined, 'nothing about the service before the code');
+ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'note', text: 'no code' }), 401);
+r = ok(await guest('POST', `/api/guest/${gtoken}/unlock`, { code: gl.code === '000000' ? '111111' : '000000' }), 401);
+assert.match(r.error, /tries left/);
+ok(await guest('POST', `/api/guest/${gtoken}/unlock`, { code: gl.code }), 204);
+gpage = ok(await guest('GET', `/api/guest/${gtoken}`));
 assert.equal(gpage.event.title, 'Worship Service');
-assert.equal(gpage.notes, undefined, 'guests see only their link, not the plan');
+assert.equal(gpage.schedule.state, 'open');
+assert.equal(gpage.notes, undefined, 'guests see only their own items, not the plan');
 ok(await guest('GET', '/api/plans/' + worship.id), 401);
-ok(await guest.upload(`/api/guest/${gtoken}/files`, [{ name: 'Guest slides.pdf', type: 'application/pdf', bytes: '%PDF-1.4 test' }, { name: 'reject-me.mov', type: 'video/quicktime', bytes: 'mov' }]), 201);
-ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'note', text: 'Please put up the outline before I start.' }), 201);
+
+// Open window: submitted items go straight into the plan
+ok(await guest.upload(`/api/guest/${gtoken}/files`, [{ name: 'Guest slides.pdf', type: 'application/pdf', bytes: '%PDF-1.4 test' }]), 201);
+assert.equal(ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'note', text: 'Please put up the outline before I start.' }), 201).status, 'live');
 ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'scripture', reference: 'Psalm 23:1', version: 'NKJV', text: 'The Lord is my shepherd' }), 201);
-ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'song', title: 'Way Maker', key: 'E', lyrics: 'Verse 1\nYou are here' }), 201);
 ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'nope' }), 400);
-assert.equal(ok(await crew1('GET', `/api/plans/${worship.id}`)).media.some((m) => m.originalName === 'Guest slides.pdf'), false, 'crew can’t see unapproved uploads');
+// A draft stays private until submitted
+assert.equal(ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'song', title: 'Way Makr', key: 'D', lyrics: 'Verse 1\nYou are here', draft: true }), 201).status, 'draft');
+plan = ok(await crew1('GET', `/api/plans/${worship.id}`));
+assert.match(plan.notes, /From Guest Speaker:\nPlease put up the outline/);
+assert.ok(plan.scriptures.some((x) => x.reference === 'Psalm 23:1'));
+assert.ok(plan.media.some((m) => m.originalName === 'Guest slides.pdf'), 'crew see guest files right away');
+assert.ok(!plan.songs.some((x) => x.song.title.startsWith('Way Mak')), 'drafts aren’t in the plan');
+gpage = ok(await guest('GET', `/api/guest/${gtoken}`));
+const draft = gpage.submissions.find((x) => x.status === 'draft');
+assert.equal(ok(await guest('PATCH', `/api/guest/${gtoken}/items/${draft.id}`, { title: 'Way Maker', key: 'D', lyrics: 'Verse 1\nYou are here' })).status, 'draft');
+assert.equal(ok(await guest('PATCH', `/api/guest/${gtoken}/items/${draft.id}`, { title: 'Way Maker', key: 'E', lyrics: 'Verse 1\nYou are here', submit: true })).status, 'live');
+// Editing a live item updates the plan in place
+const noteItem = gpage.submissions.find((x) => x.kind === 'note');
+ok(await guest('PATCH', `/api/guest/${gtoken}/items/${noteItem.id}`, { text: 'Outline first, then the video.' }));
+const scrItem = gpage.submissions.find((x) => x.kind === 'scripture');
+ok(await guest('PATCH', `/api/guest/${gtoken}/items/${scrItem.id}`, { reference: 'Psalm 23:1-3', version: 'NKJV', text: 'The Lord is my shepherd…' }));
+plan = ok(await crew1('GET', `/api/plans/${worship.id}`));
+assert.match(plan.notes, /From Guest Speaker:\nOutline first, then the video\./);
+assert.ok(!plan.notes.includes('Please put up the outline'), 'the old text was replaced, not added again');
+assert.equal(plan.scriptures.filter((x) => x.reference.startsWith('Psalm 23')).length, 1);
+assert.ok(plan.songs.some((x) => x.song.title === 'Way Maker' && x.key === 'E'));
+// Taking a file back out while open
+const fileItem = gpage.submissions.find((x) => x.kind === 'media');
+ok(await guest('DELETE', `/api/guest/${gtoken}/items/${fileItem.id}`), 204);
+assert.ok(!ok(await crew1('GET', `/api/plans/${worship.id}`)).media.some((m) => m.originalName === 'Guest slides.pdf'));
+step('guest links: 6-digit code, submitted items go straight in, drafts stay private, edits update the plan');
+
+// After the deadline: locked. New items and changes wait for approval.
+ok(await crew1('POST', `/api/guest-links/link/${gl.id}/lock`), 403);
+assert.equal(ok(await crew2('POST', `/api/guest-links/link/${gl.id}/lock`)).state, 'locked');
+assert.equal(ok(await guest('GET', `/api/guest/${gtoken}`)).schedule.state, 'locked');
+assert.equal(ok(await guest('PATCH', `/api/guest/${gtoken}/items/${noteItem.id}`, { text: 'Late: skip the video.' })).status, 'change-pending');
+ok(await guest('PATCH', `/api/guest/${gtoken}/items/${noteItem.id}`, { text: 'Late: skip the video, please.' }));
+ok(await guest('DELETE', `/api/guest/${gtoken}/items/${scrItem.id}`), 400);
+assert.equal(ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'scripture', reference: 'John 3:16', version: 'KJV', text: 'For God so loved' }), 201).status, 'pending');
+ok(await guest.upload(`/api/guest/${gtoken}/files`, [{ name: 'reject-me.mov', type: 'video/quicktime', bytes: 'mov' }]), 201);
+plan = ok(await crew1('GET', `/api/plans/${worship.id}`));
+assert.match(plan.notes, /Outline first, then the video\./, 'not changed until approved');
+assert.ok(!plan.media.some((m) => m.originalName === 'reject-me.mov'), 'crew can’t see unapproved late files');
 plan = ok(await crew2('GET', `/api/plans/${worship.id}`));
-const pending = plan.submissions.filter((x) => x.status === 'pending');
-assert.equal(pending.length, 5);
+let pending = plan.submissions.filter((x) => x.status === 'pending');
+assert.equal(pending.length, 3, 'one change (updated, not doubled), one late Bible text, one late file');
+assert.equal(pending.find((x) => x.replaces)?.data.text, 'Late: skip the video, please.');
 ok(await crew1('POST', `/api/submissions/${pending[0].id}/approve`), 403);
 const rejectMe = pending.find((x) => x.media?.originalName === 'reject-me.mov');
 ok(await crew2('POST', `/api/submissions/${rejectMe.id}/reject`));
 ok(await crew2('GET', rejectMe.media.url), 404);
 for (const x of pending.filter((x) => x.id !== rejectMe.id)) ok(await crew2('POST', `/api/submissions/${x.id}/approve`));
 plan = ok(await crew1('GET', `/api/plans/${worship.id}`));
-assert.match(plan.notes, /From Guest Speaker:\nPlease put up the outline/);
-assert.ok(plan.scriptures.some((x) => x.reference === 'Psalm 23:1'));
-assert.ok(plan.songs.some((x) => x.song.title === 'Way Maker'));
-assert.ok(plan.media.some((m) => m.originalName === 'Guest slides.pdf'));
-assert.equal(ok(await guest('GET', `/api/guest/${gtoken}`)).submissions.filter((x) => x.status === 'approved').length, 4);
+assert.match(plan.notes, /From Guest Speaker:\nLate: skip the video, please\./);
+assert.ok(!plan.notes.includes('Outline first'), 'the approved change replaced the old note');
+assert.ok(plan.scriptures.some((x) => x.reference === 'John 3:16'));
+gpage = ok(await guest('GET', `/api/guest/${gtoken}`));
+assert.ok(gpage.submissions.every((x) => !x.change), 'no changes left waiting');
+assert.equal(gpage.submissions.find((x) => x.kind === 'note').data.text, 'Late: skip the video, please.');
+step('guest links: locked after the deadline, late items and changes wait for approval');
+
+// Reopen for 30 minutes: edits go straight in again
+const reopened = ok(await crew2('POST', `/api/guest-links/link/${gl.id}/reopen`, { minutes: 30 }));
+assert.equal(reopened.state, 'open');
+assert.ok(Math.abs(Date.parse(reopened.closesAt) - Date.now() - 30 * 60e3) < 60e3);
+ok(await guest('PATCH', `/api/guest/${gtoken}/items/${noteItem.id}`, { text: 'Reopened: video back in.' }));
+assert.match(ok(await crew1('GET', `/api/plans/${worship.id}`)).notes, /Reopened: video back in\./);
+// Schedule changes, and a guest can't add anything before it opens
+const future = new Date(Date.now() + 2 * 864e5).toISOString();
+ok(await crew2('PATCH', `/api/guest-links/link/${gl.id}`, { opensAt: future, closesAt: new Date(Date.now() + 864e5).toISOString() }), 400);
+assert.equal(ok(await crew2('PATCH', `/api/guest-links/link/${gl.id}`, { opensAt: future, closesAt: new Date(Date.now() + 3 * 864e5).toISOString() })).state, 'waiting');
+r = ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'note', text: 'too early' }), 400);
+assert.match(r.error, /start adding/);
+// A new code signs the guest out until they enter it
+const fresh = ok(await crew2('POST', `/api/guest-links/link/${gl.id}/new-code`));
+assert.notEqual(fresh.code, gl.code);
+assert.equal(ok(await guest('GET', `/api/guest/${gtoken}`)).needsCode, true);
+ok(await guest('POST', `/api/guest/${gtoken}/unlock`, { code: fresh.code }), 204);
 ok(await crew2('POST', `/api/guest-links/link/${gl.id}/revoke`));
 r = await guest('GET', `/api/guest/${gtoken}`);
 assert.equal(r.status, 410);
 assert.match(r.data.error, /expired/);
 ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'note', text: 'late' }), 410);
 ok(await guest('GET', '/api/guest/not-a-real-token-1234567890'), 404);
-step('guest links: 4-hour expiry, upload-only access, nothing lands until approved, revoked links refuse');
+// Too many wrong codes lock the code until a leader makes a new one
+const gl2 = ok(await crew2('POST', `/api/guest-links/${worship.id}`, { name: 'Choir' }), 201);
+const t2 = gl2.url.split('/guest/')[1];
+const wrong = gl2.code === '123456' ? '654321' : '123456';
+for (let i = 0; i < 8; i++) await guest('POST', `/api/guest/${t2}/unlock`, { code: wrong });
+ok(await guest('POST', `/api/guest/${t2}/unlock`, { code: gl2.code }), 423);
+step('guest links: reopen for a while, scheduled opening, new codes, revoked links refuse, wrong-code lockout');
 
 // ---------- availability, auto-fill, confirmations, shadows ----------
 // Fresh crew for a clean weekend two weeks out
@@ -447,11 +527,12 @@ ok(await admin('POST', '/api/events/weekend', { friday: fri5 }));
 const sab5 = new Date(Date.parse(fri5) + 864e5);
 const nth5 = String(Math.ceil(sab5.getUTCDate() / 7));
 const otherNth = nth5 === '1' ? '2' : '1';
-ok(await admin('PATCH', `/api/people/${dev.id}`, { regulars: [{ week: nth5, service: 'Worship Service', positions: ['light', 'cam'] }, { week: 'bogus', service: '' }] }));
+ok(await ben.c('POST', '/api/me/blackouts', { from: fri5, to: sun5 }), 201);
+ok(await admin('PATCH', `/api/people/${ben.id}`, { regulars: [{ week: nth5, service: 'Vespers', positions: [] }] }));
+const devSaved = ok(await admin('PATCH', `/api/people/${dev.id}`, { regulars: [{ week: nth5, service: 'Worship Service', positions: ['light', 'cam'] }, { week: 'bogus', service: '' }] }));
+assert.ok(devSaved.regularsPlaced >= 1, 'saving a regular schedule places them on weekends already built');
 ok(await admin('PATCH', `/api/people/${cara.id}`, { regulars: [{ week: 'every', service: '', positions: [] }] }));
 ok(await admin('PATCH', `/api/people/${eli.id}`, { regulars: [{ week: otherNth, service: 'Worship Service', positions: [] }] }));
-ok(await admin('PATCH', `/api/people/${ben.id}`, { regulars: [{ week: nth5, service: 'Vespers', positions: [] }] }));
-ok(await ben.c('POST', '/api/me/blackouts', { from: fri5, to: sun5 }), 201);
 const devPerson = ok(await admin('GET', '/api/people')).find((p) => p.id === dev.id);
 assert.equal(devPerson.regulars.length, 2);
 assert.equal(devPerson.regulars[1].week, 'every', 'unknown week patterns fall back to every weekend');
@@ -459,16 +540,57 @@ assert.deepEqual(ok(await dev.c('GET', '/api/bootstrap')).me.regulars[0].positio
 ok(await crew1('PATCH', `/api/people/${dev.id}`, { regulars: [] }), 403);
 ev3 = ok(await admin('GET', `/api/events?from=${fri5}&to=${sun5}`));
 const worship5 = ev3.find((e) => e.title === 'Worship Service');
+const holds = (e, uid) => Object.entries(e.assignments).find(([, a]) => (a.userId || a.user?.id || a.id || a) === uid);
+assert.ok(holds(worship5, dev.id), JSON.stringify(worship5.assignments));
+assert.equal(holds(worship5, dev.id)[0], 'light', 'first listed position is preferred');
+assert.ok(ev3.some((e) => holds(e, cara.id)), 'every-weekend regular placed in any service');
+assert.ok(!ev3.some((e) => holds(e, eli.id)), 'rule for another week does not apply');
+assert.ok(!ev3.some((e) => holds(e, ben.id)), 'away regulars are not placed');
 const af5 = ok(await admin('GET', `/api/weekend/autofill?friday=${fri5}`));
-const devPick = af5.proposals.find((p) => p.userId === dev.id && p.regular);
-assert.ok(devPick, 'regular is placed');
-assert.equal(devPick.eventId, worship5.id);
-assert.equal(devPick.position, 'light', 'first listed position is preferred');
-assert.match(devPick.reason, new RegExp(`Regular: ${['', '1st', '2nd', '3rd', '4th', '5th'][Number(nth5)]} Sabbath`));
-assert.ok(af5.proposals.some((p) => p.userId === cara.id && p.regular), 'every-weekend regular placed in any service');
-assert.ok(!af5.proposals.some((p) => p.userId === eli.id && p.regular), 'rule for another week does not apply');
 assert.ok(af5.regularNotes.some((n) => n.userId === ben.id && /Away/.test(n.why)), 'away regulars are reported');
-step('regular schedules: nth-Sabbath and every-weekend rules, preferred or any position, away regulars reported');
+const devShift = ok(await dev.c('GET', '/api/me/overview')).shifts.find((x) => x.id === worship5.id);
+assert.match(devShift.regular, new RegExp(`${['', '1st', '2nd', '3rd', '4th', '5th'][Number(nth5)]} Sabbath`));
+const devFeed = await client()('GET', new URL(ok(await dev.c('GET', '/api/bootstrap')).me.calUrl).pathname);
+const devIcs = devFeed.data.replace(/\r\n /g, '');
+assert.match(devIcs, /This is your regular .*Sabbath.* shift/, 'calendar says it is their regular shift');
+assert.match(devIcs, /TRIGGER:-P5D/, 'calendar alert 5 days before');
+assert.match(devIcs, /You're on Lighting for Worship Service on Sabbath/);
+ok(await admin('PATCH', '/api/settings', { calendarAlertDays: 0 }));
+assert.doesNotMatch((await client()('GET', new URL(ok(await dev.c('GET', '/api/bootstrap')).me.calUrl).pathname)).data, /TRIGGER:-P\d+D/, 'alert can be turned off');
+ok(await admin('PATCH', '/api/settings', { calendarAlertDays: 5 }));
+step('regular schedules: placed automatically (nth-Sabbath and every-weekend, preferred or any position), away regulars reported, calendar alert and note');
+
+// A regular a leader takes off by hand isn't put back by Sync; a new weekend gets them straight away.
+{
+  ok(await admin('PUT', `/api/events/${worship5.id}/assign/light`, { userId: null }));
+  ok(await admin('POST', '/api/events/weekend', { friday: fri5 }));
+  assert.ok(!holds(ok(await admin('GET', `/api/events?from=${fri5}&to=${sun5}`)).find((e) => e.id === worship5.id), dev.id), 'sync leaves a removed regular off');
+  ok(await admin('PUT', `/api/events/${worship5.id}/assign/light`, { userId: dev.id }));
+  const plus = (iso, n) => new Date(Date.parse(iso) + n * 864e5).toISOString().slice(0, 10);
+  let f = plus(fri5, 7);
+  for (let i = 0; i < 10 && String(Math.ceil(new Date(Date.parse(f) + 864e5).getUTCDate() / 7)) !== nth5; i++) f = plus(f, 7);
+  const bw = ok(await admin('POST', '/api/events/weekend', { friday: f }));
+  assert.ok(bw.regularsPlaced >= 1, JSON.stringify(bw));
+  const built = ok(await admin('GET', `/api/events?from=${f}&to=${plus(f, 2)}`));
+  assert.ok(built.some((e) => e.title === 'Worship Service' && holds(e, dev.id)), `a freshly built weekend gets its regulars (${f})`);
+}
+// Build ahead: weekends a few weeks out are built and regulars placed without anyone pressing a button.
+{
+  ok(await admin('PATCH', '/api/settings', { autoBuildWeeks: 3 }));
+  const r = ok(await admin('POST', '/api/weekend/build-ahead'));
+  assert.ok(r.built >= 0);
+  const thisFri = friday;
+  for (let i = 0; i < 3; i++) {
+    const f = new Date(Date.parse(thisFri) + 7 * i * 864e5).toISOString().slice(0, 10);
+    const evs = ok(await admin('GET', `/api/events?from=${f}&to=${new Date(Date.parse(f) + 2 * 864e5).toISOString().slice(0, 10)}`));
+    assert.ok(evs.length > 0, `weekend of ${f} is built`);
+    assert.ok(evs.some((e) => holds(e, cara.id)), `every-weekend regular placed on ${f}`);
+  }
+  assert.equal(ok(await admin('POST', '/api/weekend/build-ahead')).built, 0, 'nothing built twice');
+  ok(await crew1('POST', '/api/weekend/build-ahead'), 403);
+  ok(await admin('PATCH', '/api/settings', { autoBuildWeeks: 0 }));
+}
+step('build ahead: upcoming weekends are built from the template with regulars placed; Sync never re-adds a regular taken off by hand');
 
 // Template changes reach weekends already built when you sync
 const t0 = ok(await admin('GET', '/api/bootstrap')).settings.weekendTemplate;
@@ -616,5 +738,69 @@ events = ok(await admin('GET', `/api/events?from=${friday}&to=${sunday}`));
 assert.equal(events.find((e) => e.id === vespers.id).assignments.stream, undefined);
 ok(await crew1('GET', '/api/bootstrap'), 401);
 step('deactivating someone signs them out and frees their upcoming shifts');
+
+// ---------- sign-in sessions ----------
+{
+  const SECRET = process.env.JWT_SECRET;
+  const login = async (c, password = 'niapass12') => ok(await c('POST', '/api/auth/login', { email: 'nia@example.com', password }));
+  let st = ok(await admin('GET', '/api/bootstrap')).settings;
+  assert.equal(st.idleMinutes, 90);
+  assert.equal(st.endOnBrowserClose, true);
+  const raw = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'nia@example.com', password: 'niapass12' }) });
+  assert.ok(!/max-age|expires/i.test(raw.headers.get('set-cookie')), 'a browser-session cookie: gone when the browser closes');
+  ok(await admin('PATCH', '/api/settings', { endOnBrowserClose: false }));
+  await new Promise((res) => setTimeout(res, 15500)); // the server caches these rules for 15 s
+  const raw2 = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'nia@example.com', password: 'niapass12' }) });
+  assert.match(raw2.headers.get('set-cookie'), /Max-Age/i, 'stays signed in across restarts when that’s turned off');
+  ok(await admin('PATCH', '/api/settings', { endOnBrowserClose: true, idleMinutes: 5 }));
+  assert.equal(ok(await admin('GET', '/api/bootstrap')).settings.idleMinutes, 15, 'at least 15 minutes');
+  ok(await crew2('PATCH', '/api/settings', { idleMinutes: 0 }), 403);
+
+  // Sign out everywhere
+  const phone = client();
+  const laptop = client();
+  await login(phone);
+  await login(laptop);
+  ok(await phone('POST', '/api/account/sign-out-everywhere'), 204);
+  r = ok(await laptop('GET', '/api/bootstrap'), 401);
+  assert.match(r.error, /signed out/);
+  ok(await phone('GET', '/api/bootstrap'), 401);
+  step('sessions: browser-close cookie setting, sign out on all devices');
+
+  // Admin signs one person out, then everyone else
+  await login(phone);
+  ok(await phone('POST', `/api/people/${n.person.id}/sign-out`), 403);
+  ok(await admin('POST', `/api/people/${n.person.id}/sign-out`), 204);
+  ok(await phone('GET', '/api/bootstrap'), 401);
+  await login(phone);
+  const everyone = ok(await admin('POST', '/api/settings/sign-out-everyone'));
+  assert.ok(everyone.signedOut >= 1);
+  ok(await phone('GET', '/api/bootstrap'), 401);
+  ok(await admin('GET', '/api/bootstrap'), 200, 'the admin stays signed in');
+  step('sessions: the admin can sign one person or everyone else out');
+
+  // Idle timeout (15 minutes now). Background checks don't keep a session alive.
+  await login(phone);
+  const real = jwt.decode(decodeURIComponent(phone.cookie().split('=')[1]));
+  const forge = (minutesAgo) => `cc_session=${jwt.sign({ uid: real.uid, sv: real.sv, la: Math.floor(Date.now() / 1000) - minutesAgo * 60 }, SECRET, { expiresIn: '30d' })}`;
+  phone.cookie(forge(5));
+  r = await phone.bg('GET', '/api/plans/pending');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('set-cookie'), null, 'a background check doesn’t count as activity');
+  r = await phone('GET', '/api/account/ping');
+  assert.equal(r.status, 204);
+  assert.ok(r.headers.get('set-cookie'), 'real activity refreshes the session');
+  phone.cookie(forge(16));
+  r = ok(await phone('GET', '/api/bootstrap'), 401);
+  assert.match(r.error, /15 minutes without activity/);
+  // Changing your password signs out your other devices, not this one
+  await login(phone);
+  await login(laptop);
+  ok(await phone('POST', '/api/account/password', { current: 'niapass12', password: 'niapass34' }), 204);
+  ok(await phone('GET', '/api/bootstrap'));
+  ok(await laptop('GET', '/api/bootstrap'), 401);
+  ok(await admin('PATCH', '/api/settings', { idleMinutes: 90 }));
+  step('sessions: idle timeout, background checks don’t extend it, a password change signs out other devices');
+}
 
 console.log('\nAll checks passed.');

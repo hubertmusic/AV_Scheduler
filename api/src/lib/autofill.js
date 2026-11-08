@@ -7,21 +7,33 @@ import { describeWeek, matchesWeek } from './regulars.js';
  * Proposes people for every open spot on a weekend. Nothing is saved.
  * Rules: trained for the position, active, not away / marked unavailable, not already
  * on that service, under their monthly limit. Among those, it prefers people with the
- * fewest shifts this weekend, then on the same day, then over the last 8 weeks, then
+ * fewest shifts this weekend, then on the same day, then this month, then over the last 8 weeks, then
  * whoever served longest ago. A sound check prefers whoever has that position on its service.
+ * A service with no Lead yet prefers someone who's a Lead on that position.
+ *
+ * opts (used by the month planner, which plans on a draft instead of the saved schedule):
+ *   draft:   [{ eventId, position, userId }] stands in for the saved assignments
+ *   monthly: { 'YYYY-MM': { userId: shifts } } stands in for the saved monthly counts
+ *   dates:   [from, to] plans those days instead of the weekend (weekday services; regulars,
+ *            which are weekend rules, don't apply)
  */
-export async function planAutofill(friday) {
-  const events = await Event.find({ date: { $gte: friday, $lte: addDays(friday, 2) } }).sort({ date: 1, start: 1 }).lean();
+export async function planAutofill(friday, opts = {}) {
+  const [from, to] = opts.dates || [friday, addDays(friday, 2)];
+  const events = await Event.find({ date: { $gte: from, $lte: to } }).sort({ date: 1, start: 1 }).lean();
   if (!events.length) return { proposals: [], unfilled: [], regularNotes: [] };
-  const [people, asg, unav, away, recent] = await Promise.all([
+  const evIds = new Set(events.map((e) => String(e._id)));
+  const [people, saved, unav, away, recent] = await Promise.all([
     User.find({ active: true }).lean(),
-    Assignment.find({ event: { $in: events.map((e) => e._id) } }).lean(),
+    opts.draft ? [] : Assignment.find({ event: { $in: events.map((e) => e._id) } }).lean(),
     unavailableByEvent(events),
     awayByEvent(events),
     recentLoad(friday, 56),
   ]);
+  const asg = opts.draft ? opts.draft.filter((a) => evIds.has(String(a.eventId))).map((a) => ({ event: a.eventId, position: a.position, user: a.userId })) : saved;
   const months = [...new Set(events.map((e) => e.date.slice(0, 7)))];
-  const monthly = Object.fromEntries(await Promise.all(months.map(async (m) => [m, await monthCounts(`${m}-01`)])));
+  const monthly = Object.fromEntries(await Promise.all(months.map(async (m) => [m, opts.monthly?.[m] ? { ...opts.monthly[m] } : await monthCounts(`${m}-01`)])));
+  const personById = Object.fromEntries(people.map((p) => [String(p._id), p]));
+  const leadOn = {}; // eventId -> true once someone who's a Lead on their position is on it
 
   const holder = {}; // "eventId|pos" -> userId
   const onEvent = {}; // eventId -> Set(userId)
@@ -33,6 +45,7 @@ export async function planAutofill(friday) {
     holder[`${eid}|${pos}`] = uid;
     (onEvent[eid] ||= new Set()).add(uid);
     if (isShadow(pos)) return;
+    if (personById[uid]?.leads?.includes(pos)) leadOn[eid] = true;
     weekend[uid] = (weekend[uid] || 0) + 1;
     (sameDay[e.date] ||= {})[uid] = (sameDay[e.date][uid] || 0) + 1;
   };
@@ -41,6 +54,7 @@ export async function planAutofill(friday) {
     if (!e) continue;
     holder[`${e._id}|${a.position}`] = String(a.user);
     (onEvent[String(e._id)] ||= new Set()).add(String(a.user));
+    if (!isShadow(a.position) && personById[String(a.user)]?.leads?.includes(a.position)) leadOn[String(e._id)] = true;
     if (!isShadow(a.position)) {
       weekend[String(a.user)] = (weekend[String(a.user)] || 0) + 1;
       (sameDay[e.date] ||= {})[String(a.user)] = (sameDay[e.date][String(a.user)] || 0) + 1;
@@ -73,7 +87,7 @@ export async function planAutofill(friday) {
   //    Their job can vary: they get whichever of their positions is open (scarcest first),
   //    or the first open one from the positions the rule lists.
   const ruleEntries = [];
-  for (const p of people) for (const r of p.regulars || []) if (matchesWeek(r, friday)) ruleEntries.push({ p, r });
+  if (!opts.dates) for (const p of people) for (const r of p.regulars || []) if (matchesWeek(r, friday)) ruleEntries.push({ p, r });
   ruleEntries.sort((a, b) => (b.r.positions.length ? 1 : 0) - (a.r.positions.length ? 1 : 0));
   const services = events.filter((e) => (e.kind || 'service') === 'service');
   for (const { p, r } of ruleEntries) {
@@ -140,7 +154,10 @@ export async function planAutofill(friday) {
     if (!pick) {
       const score = (p) => {
         const uid = String(p._id);
-        return (weekend[uid] || 0) * 100 + (sameDay[e.date]?.[uid] || 0) * 40 + (recent.count[uid] || 0) * 5;
+        const lead = !leadOn[String(e._id)] && p.leads?.includes(pos) ? -60 : 0;
+        const m = e.date.slice(0, 7);
+        const month = (monthly[m]?.[uid] || 0) + (added[m]?.[uid] || 0); // spreads shifts across the month
+        return (weekend[uid] || 0) * 100 + (sameDay[e.date]?.[uid] || 0) * 40 + month * 25 + (recent.count[uid] || 0) * 5 + lead;
       };
       list.sort((a, b) => score(a) - score(b) || (recent.last[String(a._id)] || '').localeCompare(recent.last[String(b._id)] || '') || a.name.localeCompare(b.name));
       pick = list[0];
@@ -148,6 +165,7 @@ export async function planAutofill(friday) {
       const w = weekend[String(pick._id)] || 0;
       reason = `${w ? `${w} other shift${w === 1 ? '' : 's'} this weekend · ` : ''}${n} shift${n === 1 ? '' : 's'} in the last 8 weeks`;
     }
+    if (!leadOn[String(e._id)] && pick.leads?.includes(pos)) reason = `Lead on this position · ${reason}`;
     const uid = String(pick._id);
     add(e, pos, uid);
     const m = e.date.slice(0, 7);

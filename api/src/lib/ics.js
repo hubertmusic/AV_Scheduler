@@ -1,4 +1,7 @@
+import { DateTime } from 'luxon';
 import { localToDate } from './util.js';
+
+const dayWord = (date, tz) => DateTime.fromISO(date, { zone: tz }).toFormat('cccc, LLL d').replace('Saturday', 'Sabbath');
 
 const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 
@@ -33,7 +36,7 @@ function fold(line) {
  * items: [{ uid, event, positionLabel, crew, updatedAt }]
  * Each calendar entry starts at the call time so people arrive on time.
  */
-export function buildCalendar({ name, tz, items, link = '' }) {
+export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
   const now = fmt(new Date());
   const lines = [
     'BEGIN:VCALENDAR',
@@ -55,6 +58,7 @@ export function buildCalendar({ name, tz, items, link = '' }) {
     const top = [...(it.notices || []), e.notes ? `IMPORTANT FOR THIS SHIFT: ${e.notes}` : ''].filter(Boolean);
     const body = [
       `${it.positionLabel} for ${e.title}.`,
+      it.viaRegular ? `This is your regular ${it.viaRegular} shift.` : '',
       `Call time ${e.call}, ${isCheck ? 'sound check' : 'service'} starts ${e.start}.`,
       it.groups ? `${isCheck ? 'Sound checking' : 'With'}: ${it.groups}` : '',
       it.crew ? `Crew: ${it.crew}` : '',
@@ -73,6 +77,15 @@ export function buildCalendar({ name, tz, items, link = '' }) {
       ...(link ? [`URL:${link}`] : []),
       'STATUS:CONFIRMED',
       'TRANSP:OPAQUE',
+      ...(alertDays > 0
+        ? [
+            'BEGIN:VALARM',
+            'ACTION:DISPLAY',
+            `DESCRIPTION:${esc(`You're on ${it.positionLabel} for ${e.title} on ${dayWord(e.date, tz)}`)}`,
+            `TRIGGER:-P${alertDays}D`,
+            'END:VALARM',
+          ]
+        : []),
       'BEGIN:VALARM',
       'ACTION:DISPLAY',
       `DESCRIPTION:${esc(`Call time for ${e.title}`)}`,

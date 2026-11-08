@@ -37,7 +37,7 @@ export function ActivityTicker({ onOpen }) {
     if (!show) return undefined;
     let alive = true;
     const load = () =>
-      api('/activity/feed?limit=12')
+      api('/activity/feed?limit=12', { background: true })
         .then((list) => alive && setItems(list))
         .catch(() => {});
     load();
@@ -116,11 +116,11 @@ export default function Activity() {
   const [sort, setSort] = useState('seen');
   const [more, setMore] = useState(true);
 
-  const loadRows = useCallback(() => api('/activity/people').then(setRows).catch(() => setRows([])), []);
+  const loadRows = useCallback((bg) => api('/activity/people', { background: bg === true }).then(setRows).catch(() => setRows([])), []);
   const query = useCallback((before) => `/activity/feed?limit=60${kind ? `&kind=${kind}` : ''}${who ? `&user=${who}` : ''}${before ? `&before=${encodeURIComponent(before)}` : ''}`, [kind, who]);
 
-  const loadFeed = useCallback(async () => {
-    const list = await api(query()).catch(() => []);
+  const loadFeed = useCallback(async (bg) => {
+    const list = await api(query(), { background: bg === true }).catch(() => []);
     setFeed(list);
     setMore(list.length === 60);
   }, [query]);
@@ -131,8 +131,8 @@ export default function Activity() {
   useEffect(() => {
     loadFeed();
     const id = setInterval(() => {
-      loadFeed();
-      loadRows();
+      loadFeed(true);
+      loadRows(true);
     }, 20000);
     return () => clearInterval(id);
   }, [loadFeed, loadRows]);

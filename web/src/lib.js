@@ -9,7 +9,14 @@ export function setViewAs(id) {
 }
 export const previewing = () => Boolean(viewAsId);
 
-export async function api(path, { method = 'GET', body } = {}) {
+// The server signed this browser out (idle timeout, "sign out everywhere", …). App.jsx shows sign-in.
+export function signalSignedOut(message) {
+  window.dispatchEvent(new CustomEvent('cc:signed-out', { detail: message || 'Please sign in again.' }));
+}
+
+// background: a check the app makes on its own (badges, live feed). It doesn't count as
+// activity, so it won't keep an idle session from timing out.
+export async function api(path, { method = 'GET', body, background = false } = {}) {
   if (viewAsId && method !== 'GET' && path !== '/activity/view') {
     const err = new Error('This is a preview, so nothing is saved. Exit the preview to make changes.');
     err.status = 403;
@@ -19,6 +26,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   if (viewAsId && path === '/activity/view') return null;
   const headers = body !== undefined ? { 'Content-Type': 'application/json' } : {};
   if (viewAsId) headers['X-View-As'] = viewAsId;
+  if (background) headers['X-Background'] = '1';
   const res = await fetch('/api' + path, {
     method,
     headers,
@@ -29,16 +37,18 @@ export async function api(path, { method = 'GET', body } = {}) {
   if (!res.ok) {
     const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
+    if (res.status === 401 && !path.startsWith('/auth/') && !path.startsWith('/guest/') && path !== '/bootstrap') signalSignedOut(err.message);
     throw err;
   }
   return data;
 }
 
 // Multipart upload with progress (fetch can't report upload progress).
-export function uploadFiles(path, files, { field = 'files', onProgress } = {}) {
+export function uploadFiles(path, files, { field = 'files', onProgress, extra = {} } = {}) {
   if (viewAsId) return Promise.reject(Object.assign(new Error('This is a preview, so nothing is saved. Exit the preview to make changes.'), { status: 403, preview: true }));
   return new Promise((resolve, reject) => {
     const fd = new FormData();
+    for (const [k, v] of Object.entries(extra)) fd.append(k, v); // fields first, so the server has them with the files
     for (const f of files) fd.append(field, f, f.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api' + path);
@@ -53,6 +63,7 @@ export function uploadFiles(path, files, { field = 'files', onProgress } = {}) {
       }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
       else {
+        if (xhr.status === 401 && !path.startsWith('/guest/')) signalSignedOut(data?.error);
         const msg = xhr.status === 413 && !data?.error ? 'That file is too big to upload.' : data?.error || `Upload failed (${xhr.status})`;
         const err = new Error(msg);
         err.status = xhr.status;
@@ -71,25 +82,16 @@ export function fmtSize(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
+// "Fri, Nov 13, 6:00 PM"
+export function fmtWhen(iso) {
+  return new Date(iso).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 export function fmtDateTime(iso) {
   return new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 }
 
 // Public-domain translations from bible-api.com (it allows browser requests).
-export const BIBLE_VERSIONS = [
-  { id: 'kjv', label: 'KJV' },
-  { id: 'web', label: 'WEB' },
-  { id: 'asv', label: 'ASV' },
-  { id: 'ylt', label: 'YLT' },
-  { id: 'darby', label: 'Darby' },
-];
-export async function lookUpBible(reference, version = 'kjv') {
-  const res = await fetch(`https://bible-api.com/${encodeURIComponent(reference)}?translation=${version}`);
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.verses) throw new Error(data?.error || 'Couldn’t find that passage. Check the reference, e.g. John 3:16-17.');
-  const text = data.verses.map((v) => `${v.verse} ${v.text.replace(/\s+/g, ' ').trim()}`).join(' ');
-  return { reference: data.reference, text };
-}
 
 // ---------- dates (YYYY-MM-DD strings, treated as calendar days) ----------
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -120,6 +122,11 @@ export function fmtDay(s) {
   const d = parseDay(s);
   return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
+// "Nov 7, 2026"
+export function fmtDate(s) {
+  const d = parseDay(s);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}
 export const dowShort = (s) => SHORT[parseDay(s).getUTCDay()];
 export const dayNum = (s) => String(parseDay(s).getUTCDate());
 export function weekendLabel(fri) {
@@ -140,6 +147,21 @@ export function addMinutes(t, n) {
   const total = Math.min(23 * 60 + 59, Math.max(0, h * 60 + m + n));
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
+// Order of service: when each line starts (from the service start), when it all ends, total minutes
+export function orderTimes(start, items) {
+  let t = start || '00:00';
+  let total = 0;
+  const at = items.map((it) => {
+    const here = t;
+    const n = it.kind === 'heading' ? 0 : Number(it.minutes) || 0;
+    t = addMinutes(t, n);
+    total += n;
+    return here;
+  });
+  return { at, end: t, total };
+}
+export const fmtMinutes = (n) => (n >= 60 ? `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}` : `${n} min`);
+
 export function ago(iso) {
   if (!iso) return '';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;

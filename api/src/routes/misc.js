@@ -2,7 +2,7 @@ import { config } from '../config.js';
 import { Router } from 'express';
 import { IANAZone } from 'luxon';
 import { Assignment, Blackout, Event, EVENT_KINDS, Group, Position, Request, Resource, Unavailable, User } from '../models.js';
-import { requireAdmin, requirePerm } from '../auth.js';
+import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
 import { addDays, bad, conflict, DATE_RE, getSettings, isHttpUrl, isId, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { eventView, groupView, meView, personView, requestView } from '../lib/views.js';
 import { cleanGroupIds } from './events.js';
@@ -10,6 +10,7 @@ import { announcementsFor, noticeLinesFor } from './announcements.js';
 import { buildCalendar } from '../lib/ics.js';
 import { awayByEvent, baseOf, isShadow, touchAvailability } from '../lib/availability.js';
 import { mailerReady, sendMail } from '../lib/mailer.js';
+import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
 
 const settingsView = (s) => ({
@@ -17,9 +18,14 @@ const settingsView = (s) => ({
   timezone: s.timezone,
   countryCode: s.countryCode,
   groupLink: s.groupLink,
+  logo: s.logo ? `/api/public/logo?v=${s.logoAt ? s.logoAt.getTime() : 0}` : '',
   weekendTemplate: s.weekendTemplate,
   reminderEmails: s.reminderEmails,
   reminderDays: s.reminderDays,
+  calendarAlertDays: s.calendarAlertDays ?? 5,
+  autoBuildWeeks: s.autoBuildWeeks ?? 4,
+  idleMinutes: s.idleMinutes ?? 90,
+  endOnBrowserClose: s.endOnBrowserClose ?? true,
   emailConfigured: mailerReady(),
 });
 
@@ -83,7 +89,7 @@ meRouter.get('/overview', wrap(async (req, res) => {
       const holder = slotHolder[key];
       if (holder === String(me._id)) {
         const a = mine[key];
-        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null });
+        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null });
       } else if (!isShadow(pos) && !holder && me.positions.includes(pos) && !unav.has(eid) && !isAway(eid) && !onEvent[eid]) {
         pickups.push({ ...eventView(e), position: pos, pending: pending[key] === 'pickup' });
       }
@@ -197,7 +203,14 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
   }
   if (b.reminderEmails !== undefined) s.reminderEmails = !!b.reminderEmails;
   if (b.reminderDays !== undefined) s.reminderDays = Math.max(1, Math.min(7, Math.round(Number(b.reminderDays) || 2)));
+  if (b.calendarAlertDays !== undefined) s.calendarAlertDays = Math.max(0, Math.min(14, Math.round(Number(b.calendarAlertDays) || 0)));
+  if (b.autoBuildWeeks !== undefined) s.autoBuildWeeks = Math.max(0, Math.min(12, Math.round(Number(b.autoBuildWeeks) || 0)));
   if (b.countryCode !== undefined) s.countryCode = String(b.countryCode).replace(/\D/g, '').slice(0, 4);
+  if (b.idleMinutes !== undefined) {
+    const n = Math.round(Number(b.idleMinutes) || 0);
+    s.idleMinutes = n <= 0 ? 0 : Math.max(15, Math.min(720, n));
+  }
+  if (b.endOnBrowserClose !== undefined) s.endOnBrowserClose = !!b.endOnBrowserClose;
   if (b.groupLink !== undefined) {
     const link = normalizeUrl(str(b.groupLink, 300));
     if (link && !isHttpUrl(link)) throw bad('The group link should start with https://');
@@ -227,7 +240,42 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
     s.weekendTemplate = rows;
   }
   await s.save();
+  forgetSessionRules();
   res.json(settingsView(s));
+}));
+
+// Sign everyone except the admin out on every device
+// Church logo for the bulletin (PNG, JPEG or WebP, up to 3 MB)
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+settingsRouter.post('/logo', requireAdmin, uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
+  const [f] = filesOf(req);
+  if (!f) throw bad('Choose an image.');
+  if (!LOGO_TYPES.includes(f.mimetype) || f.size > 3 * 1024 * 1024) {
+    removeUploads([f]);
+    throw bad('Use a PNG, JPEG or WebP image up to 3 MB.');
+  }
+  const s = await getSettings();
+  if (s.logo) deleteStored(s.logo);
+  s.logo = f.filename;
+  s.logoAt = new Date();
+  await s.save();
+  res.locals.activity = 'Changed the bulletin logo';
+  res.json(settingsView(s));
+}));
+settingsRouter.delete('/logo', requireAdmin, wrap(async (req, res) => {
+  const s = await getSettings();
+  if (s.logo) deleteStored(s.logo);
+  s.logo = '';
+  s.logoAt = null;
+  await s.save();
+  res.locals.activity = 'Removed the bulletin logo';
+  res.json(settingsView(s));
+}));
+
+settingsRouter.post('/sign-out-everyone', requireAdmin, wrap(async (req, res) => {
+  const n = await signOutUsers({ _id: { $ne: req.user._id } });
+  await logActivity({ user: req.user, kind: 'system', action: `Signed everyone else out on all devices (${n} account${n === 1 ? '' : 's'})`, req });
+  res.json({ signedOut: n });
 }));
 
 settingsRouter.post('/test-email', requireAdmin, wrap(async (req, res) => {
@@ -320,8 +368,9 @@ calRouter.get('/:file', wrap(async (req, res) => {
     crew: (crewBy[String(a.event._id)] || []).join(', '),
     groups: (a.event.groups || []).map((g) => g?.name).filter(Boolean).join(', '),
     updatedAt: a.updatedAt,
+    viaRegular: a.viaRegular || '',
   }));
-  const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s shifts`, tz: s.timezone, items, link: `${config.publicUrl}/#mine` });
+  const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s shifts`, tz: s.timezone, items, link: `${config.publicUrl}/#mine`, alertDays: s.calendarAlertDays ?? 5 });
   res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-cache, max-age=0', 'Content-Disposition': 'inline; filename="shifts.ics"' });
   res.send(body);
 }));

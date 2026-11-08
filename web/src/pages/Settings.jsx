@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, unsaved } from '../lib.js';
+import { api, unsaved, uploadFiles } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
@@ -19,7 +19,9 @@ export default function Settings() {
         </div>
         <div className="side-col stack-lg">
           <Reminders />
+          <SignIn />
           <General />
+          <BulletinLogo />
           <Positions />
         </div>
       </div>
@@ -50,11 +52,76 @@ function useSaver() {
   return { busy, error, run };
 }
 
+function SignIn() {
+  const app = useApp();
+  const { settings } = app;
+  const [idle, setIdle] = useState(String(settings.idleMinutes ?? 90));
+  const [onClose, setOnClose] = useState(settings.endOnBrowserClose ?? true);
+  const { busy, error, run } = useSaver();
+  const everyone = async () => {
+    if (!window.confirm('Sign everyone except you out on all their devices? They’ll need their passwords to sign in again.')) return;
+    try {
+      const r = await api('/settings/sign-out-everyone', { method: 'POST' });
+      app.toast(`Signed out ${r.signedOut} ${r.signedOut === 1 ? 'person' : 'people'}`);
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const choices = [
+    ['30', '30 minutes'],
+    ['60', '1 hour'],
+    ['90', '90 minutes'],
+    ['120', '2 hours'],
+    ['240', '4 hours'],
+    ['0', 'Never'],
+  ];
+  if (!choices.some(([v]) => v === idle)) choices.unshift([idle, `${idle} minutes`]);
+  return (
+    <section className="card stack" aria-label="Sign-in">
+      <h2>Sign-in</h2>
+      <label className="field">
+        <span>Sign people out after no activity for</span>
+        <select value={idle} onChange={(e) => setIdle(e.target.value)}>
+          {choices.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={onClose} onChange={(e) => setOnClose(e.target.checked)} />
+        Sign people out when they close the browser
+      </label>
+      <p className="muted small">
+        Some browsers reopen your last tabs after a restart and keep you signed in; the no-activity limit still signs those out. Changes apply the next time someone signs in or opens a page.
+      </p>
+      {error && <div className="error" role="alert">{error}</div>}
+      <button
+        type="button"
+        className="btn btn-primary self-start"
+        disabled={busy}
+        onClick={() => run(() => api('/settings', { method: 'PATCH', body: { idleMinutes: Number(idle), endOnBrowserClose: onClose } }), 'Sign-in settings saved')}
+      >
+        Save
+      </button>
+      <div className="stack-sm divider-top">
+        <h3>Sign everyone out</h3>
+        <p className="muted small">Signs every crew member and leader out on all their devices. You stay signed in. One person at a time: Team &amp; roles → their name → Sign out everywhere.</p>
+        <button type="button" className="btn btn-danger self-start" onClick={everyone}>
+          Sign everyone else out
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function Reminders() {
   const app = useApp();
   const { settings } = app;
   const [on, setOn] = useState(settings.reminderEmails);
   const [days, setDays] = useState(settings.reminderDays);
+  const [alertDays, setAlertDays] = useState(settings.calendarAlertDays ?? 5);
   const { busy, error, run } = useSaver();
   const [note, setNote] = useState('');
   const test = async () => {
@@ -100,9 +167,21 @@ function Reminders() {
         </select>
       </label>
       <p className="muted small">Each person gets one email per shift: call time, crew, songs, a Confirm link and their Quick review link.</p>
+      <label className="field field-row">
+        <span className="small">Calendar alert</span>
+        <select value={alertDays} onChange={(e) => setAlertDays(Number(e.target.value))}>
+          <option value={0}>Off</option>
+          {[1, 2, 3, 4, 5, 6, 7, 10, 14].map((n) => (
+            <option key={n} value={n}>
+              {n} day{n === 1 ? '' : 's'} before
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">An alert on each shift in people’s synced calendars (“You’re on FOH Audio for Worship Service on Sabbath, Oct 31”), plus one an hour before call time.</p>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="row-wrap">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { reminderEmails: on, reminderDays: days } }), 'Reminder settings saved')}>
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { reminderEmails: on, reminderDays: days, calendarAlertDays: alertDays } }), 'Reminder settings saved')}>
           Save
         </button>
         {settings.emailConfigured && (
@@ -155,6 +234,36 @@ function General() {
       <button type="button" className="btn btn-primary self-start" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: f }), 'Settings saved')}>
         Save
       </button>
+    </section>
+  );
+}
+
+// Church logo at the top of the congregation's bulletin
+function BulletinLogo() {
+  const { settings } = useApp();
+  const { busy, error, run } = useSaver();
+  const pick = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) run(() => uploadFiles('/settings/logo', [f], { field: 'file' }), 'Logo saved');
+  };
+  return (
+    <section className="card stack" aria-label="Bulletin logo">
+      <h2>Bulletin logo</h2>
+      <p className="muted small">Shown at the top of the congregation’s bulletin, on screen and printed. PNG, JPEG or WebP up to 3 MB; a wide logo on a white or clear background works best.</p>
+      {settings.logo ? <img className="logo-preview" src={settings.logo} alt="Current bulletin logo" /> : <div className="logo-preview logo-empty small muted">No logo yet</div>}
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="row-wrap">
+        <label className={`btn btn-outline btn-sm${busy ? ' disabled' : ''}`}>
+          {settings.logo ? 'Replace logo' : 'Upload logo'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={pick} />
+        </label>
+        {settings.logo && (
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => run(() => api('/settings/logo', { method: 'DELETE' }), 'Logo removed')}>
+            Remove
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -226,6 +335,34 @@ function Positions() {
   );
 }
 
+// Build weekends from the template ahead of time, so regulars land on calendars early.
+function PlanAhead() {
+  const app = useApp();
+  const [weeks, setWeeks] = useState(app.settings.autoBuildWeeks ?? 4);
+  const { busy, error, run } = useSaver();
+  const change = (n) => {
+    setWeeks(n);
+    run(() => api('/settings', { method: 'PATCH', body: { autoBuildWeeks: n } }), n ? `Weekends will be built ${n} week${n === 1 ? '' : 's'} ahead` : 'Weekends won’t be built automatically');
+  };
+  return (
+    <div className="plan-ahead stack-xs">
+      <label className="field field-row">
+        <span className="small strong">Build weekends automatically</span>
+        <select value={weeks} disabled={busy} onChange={(e) => change(Number(e.target.value))}>
+          <option value={0}>Off — build each one by hand</option>
+          {[1, 2, 3, 4, 6, 8, 12].map((n) => (
+            <option key={n} value={n}>
+              {n} week{n === 1 ? '' : 's'} ahead
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">Crew Call builds each weekend from this template that far ahead and places everyone with a regular schedule, so it shows on their calendar early. Everyone else is still placed by you or Auto-fill. Skipped weekends and services stay skipped.</p>
+      {error && <div className="error" role="alert">{error}</div>}
+    </div>
+  );
+}
+
 function Template() {
   const { settings, positions, groups } = useApp();
   const fromSettings = () => settings.weekendTemplate.map((t) => ({ ...t, kind: t.kind || 'service', needs: [...t.needs], groups: (t.groups || []).map(String), off: Boolean(t.off) }));
@@ -261,6 +398,7 @@ function Template() {
           “Build this weekend” on the Schedule creates these services and sound checks. Turn a service <strong>off</strong> to stop using it without losing its settings. For a weekend that’s already built, press <strong>Sync with template</strong> on the Schedule: it adds missing services, offers to update ones you changed here, and offers to take off ones you removed or turned off.
         </p>
       </div>
+      <PlanAhead />
       {dirty && (
         <div className="warn-box row-wrap spread">
           <span>You have unsaved changes to the template.</span>

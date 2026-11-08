@@ -10,10 +10,31 @@ import { deviceFrom, logActivity, touchSeen } from './lib/activity.js';
 
 const COOKIE = 'cc_session';
 const MAX_AGE = 30 * 24 * 3600 * 1000;
+const now = () => Math.floor(Date.now() / 1000);
 
-function setSession(res, user) {
-  const t = jwt.sign({ uid: String(user._id) }, config.jwtSecret, { expiresIn: '30d' });
-  res.cookie(COOKIE, t, { httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, maxAge: MAX_AGE, path: '/' });
+// Session rules (idle timeout, end on browser close) change rarely; don't read them on every request.
+let rulesCache = { at: 0, idleMinutes: 90, endOnBrowserClose: true };
+async function sessionRules() {
+  if (Date.now() - rulesCache.at > 15000) {
+    const s = await getSettings();
+    rulesCache = { at: Date.now(), idleMinutes: s.idleMinutes ?? 90, endOnBrowserClose: s.endOnBrowserClose ?? true };
+  }
+  return rulesCache;
+}
+export const forgetSessionRules = () => (rulesCache.at = 0);
+
+// The token carries the person's session version (raise it to sign them out everywhere) and
+// when they were last active (`la`), for the idle timeout.
+async function setSession(res, user) {
+  const rules = await sessionRules();
+  const t = jwt.sign({ uid: String(user._id), sv: user.sessionVersion || 0, la: now() }, config.jwtSecret, { expiresIn: '30d' });
+  // Without maxAge the cookie only lasts until the browser is closed.
+  res.cookie(COOKIE, t, { httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, path: '/', ...(rules.endOnBrowserClose ? {} : { maxAge: MAX_AGE }) });
+}
+
+function signedOut(res, msg) {
+  res.clearCookie(COOKIE, { path: '/' });
+  return new HttpError(401, msg);
 }
 
 // Loads the signed-in user into req.user, or answers 401.
@@ -28,6 +49,14 @@ export const requireAuth = wrap(async (req, res, next) => {
   }
   const user = await User.findById(payload.uid);
   if (!user || !user.active || !user.passwordHash) throw new HttpError(401, 'Please sign in.');
+  if ((payload.sv || 0) !== (user.sessionVersion || 0)) throw signedOut(res, 'You were signed out. Please sign in again.');
+  const rules = await sessionRules();
+  const idle = now() - (payload.la || payload.iat || 0);
+  if (rules.idleMinutes > 0 && idle > rules.idleMinutes * 60) {
+    throw signedOut(res, `You were signed out after ${rules.idleMinutes} minutes without activity. Please sign in again.`);
+  }
+  // Activity keeps the session going. Background checks (badges, the live ticker) don't.
+  if (idle >= 60 && req.get('x-background') !== '1') await setSession(res, user);
   req.user = user;
   req.can = can(user);
   await touchSeen(user);
@@ -109,7 +138,7 @@ authRouter.post('/setup', loginLimiter, wrap(async (req, res) => {
     positions: DEFAULT_POSITIONS.map((p) => p.key),
     calToken: token(),
   });
-  setSession(res, user);
+  await setSession(res, user);
   await noteLogin(user, req, 'Set up Crew Call');
   res.status(201).json({ me: meView(user) });
 }));
@@ -122,7 +151,7 @@ authRouter.post('/login', loginLimiter, wrap(async (req, res) => {
     if (user) await logActivity({ user, kind: 'login-failed', action: 'Wrong password at sign-in', req });
     throw new HttpError(401, 'That email and password don’t match.');
   }
-  setSession(res, user);
+  await setSession(res, user);
   await noteLogin(user, req, 'Signed in');
   res.json({ me: meView(user) });
 }));
@@ -148,7 +177,7 @@ authRouter.post('/invite/:token', loginLimiter, wrap(async (req, res) => {
   user.inviteExpires = undefined;
   if (!user.calToken) user.calToken = token();
   await user.save();
-  setSession(res, user);
+  await setSession(res, user);
   await noteLogin(user, req, 'Accepted their invite and set a password');
   res.json({ me: meView(user) });
 }));
@@ -160,9 +189,29 @@ accountRouter.post('/password', wrap(async (req, res) => {
   if (!ok) throw bad('Your current password isn’t right.');
   checkPassword(req.body.password);
   req.user.passwordHash = await bcrypt.hash(req.body.password, 12);
+  req.user.sessionVersion = (req.user.sessionVersion || 0) + 1; // other devices sign in again
   await req.user.save();
+  await setSession(res, req.user); // this one stays signed in
   res.status(204).end();
 }));
+
+// Sign out on every device, this one included
+accountRouter.post('/sign-out-everywhere', wrap(async (req, res) => {
+  if (req.previewing) throw forbidden('Exit the preview first.');
+  await User.updateOne({ _id: req.user._id }, { $inc: { sessionVersion: 1 } });
+  await logActivity({ user: req.user, kind: 'login', action: 'Signed out on all devices', req });
+  res.clearCookie(COOKIE, { path: '/' });
+  res.status(204).end();
+}));
+
+// Keeps a session alive while someone is working on a page without saving anything
+accountRouter.get('/ping', (req, res) => res.status(204).end());
+
+// Admin: sign one person, or everyone except the admin, out on every device
+export async function signOutUsers(filter) {
+  const r = await User.updateMany(filter, { $inc: { sessionVersion: 1 } });
+  return r.modifiedCount ?? r.nModified ?? 0;
+}
 
 accountRouter.patch('/', wrap(async (req, res) => {
   const s = await getSettings();
