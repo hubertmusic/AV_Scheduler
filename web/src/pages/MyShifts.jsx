@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, dayNum, dowShort, fmtDay, fmtTime, TYPE_LABEL, describeRule } from '../lib.js';
+import { addDays, api, dayNum, dowShort, fmtDay, fmtTime, TYPE_LABEL, describeRule, todayISO } from '../lib.js';
 import { Empty, Icon, StatusChip, useApp } from '../ui.jsx';
 import { Notices, noticesFor } from '../notices.jsx';
+import { DebriefPrompt, featureOn, ReportProblem, ShiftChecklist, SignOffButton } from './Extras.jsx';
+import { LiveView } from './Live.jsx';
 
 export default function MyShifts() {
   const app = useApp();
@@ -10,6 +12,8 @@ export default function MyShifts() {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [liveId, setLiveId] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -64,9 +68,17 @@ export default function MyShifts() {
           <h1>My shifts</h1>
           <div className="muted">Trained on {me.positions.map(posLabel).join(', ') || 'nothing yet — ask a team leader'}</div>
         </div>
+        {featureOn(app, 'problems') && (
+          <button type="button" className="btn btn-outline" onClick={() => setReporting(true)}>
+            Report a problem
+          </button>
+        )}
       </div>
+      {reporting && <ReportProblem onClose={() => setReporting(false)} />}
+      {liveId && <LiveView eventId={liveId} onClose={() => setLiveId(null)} />}
       <div className="split">
         <div className="stack-lg main-col">
+          {featureOn(app, 'debrief') && <DebriefPrompt />}
           <section className="card stack" aria-label="Upcoming shifts">
             <h2>Upcoming</h2>
             {data.shifts.length === 0 && <Empty>You’re not on the schedule yet. Pick up an open shift below.</Empty>}
@@ -118,7 +130,14 @@ export default function MyShifts() {
                     <button type="button" className="btn btn-soft" onClick={() => { app.setResFilter(s.position); app.goTab('resources'); }}>
                       <Icon name="doc" size={16} /> Quick review
                     </button>
+                    {featureOn(app, 'liveShow') && s.date === todayISO() && s.kind !== 'soundcheck' && (
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setLiveId(s.id)}>
+                        Live rundown
+                      </button>
+                    )}
+                    {featureOn(app, 'signoffs') && s.learner && <SignOffButton shift={s} onDone={load} />}
                   </div>
+                  {featureOn(app, 'checklists') && s.date <= addDays(todayISO(), 1) && <ShiftChecklist eventId={s.id} position={s.position} />}
                 </div>
               </div>
             ))}

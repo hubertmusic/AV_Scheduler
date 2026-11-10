@@ -172,6 +172,34 @@ export function RundownPage({ token }) {
         )}
       </div>
 
+      {d.inputs?.length > 0 && (
+        <section className="rs-block">
+          <h2>Inputs</h2>
+          <table className="rd-table">
+            <thead>
+              <tr>
+                <th scope="col">Ch</th>
+                <th scope="col">Source</th>
+                <th scope="col">Mic / DI</th>
+                <th scope="col">Stand</th>
+                <th scope="col">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.inputs.map((r, i) => (
+                <tr key={i}>
+                  <td className="rd-time">{r.ch}</td>
+                  <td>{r.source}</td>
+                  <td>{r.mic}</td>
+                  <td>{r.stand}</td>
+                  <td className="small">{r.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       {d.scriptures.length > 0 && (
         <section className="rs-block">
           <h2>Bible texts</h2>

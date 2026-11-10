@@ -17,6 +17,7 @@ import { boardsRouter } from './routes/boards.js';
 import { standingRouter } from './routes/standing.js';
 import { templatesRouter } from './routes/templates.js';
 import { gearRouter } from './routes/gear.js';
+import { checklistsRouter, debriefRouter, issuesRouter, signoffsRouter } from './routes/extras.js';
 import { plannerRouter } from './routes/planner.js';
 import { libraryRouter } from './routes/library.js';
 import { academyRouter } from './routes/academy.js';
@@ -68,6 +69,10 @@ app.use('/api/boards', boardsRouter);
 app.use('/api/standing-links', standingRouter);
 app.use('/api/order-templates', templatesRouter);
 app.use('/api/gear', gearRouter);
+app.use('/api/checklists', checklistsRouter);
+app.use('/api/issues', issuesRouter);
+app.use('/api/debrief', debriefRouter);
+app.use('/api/signoffs', signoffsRouter);
 app.use('/api/planner', plannerRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));

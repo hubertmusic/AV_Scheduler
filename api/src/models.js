@@ -212,6 +212,8 @@ const settingsSchema = new Schema({
   groupLink: { type: String, default: '' }, // WhatsApp group invite link, optional
   logo: { type: String, default: '' }, // stored file name of the church logo (bulletin)
   streamFooter: { type: String, default: '' }, // added to every livestream description
+  features: { type: Schema.Types.Mixed, default: {} }, // extra features the admin turned on (Settings → Extra features)
+  checklists: { type: Schema.Types.Mixed, default: {} }, // { positionKey: ['Check mic batteries', …] }
   burnoutWeeks: { type: Number, default: 4 }, // warn after this many weekends in a row (0 = off)
   logoAt: { type: Date, default: null },
   weekendTemplate: { type: [templateItem], default: [] },
@@ -277,6 +279,9 @@ const planSchema = new Schema(
     assets: [ref('Media')], // media library items used in this service (backgrounds, countdowns…)
     order: { type: [orderItemSchema], default: [] }, // order of service (optional)
     announcements: { type: String, default: '' }, // bulletin only
+    // Live run-of-show: { startedAt, index, itemAt, endedAt, log: [{ index, title, at }] }
+    live: { type: Schema.Types.Mixed, default: null },
+    inputs: { type: [Schema.Types.Mixed], default: [] }, // input list: [{ ch, source, mic, stand, notes }]
     // Share links: the rundown is for the platform and crew, the bulletin for the congregation.
     rundownToken: { type: String, index: true, sparse: true },
     bulletinToken: { type: String, index: true, sparse: true },
@@ -443,6 +448,63 @@ const gearLogSchema = new Schema(
   { timestamps: true }
 );
 export const GearLog = model('GearLog', gearLogSchema);
+
+// Pre-service checklist ticks: one per service, position and item
+const checklistTickSchema = new Schema(
+  {
+    event: { ...ref('Event'), required: true },
+    position: { type: String, required: true },
+    item: { type: String, required: true },
+    user: ref('User'),
+  },
+  { timestamps: true }
+);
+checklistTickSchema.index({ event: 1, position: 1, item: 1 }, { unique: true });
+export const ChecklistTick = model('ChecklistTick', checklistTickSchema);
+
+// Problem reports: the fix list
+const issueSchema = new Schema(
+  {
+    title: { type: String, required: true },
+    details: { type: String, default: '' },
+    event: ref('Event'),
+    gear: ref('Gear'),
+    reportedBy: ref('User'),
+    status: { type: String, enum: ['open', 'fixed'], default: 'open' },
+    fixedBy: ref('User'),
+    fixedAt: Date,
+    fixNote: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
+export const Issue = model('Issue', issueSchema);
+
+// After-service check-in, one per person per service
+const debriefSchema = new Schema(
+  {
+    event: { ...ref('Event'), required: true },
+    user: { ...ref('User'), required: true },
+    wentWell: { type: String, default: '' },
+    problems: { type: String, default: '' },
+    ideas: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
+debriefSchema.index({ event: 1, user: 1 }, { unique: true });
+export const Debrief = model('Debrief', debriefSchema);
+
+// A Lead (or the admin) signing off a learner on a position
+const signOffSchema = new Schema(
+  {
+    user: { ...ref('User'), required: true, index: true },
+    position: { type: String, required: true },
+    by: ref('User'),
+    event: ref('Event'),
+    note: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
+export const SignOff = model('SignOff', signOffSchema);
 export const Song = model('Song', songSchema);
 export const Media = model('Media', mediaSchema);
 export const GuestLink = model('GuestLink', guestLinkSchema);

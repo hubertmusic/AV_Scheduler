@@ -22,6 +22,7 @@ import Gear from './pages/Gear.jsx';
 const Planning = lazy(() => import('./pages/Planning.jsx'));
 import { BulletinPage, RundownPage } from './pages/Share.jsx';
 import { WeeklyRedirect } from './pages/WeeklyLinks.jsx';
+import { StagePage } from './pages/Live.jsx';
 
 // Signs out after `minutes` without a click, tap or key press, and tells the server
 // someone's still here while they work on a page without saving.
@@ -57,7 +58,7 @@ export default function App() {
   const guestToken = useMemo(() => window.location.pathname.match(/^\/guest\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
   // Public rundown / bulletin links (no sign-in)
-  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly)\/([A-Za-z0-9_-]+)/), []);
+  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage)\/([A-Za-z0-9_-]+)/), []);
   const [phase, setPhase] = useState(inviteToken ? 'invite' : 'loading');
   const [boot, setBoot] = useState(null);
   const [orgName, setOrgName] = useState('');
@@ -148,7 +149,13 @@ export default function App() {
   };
 
   if (guestToken) return <Guest token={guestToken} />;
-  if (shared) return shared[1] === 'rundown' ? <RundownPage token={shared[2]} /> : shared[1] === 'weekly' ? <WeeklyRedirect token={shared[2]} /> : <BulletinPage token={shared[2]} />;
+  if (shared) {
+    const [, kind, t] = shared;
+    if (kind === 'rundown') return <RundownPage token={t} />;
+    if (kind === 'weekly') return <WeeklyRedirect token={t} />;
+    if (kind === 'stage') return <StagePage token={t} />;
+    return <BulletinPage token={t} />;
+  }
   if (phase === 'invite') return <Invite token={inviteToken} onDone={finishInvite} />;
   if (phase === 'setup') return <Setup onDone={load} />;
   if (phase === 'login')

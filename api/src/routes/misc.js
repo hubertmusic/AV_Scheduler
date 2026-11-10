@@ -10,6 +10,7 @@ import { announcementsFor, noticeLinesFor } from './announcements.js';
 import { buildCalendar } from '../lib/ics.js';
 import { awayByEvent, baseOf, isShadow, touchAvailability } from '../lib/availability.js';
 import { mailerReady, sendMail } from '../lib/mailer.js';
+import { FEATURES } from '../lib/features.js';
 import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
 
@@ -19,6 +20,8 @@ const settingsView = (s) => ({
   countryCode: s.countryCode,
   groupLink: s.groupLink,
   streamFooter: s.streamFooter,
+  features: Object.fromEntries(FEATURES.map((k) => [k, !!s.features?.[k]])),
+  checklists: s.checklists || {},
   burnoutWeeks: s.burnoutWeeks ?? 4,
   logo: s.logo ? `/api/public/logo?v=${s.logoAt ? s.logoAt.getTime() : 0}` : '',
   weekendTemplate: s.weekendTemplate,
@@ -91,7 +94,9 @@ meRouter.get('/overview', wrap(async (req, res) => {
       const holder = slotHolder[key];
       if (holder === String(me._id)) {
         const a = mine[key];
-        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null });
+        // A learner shadowing this spot, for a Lead (or the admin) to sign off
+        const learner = !isShadow(pos) && (me.role === 'admin' || me.leads?.includes(pos)) ? slotHolder[`${eid}|${pos}+shadow`] || null : null;
+        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null, learner });
       } else if (!isShadow(pos) && !holder && me.positions.includes(pos) && !unav.has(eid) && !isAway(eid) && !onEvent[eid]) {
         pickups.push({ ...eventView(e), position: pos, pending: pending[key] === 'pickup' });
       }
@@ -214,6 +219,22 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
   }
   if (b.endOnBrowserClose !== undefined) s.endOnBrowserClose = !!b.endOnBrowserClose;
   if (b.streamFooter !== undefined) s.streamFooter = str(b.streamFooter, 2000);
+  if (b.features !== undefined) {
+    if (typeof b.features !== 'object' || !b.features) throw bad('Features must be on or off.');
+    s.features = { ...(s.features || {}), ...Object.fromEntries(FEATURES.filter((k) => k in b.features).map((k) => [k, !!b.features[k]])) };
+    s.markModified('features');
+  }
+  if (b.checklists !== undefined) {
+    if (typeof b.checklists !== 'object' || !b.checklists) throw bad('Checklists are invalid.');
+    const keys = new Set((await Position.find({}).lean()).map((p) => p.key));
+    s.checklists = Object.fromEntries(
+      Object.entries(b.checklists)
+        .filter(([k, v]) => keys.has(k) && Array.isArray(v))
+        .map(([k, v]) => [k, [...new Set(v.map((x) => str(x, 120)).filter(Boolean))].slice(0, 30)])
+        .filter(([, v]) => v.length)
+    );
+    s.markModified('checklists');
+  }
   if (b.burnoutWeeks !== undefined) {
     const n = Number(b.burnoutWeeks);
     if (!Number.isInteger(n) || n < 0 || n > 12) throw bad('Weekends in a row must be 0 (off) to 12.');
