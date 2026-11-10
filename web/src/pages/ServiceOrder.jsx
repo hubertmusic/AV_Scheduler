@@ -3,7 +3,7 @@
 // printable page.
 import { useEffect, useState } from 'react';
 import { api, fmtDate, fmtMinutes, fmtTime, orderTimes } from '../lib.js';
-import { Empty, Icon, useApp } from '../ui.jsx';
+import { Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { Qr, qrPng } from '../qr.jsx';
 
 export const KIND_LABEL = { item: 'Item', song: 'Song', scripture: 'Scripture', prayer: 'Prayer', sermon: 'Sermon', heading: 'Heading' };
@@ -67,6 +67,35 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
     if (!add.length) return app.toast('Everything from this plan is already in the order');
     setItems([...items, ...add]);
   };
+
+  const [templates, setTemplates] = useState([]);
+  const [savingTpl, setSavingTpl] = useState(false);
+  const loadTemplates = () => api('/order-templates').then(setTemplates, () => {});
+  useEffect(() => {
+    if (canEdit) loadTemplates();
+  }, [canEdit]);
+  const applyTemplate = async (id) => {
+    if (!id) return;
+    if (dirty) return app.toast('Save or discard your changes first');
+    setBusy(true);
+    try {
+      setPlan(await api(`/plans/${ev.id}/order/template/${id}`, { method: 'POST' }));
+      app.toast('Template added');
+    } catch (e) {
+      app.toast(e.message);
+    }
+    setBusy(false);
+  };
+  const templatePicker = templates.length > 0 && (
+    <select className="oos-tpl" aria-label="Add a template" value="" disabled={busy} onChange={(e) => applyTemplate(e.target.value)}>
+      <option value="">{items.length ? 'Add a template…' : 'Start from a template…'}</option>
+      {templates.map((t) => (
+        <option key={t.id} value={t.id}>
+          {t.name} ({t.order.length} line{t.order.length === 1 ? '' : 's'})
+        </option>
+      ))}
+    </select>
+  );
 
   const copyLast = async () => {
     setBusy(true);
@@ -145,6 +174,7 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
           <button type="button" className="btn btn-outline" disabled={busy} onClick={copyLast}>
             Copy last week’s
           </button>
+          {templatePicker}
         </div>
       )}
       {items.length > 0 && (
@@ -202,7 +232,14 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
             Add songs, Bible texts and sermon from this plan
           </button>
         )}
+        {items.length > 0 && templatePicker}
+        {items.length > 0 && (
+          <button type="button" className="btn btn-ghost" onClick={() => setSavingTpl(true)}>
+            Save as template…
+          </button>
+        )}
       </div>
+      {savingTpl && <SaveTemplate ev={ev} order={clean(items)} templates={templates} onClose={() => setSavingTpl(false)} onSaved={() => (setSavingTpl(false), loadTemplates())} />}
       {dirty && (
         <div className="row-wrap">
           <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>
@@ -214,6 +251,79 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
         </div>
       )}
     </section>
+  );
+}
+
+function SaveTemplate({ ev, order, templates, onClose, onSaved }) {
+  const app = useApp();
+  const auto = templates.find((t) => t.serviceTitle === ev.title);
+  const [name, setName] = useState(auto?.name || ev.title);
+  const [useAuto, setUseAuto] = useState(!auto || auto.name === (auto?.name || ev.title));
+  const [busy, setBusy] = useState(false);
+  const replacing = templates.find((t) => t.name.toLowerCase() === name.trim().toLowerCase());
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await api('/order-templates', { method: 'POST', body: { name: name.trim(), serviceTitle: useAuto ? ev.title : '', order } });
+      app.toast(replacing ? 'Template updated' : 'Template saved');
+      onSaved();
+    } catch (err) {
+      app.toast(err.message);
+      setBusy(false);
+    }
+  };
+  const remove = async (t) => {
+    try {
+      await api(`/order-templates/${t.id}`, { method: 'DELETE' });
+      app.toast(`Deleted “${t.name}”`);
+      onSaved();
+    } catch (err) {
+      app.toast(err.message);
+    }
+  };
+  return (
+    <Modal title="Save as a template" onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <label className="field">
+          <span>Template name</span>
+          <input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        {replacing && <p className="small muted">This replaces the saved template “{replacing.name}”.</p>}
+        <label className="check check-top">
+          <input type="checkbox" checked={useAuto} onChange={(e) => setUseAuto(e.target.checked)} />
+          <span>
+            Start every new <strong>{ev.title}</strong> plan from this
+            {auto && auto.name !== name.trim() ? <span className="small muted block">Instead of “{auto.name}”.</span> : null}
+          </span>
+        </label>
+        <p className="small muted">Saves the {order.length} line{order.length === 1 ? '' : 's'} with who, minutes and cues. Plans that already exist don’t change.</p>
+        <div className="row-wrap">
+          <button className="btn btn-primary" disabled={busy || !name.trim()}>
+            {busy ? 'Saving…' : 'Save template'}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+        {templates.length > 0 && (
+          <div className="stack-xs divider-top">
+            <div className="label-sm">Saved templates</div>
+            {templates.map((t) => (
+              <div key={t.id} className="row-wrap tpl-row">
+                <span className="grow small">
+                  <strong>{t.name}</strong> · {t.order.length} line{t.order.length === 1 ? '' : 's'}
+                  {t.serviceTitle ? ` · used for new ${t.serviceTitle} plans` : ''}
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(t)}>
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </form>
+    </Modal>
   );
 }
 
@@ -266,6 +376,11 @@ export function ShareCard({ plan, canEdit, canPlans, onSave, setPlan }) {
         <label className="field">
           <span>Announcements (bulletin only)</span>
           <textarea rows={4} value={ann} maxLength={5000} placeholder="Potluck after church, prayer meeting Wednesday 7 PM…" onChange={(e) => setAnn(e.target.value)} />
+          {ann === plan.announcements && plan.announcements.trim() && (
+            <a className="btn btn-ghost btn-sm oos-slides" href={`/api/plans/${plan.event.id}/announcements.pptx`}>
+              Download as slides (.pptx) for ProPresenter
+            </a>
+          )}
           {ann !== plan.announcements && (
             <div className="row-wrap">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={saveAnn}>
@@ -363,5 +478,77 @@ function ShareBlock({ plan, which, title, badge, badgeTone, blurb, canPlans, set
         </div>
       )}
     </div>
+  );
+}
+
+// Livestream: a YouTube title and description written from the plan, with chapter times taken from
+// the order of service (its planned minutes, or the times logged live when available)
+const stamp = (sec) => {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(Math.floor(sec % 60)).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+};
+export function streamChapters(order, actual) {
+  const lines = order.filter((x) => x.kind !== 'heading');
+  if (actual?.length) {
+    const first = actual[0].at;
+    return actual.map((a) => ({ at: Math.max(0, Math.round((new Date(a.at) - new Date(first)) / 1000)), title: a.title }));
+  }
+  if (!lines.some((x) => x.minutes > 0)) return [];
+  let t = 0;
+  return lines.map((x) => {
+    const c = { at: t * 60, title: x.title };
+    t += Number(x.minutes) || 0;
+    return c;
+  });
+}
+
+export function LivestreamCard({ plan }) {
+  const app = useApp();
+  const ev = plan.event;
+  const org = app.settings.orgName || '';
+  const chapters = streamChapters(plan.order, plan.live?.log);
+  const okChapters = chapters.length >= 3 && chapters.every((c, i) => i === 0 || c.at - chapters[i - 1].at >= 10);
+  const title = [plan.sermonTitle ? `“${plan.sermonTitle}”` : ev.title, plan.speaker, org].filter(Boolean).join(' | ');
+  const lines = [
+    `${ev.title} · ${fmtDate(ev.date)}${org ? ` · ${org}` : ''}`,
+    plan.sermonTitle || plan.speaker ? `\n${plan.sermonTitle ? `Sermon: “${plan.sermonTitle}”` : 'Sermon'}${plan.speaker ? ` — ${plan.speaker}` : ''}` : '',
+    plan.scriptures.length ? `\nScripture: ${plan.scriptures.map((x) => x.reference + (x.version ? ` (${x.version})` : '')).join('; ')}` : '',
+    plan.songs.length ? `\nSongs: ${plan.songs.map((x) => x.song.title).join(', ')}` : '',
+    okChapters ? `\nChapters\n${chapters.map((c) => `${stamp(c.at)} ${c.title}`).join('\n')}` : '',
+    app.settings.streamFooter ? `\n${app.settings.streamFooter}` : '',
+  ];
+  const description = lines.filter(Boolean).join('\n');
+  const copy = (text, what) => navigator.clipboard.writeText(text).then(() => app.toast(`${what} copied`), () => app.toast('Couldn’t copy; select the text instead'));
+  return (
+    <section className="card stack" aria-label="Livestream">
+      <div>
+        <h3>Livestream</h3>
+        <p className="small muted">A title and description for YouTube or Facebook, written from this plan. Copy them when you upload or schedule the stream.</p>
+      </div>
+      <div className="field">
+        <span className="label-sm">Title</span>
+        <div className="ls-box">{title}</div>
+        <div className="row-wrap">
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => copy(title, 'Title')}>
+            Copy title
+          </button>
+          {title.length > 100 && <span className="small danger">YouTube titles max out at 100 characters ({title.length} now).</span>}
+        </div>
+      </div>
+      <div className="field">
+        <span className="label-sm">Description</span>
+        <div className="ls-box rs-pre">{description}</div>
+        <div className="row-wrap">
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => copy(description, 'Description')}>
+            Copy description
+          </button>
+          {!okChapters && <span className="small muted">Add minutes to at least three lines of the order of service to get chapter markers.</span>}
+          {okChapters && plan.live?.log?.length > 0 && <span className="small muted">Chapter times come from when each part actually started.</span>}
+        </div>
+      </div>
+      {!app.settings.streamFooter && app.me.role === 'admin' && <p className="small muted">Tip: add a standard ending (website, giving link) under Settings → Bulletin and livestream.</p>}
+    </section>
   );
 }

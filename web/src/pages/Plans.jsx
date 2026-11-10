@@ -4,18 +4,22 @@ import { BibleFields } from '../scripture.jsx';
 import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
-import { OrderOfService, ShareCard } from './ServiceOrder.jsx';
+import { LivestreamCard, OrderOfService, ShareCard } from './ServiceOrder.jsx';
+import WeeklyLinks from './WeeklyLinks.jsx';
 
 const VIEWS = [
   { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
   { id: 'archive', tab: 'Archive', title: 'Archive', blurb: 'Past services, read-only. Search them, and copy anything you need into this week.' },
   { id: 'songs', tab: 'Songs', title: 'Song library', blurb: 'Every song the team uses, with lyrics, .pro files and when it was last sung.' },
   { id: 'media', tab: 'Media', title: 'Media library', blurb: 'Backgrounds, countdowns and logo loops you use every week. Services link to these instead of uploading them again.' },
+  { id: 'weekly', tab: 'Weekly links', title: 'Weekly links', blurb: 'A permanent link and code for people who send things every week, like your pastor or worship leader. It always opens the next service.', plans: true },
 ];
 
 export default function Plans() {
+  const app = useApp();
   const [view, setView] = useState('plans');
-  const v = VIEWS.find((x) => x.id === view);
+  const views = VIEWS.filter((x) => !x.plans || app.can.plans);
+  const v = views.find((x) => x.id === view) || views[0];
   return (
     <div className="stack-lg">
       <div className="page-head">
@@ -24,8 +28,8 @@ export default function Plans() {
           <div className="muted">{v.blurb}</div>
         </div>
         <div className="seg" role="group" aria-label="View">
-          {VIEWS.map((x) => (
-            <button key={x.id} type="button" aria-pressed={view === x.id} onClick={() => setView(x.id)}>
+          {views.map((x) => (
+            <button key={x.id} type="button" aria-pressed={v.id === x.id} onClick={() => setView(x.id)}>
               {x.tab}
             </button>
           ))}
@@ -35,6 +39,7 @@ export default function Plans() {
       {view === 'archive' && <ArchiveBrowser />}
       {view === 'songs' && <SongLibrary />}
       {view === 'media' && <MediaLibrary />}
+      {v.id === 'weekly' && <WeeklyLinks />}
     </div>
   );
 }
@@ -392,6 +397,7 @@ function PlanEditor({ eventId, onChanged }) {
       <Songs plan={plan} canEdit={canEdit} onSave={patch} reload={load} />
       <MediaSection plan={plan} canEdit={canEdit} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
       {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
+      {ev.kind !== 'soundcheck' && <LivestreamCard plan={plan} />}
       {canEdit && <Guests plan={plan} eventId={eventId} reload={load} />}
       {copying && <CopyModal plan={plan} onClose={() => setCopying(false)} />}
     </div>

@@ -22,6 +22,7 @@ export default function Settings() {
           <SignIn />
           <General />
           <BulletinLogo />
+          <BurnoutWatch />
           <Positions />
         </div>
       </div>
@@ -238,18 +239,20 @@ function General() {
   );
 }
 
-// Church logo at the top of the congregation's bulletin
+// Church logo at the top of the congregation's bulletin, and the standard livestream ending
 function BulletinLogo() {
   const { settings } = useApp();
   const { busy, error, run } = useSaver();
+  const [footer, setFooter] = useState(settings.streamFooter || '');
   const pick = (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (f) run(() => uploadFiles('/settings/logo', [f], { field: 'file' }), 'Logo saved');
   };
   return (
-    <section className="card stack" aria-label="Bulletin logo">
-      <h2>Bulletin logo</h2>
+    <section className="card stack" aria-label="Bulletin and livestream">
+      <h2>Bulletin and livestream</h2>
+      <div className="label-sm">Bulletin logo</div>
       <p className="muted small">Shown at the top of the congregation’s bulletin, on screen and printed. PNG, JPEG or WebP up to 3 MB; a wide logo on a white or clear background works best.</p>
       {settings.logo ? <img className="logo-preview" src={settings.logo} alt="Current bulletin logo" /> : <div className="logo-preview logo-empty small muted">No logo yet</div>}
       {error && <div className="error" role="alert">{error}</div>}
@@ -264,6 +267,38 @@ function BulletinLogo() {
           </button>
         )}
       </div>
+      <label className="field divider-top">
+        <span>End of every livestream description</span>
+        <textarea rows={3} maxLength={2000} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder={'Website: …\nGive online: …\nPrayer requests: …'} />
+      </label>
+      {footer !== (settings.streamFooter || '') && (
+        <button type="button" className="btn btn-primary btn-sm self-start" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { streamFooter: footer } }), 'Saved')}>
+          Save
+        </button>
+      )}
+    </section>
+  );
+}
+
+// Burnout watch: flag people who've served several weekends in a row
+function BurnoutWatch() {
+  const { settings } = useApp();
+  const { busy, run } = useSaver();
+  const n = settings.burnoutWeeks ?? 4;
+  return (
+    <section className="card stack" aria-label="Burnout watch">
+      <h2>Burnout watch</h2>
+      <p className="muted small">Flags anyone serving this many weekends in a row, on Team &amp; roles and in the month planner, so you can give them a break or say thanks.</p>
+      <label className="field">
+        <span>Flag after</span>
+        <select value={n} disabled={busy} onChange={(e) => run(() => api('/settings', { method: 'PATCH', body: { burnoutWeeks: Number(e.target.value) } }), 'Saved')}>
+          {[0, 2, 3, 4, 5, 6, 8].map((x) => (
+            <option key={x} value={x}>
+              {x === 0 ? 'Off' : `${x} weekends in a row`}
+            </option>
+          ))}
+        </select>
+      </label>
     </section>
   );
 }

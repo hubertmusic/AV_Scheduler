@@ -171,3 +171,35 @@ export async function buildServicePptx(ev, plan, media, orgName = '') {
   const buffer = await pres.write({ outputType: 'nodebuffer' });
   return { buffer, skipped };
 }
+
+/**
+ * Announcements as slides for the pre-service loop: a title slide, then one slide per
+ * announcement. Announcements are separated by a blank line; with no blank lines, each line is one.
+ */
+export async function buildAnnouncementsPptx(ev, text, orgName = '') {
+  const pres = new pptxgen();
+  pres.layout = 'LAYOUT_WIDE';
+  pres.title = `Announcements — ${ev.title}, ${ev.date}`;
+  pres.company = orgName || 'Crew Call';
+  pres.defineSlideMaster({ title: 'SCREEN', background: { color: '000000' } });
+  const clean = text.replace(/\r/g, '').trim();
+  const items = (/\n\s*\n/.test(clean) ? clean.split(/\n\s*\n/) : clean.split('\n')).map((x) => x.trim()).filter(Boolean);
+
+  const t = pres.addSlide({ masterName: 'SCREEN' });
+  t.addText('Announcements', { x: 0.8, y: 2.4, w: W - 1.6, h: 1.4, fontFace: FONT, fontSize: 54, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle' });
+  t.addText([orgName, fmtDate(ev.date)].filter(Boolean).join(' · '), { x: 0.8, y: 3.9, w: W - 1.6, h: 0.7, fontFace: FONT, fontSize: 24, color: 'A0A0A0', align: 'center' });
+
+  for (const item of items) {
+    const [first, ...rest] = item.split('\n');
+    const s = pres.addSlide({ masterName: 'SCREEN' });
+    if (rest.length) {
+      // First line is the heading, the rest the details
+      s.addText(first, { x: 0.8, y: 1.0, w: W - 1.6, h: 1.4, fontFace: FONT, fontSize: 44, bold: true, color: 'FFFFFF', align: 'center', valign: 'bottom', fit: 'shrink' });
+      s.addText(rest.join('\n'), { x: 0.8, y: 2.7, w: W - 1.6, h: H - 3.6, fontFace: FONT, fontSize: 30, color: 'E0E0E0', align: 'center', valign: 'top', fit: 'shrink', lineSpacingMultiple: 1.15 });
+    } else {
+      s.addText(first, { x: 0.8, y: 1.2, w: W - 1.6, h: H - 2.4, fontFace: FONT, fontSize: 44, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fit: 'shrink', lineSpacingMultiple: 1.1 });
+    }
+    s.addText(orgName || 'Announcements', { x: 0.6, y: H - 0.7, w: W - 1.2, h: 0.4, fontFace: FONT, fontSize: 12, color: '707070', align: 'left', margin: 0 });
+  }
+  return pres.write({ outputType: 'nodebuffer' });
+}

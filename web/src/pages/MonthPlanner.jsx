@@ -2,7 +2,7 @@
 // on every service, and a draft of placements. Nothing reaches the schedule (or anyone's phone)
 // until Apply.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, firstName, fmtDay, fmtTime, todayISO, waLink } from '../lib.js';
+import { addDays, api, firstName, fmtDay, fmtTime, fridayOf, todayISO, waLink } from '../lib.js';
 import { Empty, useApp } from '../ui.jsx';
 
 const SHADOW = '+shadow';
@@ -72,6 +72,29 @@ export default function MonthPlanner() {
       const lead = e.needs.some((k) => person[draft[keyOf(e.id, k)]]?.leads.includes(k));
       return { ...e, open, lead, rows: new Set(rowsFor(e)) };
     });
+    // Burnout watch: longest run of weekends in a row this month, carrying on from before it
+    const weekendOf = (date) => ([5, 6, 0].includes(new Date(`${date}T12:00:00`).getDay()) ? fridayOf(date) : null);
+    const dateOf = Object.fromEntries(d.events.map((e) => [e.id, e.date]));
+    const weekends = [...new Set(d.events.map((e) => weekendOf(e.date)).filter(Boolean))].sort();
+    const servedWk = {};
+    for (const [k, uid] of Object.entries(draft)) {
+      const [eid, pos] = k.split('|');
+      const wk = uid && !isShadow(pos) && weekendOf(dateOf[eid]);
+      if (wk) (servedWk[uid] ||= new Set()).add(wk);
+    }
+    const streakOf = (uid) => {
+      let run = d.streakBefore?.[uid] || 0;
+      let best = 0;
+      let prev = addDays(fridayOf(`${d.month}-01`), -7);
+      for (const wk of weekends) {
+        if (addDays(prev, 7) !== wk) run = 0;
+        run = servedWk[uid]?.has(wk) ? run + 1 : 0;
+        best = Math.max(best, run);
+        prev = wk;
+      }
+      return best;
+    };
+    const tired = (uid) => d.burnoutWeeks > 0 && streakOf(uid) >= d.burnoutWeeks;
     const canServe = (p, e) => !off[e.id]?.has(p.id) && e.needs.some((k) => p.positions.includes(k));
     const people = d.people
       .map((p) => {
@@ -87,7 +110,7 @@ export default function MonthPlanner() {
         else if (p.maxPerMonth && n === p.maxPerMonth) status = { tone: 'full', text: 'At their monthly limit' };
         else if (room > 0) status = { tone: 'room', text: `Room for ${room} more` };
         else status = { tone: 'full', text: 'On every service they can do' };
-        return { ...p, avail, n, room, status };
+        return { ...p, avail, n, room, status, streak: streakOf(p.id) };
       })
       .sort((a, b) => b.room - a.room || a.name.localeCompare(b.name));
     const changes = Object.keys({ ...saved, ...draft })
@@ -109,6 +132,7 @@ export default function MonthPlanner() {
       changes,
       open: events.reduce((t, e) => t + e.open, 0),
       noLead: events.filter((e) => e.kind !== 'soundcheck' && e.needs.length && !e.lead).length,
+      tired,
       roomy: people.filter((p) => p.status.tone === 'room').length,
     };
   }, [d, draft]);
@@ -274,7 +298,14 @@ export default function MonthPlanner() {
                     <span className="mp-person-nums small">
                       {p.n} scheduled{p.maxPerMonth ? ` of ${p.maxPerMonth} max` : ''} · available for {p.avail} of {d.events.length}
                     </span>
-                    <span className={`mp-status mp-${p.status.tone}`}>{p.status.text}</span>
+                    <span className="mp-person-flags">
+                      <span className={`mp-status mp-${p.status.tone}`}>{p.status.text}</span>
+                      {d.burnoutWeeks > 0 && p.streak >= d.burnoutWeeks && (
+                        <span className="mp-status mp-over" title="Burnout watch">
+                          {p.streak} weekends in a row
+                        </span>
+                      )}
+                    </span>
                   </button>
                   {focus === p.id && <WhereTheyFit p={p} m={m} draft={draft} onPlace={place} />}
                 </div>
@@ -322,7 +353,7 @@ function SlotSelect({ e, pos, m, draft, focus, onPick }) {
   const list = Object.values(m.person).filter((p) => fits(p) || p.id === uid);
   const levelOf = (p) => (shadow ? (p.trainee.includes(base) ? 'learning' : '') : p.leads.includes(base) ? 'Lead' : '');
   const tag = (p) => {
-    const bits = [levelOf(p), `${m.count[p.id] || 0}${p.maxPerMonth ? `/${p.maxPerMonth}` : ''} this month`].filter(Boolean);
+    const bits = [levelOf(p), `${m.count[p.id] || 0}${p.maxPerMonth ? `/${p.maxPerMonth}` : ''} this month`, m.tired(p.id) && 'many weekends in a row'].filter(Boolean);
     return `${p.name} · ${bits.join(' · ')}`;
   };
   const free = list.filter((p) => p.id === uid || (!off.has(p.id) && !others.has(p.id)));

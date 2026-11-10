@@ -211,6 +211,8 @@ const settingsSchema = new Schema({
   countryCode: { type: String, default: '1' },
   groupLink: { type: String, default: '' }, // WhatsApp group invite link, optional
   logo: { type: String, default: '' }, // stored file name of the church logo (bulletin)
+  streamFooter: { type: String, default: '' }, // added to every livestream description
+  burnoutWeeks: { type: Number, default: 4 }, // warn after this many weekends in a row (0 = off)
   logoAt: { type: Date, default: null },
   weekendTemplate: { type: [templateItem], default: [] },
   reminderEmails: { type: Boolean, default: true },
@@ -344,9 +346,28 @@ const guestLinkSchema = new Schema(
     code: { type: String, default: '' },
     codeVersion: { type: Number, default: 0 }, // raised with each new code, so earlier sign-ins stop working
     codeTries: { type: Number, default: 0 }, // wrong codes in a row
+    standing: ref('StandingLink'), // made by a weekly link for this service
   },
   { timestamps: true }
 );
+
+// A permanent weekly link for someone who sends things every week (pastor, worship leader).
+// Opening it goes to the next matching service's guest page, with a deadline before it.
+const standingLinkSchema = new Schema(
+  {
+    token: { type: String, required: true, unique: true },
+    name: { type: String, required: true, trim: true },
+    note: { type: String, default: '' },
+    serviceTitle: { type: String, default: '' }, // '' = any service
+    deadlineDays: { type: Number, default: 2 }, // days before the service…
+    deadlineTime: { type: String, default: '18:00' }, // …at this time
+    code: { type: String, required: true },
+    revoked: { type: Boolean, default: false },
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const StandingLink = model('StandingLink', standingLinkSchema);
 
 // Anything a guest sends. Nothing reaches the plan until a leader approves it.
 const submissionSchema = new Schema(
@@ -383,6 +404,45 @@ const boardSchema = new Schema(
 export const Board = model('Board', boardSchema);
 
 export const Plan = model('Plan', planSchema);
+
+// A saved order of service. With serviceTitle set, new plans for services of that name start from it.
+const orderTemplateSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    serviceTitle: { type: String, default: '' },
+    order: { type: [orderItemSchema], default: [] },
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const OrderTemplate = model('OrderTemplate', orderTemplateSchema);
+
+// Gear the crew checks out and returns (wireless mics, camera bag, spare batteries…)
+const gearSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    category: { type: String, default: '' },
+    notes: { type: String, default: '' },
+    holder: ref('User'), // who has it now
+    holderName: { type: String, default: '' }, // or someone outside the crew
+    outAt: { type: Date, default: null },
+    attention: { type: String, default: '' }, // what's wrong with it, '' = fine
+    batteryAt: { type: Date, default: null },
+  },
+  { timestamps: true }
+);
+export const Gear = model('Gear', gearSchema);
+
+const gearLogSchema = new Schema(
+  {
+    gear: { ...ref('Gear'), required: true, index: true },
+    action: { type: String, enum: ['out', 'in', 'battery', 'note', 'attention', 'fixed'], required: true },
+    text: { type: String, default: '' },
+    by: ref('User'),
+  },
+  { timestamps: true }
+);
+export const GearLog = model('GearLog', gearLogSchema);
 export const Song = model('Song', songSchema);
 export const Media = model('Media', mediaSchema);
 export const GuestLink = model('GuestLink', guestLinkSchema);

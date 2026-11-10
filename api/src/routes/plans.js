@@ -3,7 +3,7 @@ import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
 import { config } from '../config.js';
-import { Event, GuestLink, Media, Plan, Song, Submission, User } from '../models.js';
+import { Event, GuestLink, Media, OrderTemplate, Plan, Song, Submission, User } from '../models.js';
 import { requirePerm } from '../auth.js';
 import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
@@ -11,7 +11,7 @@ import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '
 import { orderView, readOrder } from '../lib/serviceOrder.js';
 import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
-import { buildServicePptx } from '../lib/pptx.js';
+import { buildAnnouncementsPptx, buildServicePptx } from '../lib/pptx.js';
 import { eventView } from '../lib/views.js';
 import { evName } from '../lib/activity.js';
 import path from 'node:path';
@@ -58,7 +58,10 @@ export async function planFor(eventId) {
   let p = await Plan.findOne({ event: eventId });
   if (!p) {
     try {
-      p = await Plan.create({ event: eventId });
+      // A new plan starts from the order-of-service template for services of this name, if any
+      const ev = await Event.findById(eventId, { title: 1, kind: 1 }).lean();
+      const tpl = ev && ev.kind !== 'soundcheck' ? await OrderTemplate.findOne({ serviceTitle: ev.title }).lean() : null;
+      p = await Plan.create({ event: eventId, order: tpl ? readOrder(tpl.order) : [] });
     } catch {
       p = await Plan.findOne({ event: eventId }); // created by a parallel request
     }
@@ -354,6 +357,32 @@ plansRouter.post('/:eventId/order/copy-last', requirePerm('plans'), wrap(async (
   await plan.save();
   res.locals.activity = `Copied the order of service from ${evName(src)} · ${evName(ev)}`;
   res.json({ ...(await fullPlan(ev, req.can)), copiedFrom: { title: src.title, date: src.date } });
+}));
+
+// POST /api/plans/:eventId/order/template/:id — add a saved template's lines to the order
+plansRouter.post('/:eventId/order/template/:id', requirePerm('plans'), wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  await assertOpen(ev);
+  if (!isId(req.params.id)) throw notFound();
+  const tpl = await OrderTemplate.findById(req.params.id).lean();
+  if (!tpl) throw notFound('That template was deleted.');
+  const plan = await planFor(ev._id);
+  plan.order.push(...readOrder(tpl.order));
+  plan.updatedBy = req.user._id;
+  await plan.save();
+  res.locals.activity = `Added the “${tpl.name}” template to the order of service · ${evName(ev)}`;
+  res.json(await fullPlan(ev, req.can));
+}));
+
+// GET /api/plans/:eventId/announcements.pptx — the bulletin's announcements as slides
+plansRouter.get('/:eventId/announcements.pptx', wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  const plan = await planFor(ev._id);
+  if (!plan.announcements.trim()) throw bad('Add announcements to the plan first.');
+  const buffer = await buildAnnouncementsPptx(ev, plan.announcements, (await getSettings()).orgName);
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+  res.set('Content-Disposition', `attachment; filename="announcements-${ev.date}.pptx"`);
+  res.send(buffer);
 }));
 
 // Put a service archived by hand back on the planning page (only until its Monday).
