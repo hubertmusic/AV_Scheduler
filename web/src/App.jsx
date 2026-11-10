@@ -17,9 +17,11 @@ import Account from './pages/Account.jsx';
 import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
 import RunSheet from './pages/RunSheet.jsx';
+import Gear from './pages/Gear.jsx';
 // The flow-chart library is big, so the Planning tab loads only when opened
 const Planning = lazy(() => import('./pages/Planning.jsx'));
 import { BulletinPage, RundownPage } from './pages/Share.jsx';
+import { WeeklyRedirect } from './pages/WeeklyLinks.jsx';
 
 // Signs out after `minutes` without a click, tap or key press, and tells the server
 // someone's still here while they work on a page without saving.
@@ -55,7 +57,7 @@ export default function App() {
   const guestToken = useMemo(() => window.location.pathname.match(/^\/guest\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
   // Public rundown / bulletin links (no sign-in)
-  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin)\/([A-Za-z0-9_-]+)/), []);
+  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly)\/([A-Za-z0-9_-]+)/), []);
   const [phase, setPhase] = useState(inviteToken ? 'invite' : 'loading');
   const [boot, setBoot] = useState(null);
   const [orgName, setOrgName] = useState('');
@@ -146,7 +148,7 @@ export default function App() {
   };
 
   if (guestToken) return <Guest token={guestToken} />;
-  if (shared) return shared[1] === 'rundown' ? <RundownPage token={shared[2]} /> : <BulletinPage token={shared[2]} />;
+  if (shared) return shared[1] === 'rundown' ? <RundownPage token={shared[2]} /> : shared[1] === 'weekly' ? <WeeklyRedirect token={shared[2]} /> : <BulletinPage token={shared[2]} />;
   if (phase === 'invite') return <Invite token={inviteToken} onDone={finishInvite} />;
   if (phase === 'setup') return <Setup onDone={load} />;
   if (phase === 'login')
@@ -189,6 +191,7 @@ const TABS = [
   { id: 'mine', label: 'My shifts', show: () => true },
   { id: 'plans', label: 'Service plans', show: () => true },
   { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader' },
+  { id: 'gear', label: 'Gear', show: () => true },
   { id: 'requests', label: 'Requests', show: (c) => c.approve },
   { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message },
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
@@ -354,6 +357,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'mine' && <MyShifts />}
         {tab === 'requests' && <Requests />}
         {tab === 'plans' && <Plans />}
+        {tab === 'gear' && <Gear />}
         {tab === 'planning' && (
           <Suspense fallback={<div className="loading-inline">Loading…</div>}>
             <Planning />

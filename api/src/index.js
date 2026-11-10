@@ -14,6 +14,9 @@ import { guestAdminRouter, mediaRouter, plansRouter, songsRouter, submissionsRou
 import { guestRouter } from './routes/guest.js';
 import { publicRouter } from './routes/public.js';
 import { boardsRouter } from './routes/boards.js';
+import { standingRouter } from './routes/standing.js';
+import { templatesRouter } from './routes/templates.js';
+import { gearRouter } from './routes/gear.js';
 import { plannerRouter } from './routes/planner.js';
 import { libraryRouter } from './routes/library.js';
 import { academyRouter } from './routes/academy.js';
@@ -62,6 +65,9 @@ app.use('/api/resources', resourcesRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/positions', positionsRouter);
 app.use('/api/boards', boardsRouter);
+app.use('/api/standing-links', standingRouter);
+app.use('/api/order-templates', templatesRouter);
+app.use('/api/gear', gearRouter);
 app.use('/api/planner', plannerRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));

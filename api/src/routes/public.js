@@ -4,7 +4,8 @@ import path from 'node:path';
 import { Router } from 'express';
 import { config } from '../config.js';
 import rateLimit from 'express-rate-limit';
-import { Event, Plan } from '../models.js';
+import { Event, Plan, StandingLink } from '../models.js';
+import { weeklyGuestLink } from './standing.js';
 import { getSettings, notFound, wrap } from '../lib/util.js';
 import { bulletinData, rundownData } from '../lib/serviceOrder.js';
 
@@ -24,6 +25,17 @@ publicRouter.use(
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const GONE = 'This link doesn’t work any more. Ask the team for the new one.';
+
+// A weekly link: this week's guest page for the next matching service
+publicRouter.get('/weekly/:token', wrap(async (req, res) => {
+  if (!TOKEN_RE.test(req.params.token || '')) throw notFound('This link isn’t valid.');
+  const sl = await StandingLink.findOne({ token: req.params.token, revoked: false });
+  if (!sl) throw notFound('This weekly link was turned off. Ask the team for a new one.');
+  const r = await weeklyGuestLink(sl);
+  if (!r) throw notFound('There’s no upcoming service for this link yet. Try again once the team has scheduled it.');
+  res.set('Cache-Control', 'no-store');
+  res.json({ token: r.guest.token, event: { title: r.ev.title, date: r.ev.date } });
+}));
 
 // The church logo shown on the bulletin
 publicRouter.get('/logo', wrap(async (req, res) => {

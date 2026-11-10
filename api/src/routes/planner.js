@@ -5,10 +5,11 @@ import { Router } from 'express';
 import { DateTime } from 'luxon';
 import { Assignment, Event, Position, User } from '../models.js';
 import { requireAdmin } from '../auth.js';
-import { bad, fridayOf, isId, wrap } from '../lib/util.js';
+import { addDays, bad, fridayOf, getSettings, isId, wrap } from '../lib/util.js';
 import { awayByEvent, baseOf, isShadow, monthCounts, recentLoad, slotValid, unavailableByEvent } from '../lib/availability.js';
 import { planAutofill } from '../lib/autofill.js';
 import { evName } from '../lib/activity.js';
+import { streaksEnding } from '../lib/streaks.js';
 
 export const plannerRouter = Router();
 plannerRouter.use(requireAdmin);
@@ -33,6 +34,8 @@ plannerRouter.get('/month', wrap(async (req, res) => {
     awayByEvent(events),
     recentLoad(range.first, 56),
   ]);
+  // Weekends in a row each person served just before this month (burnout watch)
+  const before = await streaksEnding(addDays(fridayOf(range.first), -7));
   const off = {};
   for (const e of events) {
     const eid = String(e._id);
@@ -45,6 +48,8 @@ plannerRouter.get('/month', wrap(async (req, res) => {
     people: people.map((p) => ({ id: String(p._id), name: p.name, phone: p.phone || '', positions: p.positions || [], trainee: p.trainee || [], leads: (p.leads || []).filter((k) => (p.positions || []).includes(k)), maxPerMonth: p.maxPerMonth || 0, recent: recent.count[String(p._id)] || 0 })),
     unavailable: off,
     assignments: asg.map((a) => ({ eventId: String(a.event), position: a.position, userId: String(a.user), confirmed: !!a.confirmedAt })),
+    streakBefore: before,
+    burnoutWeeks: (await getSettings()).burnoutWeeks ?? 4,
   });
 }));
 

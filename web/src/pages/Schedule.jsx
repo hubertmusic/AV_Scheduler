@@ -554,6 +554,22 @@ function PlacePanel({ event, pos, events, busy, autoNext, setAutoNext, onPlace, 
     })
     .sort((a, b) => a.rank - b.rank || a.load - b.load || a.p.name.localeCompare(b.p.name));
 
+  // Who can cover? Ask free, trained people on WhatsApp before placing anyone
+  const free = cands.filter((c) => !c.warn).map((c) => c.p);
+  const when = `${event.title}, ${fmtDay(event.date)}${event.call ? ` (call ${fmtTime(event.call)})` : ` at ${fmtTime(event.start)}`}`;
+  const ask = (p) =>
+    app.openWa({
+      title: `Ask ${p.name} to cover`,
+      text: `Hi ${firstName(p.name)}, can you cover ${posLabel(pos)} for ${when}? Let me know and I’ll put you on. Thanks!`,
+      recipients: [p],
+    });
+  const askAll = () =>
+    app.openWa({
+      title: `Who can cover ${posLabel(pos)}?`,
+      text: `Can anyone cover ${posLabel(pos)} for ${when}? Reply and I’ll put you on. Thanks!`,
+      recipients: free,
+    });
+
   const remind = () =>
     app.openWa({
       title: `Remind ${cur.name}`,
@@ -594,7 +610,14 @@ function PlacePanel({ event, pos, events, busy, autoNext, setAutoNext, onPlace, 
           </div>
         </div>
       )}
-      <div className="label-sm">Trained on {posLabel(pos)}</div>
+      <div className="row-wrap cover-head">
+        <div className="label-sm grow">{curId ? 'Who can cover?' : `Trained on ${posLabel(pos)}`}</div>
+        {can.message && free.length > 1 && (
+          <button type="button" className="btn btn-outline btn-sm" onClick={askAll}>
+            Ask all {free.length} who are free
+          </button>
+        )}
+      </div>
       {cands.length === 0 && <Empty>No one else is trained for {posLabel(pos)}. Add it to people’s positions on Team &amp; roles.</Empty>}
       <ul className="cand-list">
         {cands.map(({ p, status, warn }) => (
@@ -604,6 +627,11 @@ function PlacePanel({ event, pos, events, busy, autoNext, setAutoNext, onPlace, 
               <strong>{p.name}</strong>
               <span className={`small ${warn ? 'danger' : 'good'}`}>{status}</span>
             </span>
+            {can.message && !warn && p.phone && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => ask(p)}>
+                Ask
+              </button>
+            )}
             <button type="button" className={`btn ${warn ? 'btn-outline' : 'btn-primary'}`} disabled={busy} onClick={() => onPlace(p.id)}>
               {warn ? 'Place anyway' : curId ? 'Replace' : 'Place'}
             </button>

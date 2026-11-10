@@ -7,6 +7,7 @@ import { addDays, bad, conflict, forbidden, getSettings, isId, normalizePhone, n
 import { personView } from '../lib/views.js';
 import { cleanRegulars } from '../lib/regulars.js';
 import { applyRegularsFor } from '../lib/regularsAuto.js';
+import { currentStreaks } from '../lib/streaks.js';
 
 export const peopleRouter = Router();
 
@@ -164,6 +165,8 @@ peopleRouter.get('/load', wrap(async (req, res) => {
       if (!u.next || d < u.next) u.next = d;
     }
   }
+  // Burnout watch: weekends in a row
+  for (const [uid, n] of Object.entries(await currentStreaks(today))) (out[uid] ||= { past90: 0, upcoming: 0, last: null, next: null }).streak = n;
   res.json(out);
 }));
 

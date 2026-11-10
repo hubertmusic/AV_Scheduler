@@ -69,6 +69,11 @@ export default function Team() {
                   <span className="small regular-line">Regular: {p.regulars.map((r) => describeRule(r, posLabel).week.replace(' of the month', '')).join(', ')}</span>
                 )}
               </span>
+              {p.active && app.settings.burnoutWeeks > 0 && load[p.id]?.streak >= app.settings.burnoutWeeks && (
+                <span className="chip chip-pending" title="Burnout watch: consider giving them a weekend off, or say thanks">
+                  {load[p.id].streak} weekends in a row
+                </span>
+              )}
               {p.invited && p.active && <span className="chip chip-pending">Invite pending</span>}
               {!p.active && <span className="chip chip-cancelled">Inactive</span>}
               <span className={`chip role-${p.role}`}>{roleLabel(p)}</span>

@@ -18,6 +18,8 @@ const settingsView = (s) => ({
   timezone: s.timezone,
   countryCode: s.countryCode,
   groupLink: s.groupLink,
+  streamFooter: s.streamFooter,
+  burnoutWeeks: s.burnoutWeeks ?? 4,
   logo: s.logo ? `/api/public/logo?v=${s.logoAt ? s.logoAt.getTime() : 0}` : '',
   weekendTemplate: s.weekendTemplate,
   reminderEmails: s.reminderEmails,
@@ -211,6 +213,12 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
     s.idleMinutes = n <= 0 ? 0 : Math.max(15, Math.min(720, n));
   }
   if (b.endOnBrowserClose !== undefined) s.endOnBrowserClose = !!b.endOnBrowserClose;
+  if (b.streamFooter !== undefined) s.streamFooter = str(b.streamFooter, 2000);
+  if (b.burnoutWeeks !== undefined) {
+    const n = Number(b.burnoutWeeks);
+    if (!Number.isInteger(n) || n < 0 || n > 12) throw bad('Weekends in a row must be 0 (off) to 12.');
+    s.burnoutWeeks = n;
+  }
   if (b.groupLink !== undefined) {
     const link = normalizeUrl(str(b.groupLink, 300));
     if (link && !isHttpUrl(link)) throw bad('The group link should start with https://');
