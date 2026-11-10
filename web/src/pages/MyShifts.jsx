@@ -135,7 +135,7 @@ export default function MyShifts() {
                         Live rundown
                       </button>
                     )}
-                    {featureOn(app, 'signoffs') && s.learner && <SignOffButton shift={s} onDone={load} />}
+                    {featureOn(app, 'signoffs') && s.learner && s.date <= todayISO() && <SignOffButton shift={s} onDone={load} />}
                   </div>
                   {featureOn(app, 'checklists') && s.date <= addDays(todayISO(), 1) && <ShiftChecklist eventId={s.id} position={s.position} />}
                 </div>
