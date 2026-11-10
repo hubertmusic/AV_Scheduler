@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, describeRule, firstName, fmtDay, fridayOf, prettyPhone, roleLabel, todayISO, WEEK_OPTIONS } from '../lib.js';
 import { Avatar, Icon, Modal, useApp } from '../ui.jsx';
+import { featureOn, SignOffHistory } from './Extras.jsx';
 
 const PERMS = [
   { id: 'edit', label: 'Edit the schedule', help: 'Place, move and remove people; add and edit services.' },
@@ -244,6 +245,7 @@ function PersonPanel({ person, me, positions }) {
             </div>
             <p className="muted small">Trainees can be added as a shadow next to the person on that position.</p>
           </fieldset>
+          {featureOn(app, 'signoffs') && <SignOffHistory person={person} />}
           <label className="field field-row">
             <span className="small">Most shifts a month</span>
             <input className="key-input" type="number" min="0" max="31" value={f.maxPerMonth} onChange={set('maxPerMonth')} placeholder="Any" />

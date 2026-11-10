@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import rateLimit from 'express-rate-limit';
 import { Event, Plan, StandingLink } from '../models.js';
 import { weeklyGuestLink } from './standing.js';
+import { featureOn } from '../lib/features.js';
 import { getSettings, notFound, wrap } from '../lib/util.js';
 import { bulletinData, rundownData } from '../lib/serviceOrder.js';
 
@@ -37,6 +38,14 @@ publicRouter.get('/weekly/:token', wrap(async (req, res) => {
   res.json({ token: r.guest.token, event: { title: r.ev.title, date: r.ev.date } });
 }));
 
+// Stage clock: the live run-of-show for the stage screen, from the rundown link
+publicRouter.get('/live/:token', wrap(async (req, res) => {
+  if (!(await featureOn('liveShow'))) throw notFound('The live run-of-show is turned off.');
+  const { plan, ev, orgName } = await find('rundownToken', req.params.token);
+  res.set('Cache-Control', 'no-store');
+  res.json({ orgName, event: { title: ev.title, date: ev.date, start: ev.start, end: ev.end }, order: plan.order.map((x) => ({ kind: x.kind, title: x.title, who: x.who, minutes: x.minutes || 0 })), live: plan.live || null, now: new Date() });
+}));
+
 // The church logo shown on the bulletin
 publicRouter.get('/logo', wrap(async (req, res) => {
   const s = await getSettings();
@@ -58,7 +67,7 @@ async function find(field, token) {
 publicRouter.get('/rundown/:token', wrap(async (req, res) => {
   const { plan, ev, orgName } = await find('rundownToken', req.params.token);
   res.set('Cache-Control', 'no-store');
-  res.json(await rundownData(plan, ev, orgName));
+  res.json({ ...(await rundownData(plan, ev, orgName)), inputs: (await featureOn('inputList')) ? plan.inputs || [] : [] });
 }));
 
 publicRouter.get('/bulletin/:token', wrap(async (req, res) => {

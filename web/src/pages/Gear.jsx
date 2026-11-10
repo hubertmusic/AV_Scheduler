@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ago, api, fmtWhen } from '../lib.js';
 import { Empty, Modal, useApp } from '../ui.jsx';
+import { featureOn, FixList } from './Extras.jsx';
 
 export default function Gear() {
   const app = useApp();
@@ -9,6 +10,7 @@ export default function Gear() {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(null); // item id showing its history
   const [filter, setFilter] = useState('all');
+  const [view, setView] = useState('gear');
 
   const load = useCallback(() => api('/gear').then(setList, (e) => app.toast(e.message)), [app]);
   useEffect(() => {
@@ -37,12 +39,28 @@ export default function Gear() {
           <h1>Gear</h1>
           <div className="muted">Who has the mics, camera bag and spare batteries, and what needs fixing.</div>
         </div>
-        {app.can.plans && (
-          <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-            Add gear
-          </button>
-        )}
+        <div className="row-wrap">
+          {featureOn(app, 'problems') && (
+            <div className="seg" role="group" aria-label="View">
+              <button type="button" aria-pressed={view === 'gear'} onClick={() => setView('gear')}>
+                Gear
+              </button>
+              <button type="button" aria-pressed={view === 'fix'} onClick={() => setView('fix')}>
+                Fix list
+              </button>
+            </div>
+          )}
+          {app.can.plans && view === 'gear' && (
+            <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+              Add gear
+            </button>
+          )}
+        </div>
       </div>
+      {view === 'fix' && featureOn(app, 'problems') ? (
+        <FixList />
+      ) : (
+        <>
       {list && list.length > 0 && (
         <div className="seg" role="group" aria-label="Show">
           {[
@@ -70,6 +88,8 @@ export default function Gear() {
           </ul>
         </section>
       ))}
+        </>
+      )}
       {adding && <AddGear categories={[...new Set((list || []).map((g) => g.category).filter(Boolean))]} onClose={() => setAdding(false)} onSaved={() => (setAdding(false), load())} />}
     </div>
   );

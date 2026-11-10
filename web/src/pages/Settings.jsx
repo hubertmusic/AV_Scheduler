@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, unsaved, uploadFiles } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
+import { ExtraFeaturesCard } from './Extras.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
 
@@ -23,6 +24,7 @@ export default function Settings() {
           <General />
           <BulletinLogo />
           <BurnoutWatch />
+          <ExtraFeaturesCard />
           <Positions />
         </div>
       </div>

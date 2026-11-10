@@ -6,6 +6,8 @@ import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
 import { LivestreamCard, OrderOfService, ShareCard } from './ServiceOrder.jsx';
 import WeeklyLinks from './WeeklyLinks.jsx';
+import { DebriefAnswers, featureOn, InputListCard } from './Extras.jsx';
+import { LiveView } from './Live.jsx';
 
 const VIEWS = [
   { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
@@ -297,6 +299,7 @@ function ArchiveWeekendModal({ fri, services, onClose, onDone }) {
 }
 
 function PlanEditor({ eventId, onChanged }) {
+  const [live, setLive] = useState(false);
   const app = useApp();
   const canPlans = app.can.plans;
   const [plan, setPlan] = useState(null);
@@ -392,12 +395,15 @@ function PlanEditor({ eventId, onChanged }) {
         <Details plan={plan} canEdit={canEdit} onSave={patch} />
       </section>
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
-      <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} />
+      <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} onLive={featureOn(app, 'liveShow') && plan.order.length > 0 ? () => setLive(true) : null} />
       <Scriptures plan={plan} canEdit={canEdit} onSave={patch} />
       <Songs plan={plan} canEdit={canEdit} onSave={patch} reload={load} />
       <MediaSection plan={plan} canEdit={canEdit} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
       {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
+      {featureOn(app, 'inputList') && (canEdit || plan.inputs.length > 0) && <InputListCard plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} />}
       {ev.kind !== 'soundcheck' && <LivestreamCard plan={plan} />}
+      {featureOn(app, 'debrief') && canPlans && <DebriefAnswers plan={plan} />}
+      {live && <LiveView eventId={eventId} onClose={() => (setLive(false), load())} />}
       {canEdit && <Guests plan={plan} eventId={eventId} reload={load} />}
       {copying && <CopyModal plan={plan} onClose={() => setCopying(false)} />}
     </div>

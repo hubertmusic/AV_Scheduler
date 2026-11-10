@@ -30,7 +30,7 @@ const clean = (list) =>
 const same = (a, b) => JSON.stringify(clean(a)) === JSON.stringify(clean(b));
 const fromPlanOrder = (order) => order.map((x) => ({ ...x, minutes: x.minutes || '' }));
 
-export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
+export function OrderOfService({ plan, canEdit, onSave, setPlan, onLive }) {
   const app = useApp();
   const ev = plan.event;
   const [items, setItems] = useState(() => fromPlanOrder(plan.order));
@@ -129,7 +129,14 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
   if (!canEdit) {
     return (
       <section className="card stack" aria-label="Order of service">
-        <h3>Order of service</h3>
+        <div className="section-head">
+          <h3>Order of service</h3>
+          {onLive && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={onLive}>
+              Run it live
+            </button>
+          )}
+        </div>
         {plan.order.length === 0 ? (
           <Empty>No order of service for this one.</Empty>
         ) : (
@@ -165,6 +172,11 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan }) {
           <h3>Order of service</h3>
           <p className="small muted">Optional. Add minutes to get a timed rundown; leave them blank for just the order.</p>
         </div>
+        {onLive && !dirty && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={onLive}>
+            Run it live
+          </button>
+        )}
       </div>
       {items.length === 0 && (
         <div className="oos-start">

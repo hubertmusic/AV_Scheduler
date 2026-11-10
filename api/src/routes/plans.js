@@ -3,7 +3,7 @@ import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
 import { config } from '../config.js';
-import { Event, GuestLink, Media, OrderTemplate, Plan, Song, Submission, User } from '../models.js';
+import { Assignment, Event, GuestLink, Media, OrderTemplate, Plan, Song, Submission, User } from '../models.js';
 import { requirePerm } from '../auth.js';
 import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
@@ -16,6 +16,7 @@ import { eventView } from '../lib/views.js';
 import { evName } from '../lib/activity.js';
 import path from 'node:path';
 import fs from 'node:fs';
+import { requireFeature } from '../lib/features.js';
 
 export const plansRouter = Router();
 export const songsRouter = Router();
@@ -162,6 +163,8 @@ async function fullPlan(ev, viewerCan) {
     media: media.map(mediaView),
     order: orderView(plan.order),
     announcements: plan.announcements,
+    live: plan.live || null,
+    inputs: plan.inputs || [],
     share: { rundown: plan.rundownToken, bulletin: plan.bulletinToken },
     updatedAt: plan.updatedAt,
     updatedBy: plan.updatedBy?.name || null,
@@ -359,6 +362,84 @@ plansRouter.post('/:eventId/order/copy-last', requirePerm('plans'), wrap(async (
   res.json({ ...(await fullPlan(ev, req.can)), copiedFrom: { title: src.title, date: src.date } });
 }));
 
+// ---------- input list (extra feature) ----------
+export function readInputs(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .slice(0, 96)
+    .map((r) => ({ ch: str(r?.ch, 8), source: str(r?.source, 80), mic: str(r?.mic, 60), stand: str(r?.stand, 40), notes: str(r?.notes, 120) }))
+    .filter((r) => r.ch || r.source || r.mic);
+}
+
+// POST /api/plans/:eventId/inputs/copy-last — the latest earlier service's input list (same name first)
+plansRouter.post('/:eventId/inputs/copy-last', requireFeature('inputList'), requirePerm('plans'), wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  await assertOpen(ev);
+  const withInputs = await Plan.find({ event: { $ne: ev._id }, 'inputs.0': { $exists: true } }, { event: 1 }).lean();
+  const earlier = await Event.find({ _id: { $in: withInputs.map((p) => p.event) }, date: { $lte: ev.date } }).sort({ date: -1, start: -1 }).limit(50).lean();
+  const src = earlier.find((e) => e.title === ev.title) || earlier[0];
+  if (!src) throw bad('No earlier service has an input list yet.');
+  const [from, plan] = [await planFor(src._id), await planFor(ev._id)];
+  plan.inputs = readInputs(from.inputs);
+  plan.markModified('inputs');
+  plan.updatedBy = req.user._id;
+  await plan.save();
+  res.locals.activity = `Copied the input list from ${evName(src)} · ${evName(ev)}`;
+  res.json({ ...(await fullPlan(ev, req.can)), copiedFrom: { title: src.title, date: src.date } });
+}));
+
+// ---------- live run-of-show (extra feature) ----------
+// GET: the order and live state, polled by the booth view every couple of seconds
+plansRouter.get('/:eventId/live', requireFeature('liveShow'), wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  const plan = await planFor(ev._id);
+  res.set('Cache-Control', 'no-store');
+  res.json({ event: eventView(ev), order: orderView(plan.order), live: plan.live || null, now: new Date(), stageToken: plan.rundownToken });
+}));
+
+// POST { action: start | next | prev | goto | end | reset, index } — leaders, or anyone on this service
+plansRouter.post('/:eventId/live', requireFeature('liveShow'), wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  if (!req.can.plans && !(await Assignment.exists({ event: ev._id, user: req.user._id }))) throw forbidden('Only the crew on this service, or a leader, can run the live rundown.');
+  const plan = await planFor(ev._id);
+  const lines = plan.order;
+  const playable = lines.map((x, i) => (x.kind === 'heading' ? -1 : i)).filter((i) => i >= 0);
+  if (!playable.length) throw bad('Add items to the order of service first.');
+  const now = new Date();
+  const live = plan.live ? { ...plan.live, log: [...(plan.live.log || [])] } : null;
+  const goTo = (i) => {
+    live.index = i;
+    live.itemAt = now;
+    live.endedAt = null;
+    live.log.push({ index: i, title: lines[i].title, at: now });
+  };
+  const { action } = req.body || {};
+  if (action === 'start') {
+    Object.assign(plan, { live: { startedAt: now, index: playable[0], itemAt: now, endedAt: null, log: [{ index: playable[0], title: lines[playable[0]].title, at: now }] } });
+  } else if (action === 'reset') {
+    plan.live = null;
+  } else {
+    if (!live) throw bad('Press Start first.');
+    const pos = playable.indexOf(live.index);
+    if (action === 'next') {
+      if (pos < playable.length - 1) goTo(playable[pos + 1]);
+      else live.endedAt = now;
+    } else if (action === 'prev') {
+      if (pos > 0) goTo(playable[pos - 1]);
+    } else if (action === 'goto') {
+      const i = Number(req.body.index);
+      if (!playable.includes(i)) throw bad('Pick an item in the order.');
+      goTo(i);
+    } else if (action === 'end') {
+      live.endedAt = now;
+    } else throw bad('Unknown action.');
+    plan.live = live;
+  }
+  plan.markModified('live');
+  await plan.save();
+  res.json({ event: eventView(ev), order: orderView(plan.order), live: plan.live || null, now, stageToken: plan.rundownToken });
+}));
+
 // POST /api/plans/:eventId/order/template/:id — add a saved template's lines to the order
 plansRouter.post('/:eventId/order/template/:id', requirePerm('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
@@ -411,6 +492,10 @@ plansRouter.patch('/:eventId', requirePerm('plans'), wrap(async (req, res) => {
   if (b.assets !== undefined) plan.assets = await readAssets(b.assets);
   if (b.order !== undefined) plan.order = readOrder(b.order);
   if (b.announcements !== undefined) plan.announcements = str(b.announcements, 5000);
+  if (b.inputs !== undefined) {
+    plan.inputs = readInputs(b.inputs);
+    plan.markModified('inputs');
+  }
   plan.updatedBy = req.user._id;
   await plan.save();
   const names = { sermonTitle: 'sermon title', speaker: 'speaker', notes: 'notes', scriptures: 'Bible texts', songs: 'songs', assets: 'library items', order: 'order of service', announcements: 'announcements' };
