@@ -56,7 +56,7 @@ function useIdleSignOut(minutes) {
 
 export default function App() {
   const inviteToken = useMemo(() => window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
-  const guestToken = useMemo(() => window.location.pathname.match(/^\/guest\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const guestToken = useMemo(() => window.location.pathname.match(/^\/(?:add|guest)\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
   // Public rundown / bulletin links (no sign-in)
   const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage)\/([A-Za-z0-9_-]+)/), []);

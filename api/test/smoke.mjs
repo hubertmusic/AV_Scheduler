@@ -313,7 +313,7 @@ const gl = ok(await crew2('POST', `/api/guest-links/${worship.id}`, { name: 'Gue
 assert.match(gl.code, /^\d{6}$/, 'a 6-digit code leaders can send');
 assert.equal(gl.state, 'open');
 assert.ok(Date.parse(gl.closesAt) > Date.now() && Date.parse(gl.closesAt) < Date.parse(gl.expiresAt), 'locks before the link stops working');
-const gtoken = gl.url.split('/guest/')[1];
+const gtoken = gl.url.split('/add/')[1];
 const guest = client();
 let gpage = ok(await guest('GET', `/api/guest/${gtoken}`));
 assert.equal(gpage.needsCode, true);
@@ -394,6 +394,17 @@ step('guest links: locked after the deadline, late items and changes wait for ap
 const reopened = ok(await crew2('POST', `/api/guest-links/link/${gl.id}/reopen`, { minutes: 30 }));
 assert.equal(reopened.state, 'open');
 assert.ok(Math.abs(Date.parse(reopened.closesAt) - Date.now() - 30 * 60e3) < 60e3);
+// Quick links: open now for 1–48 hours, or reopen for up to 48
+const quick = ok(await crew2('POST', `/api/guest-links/${worship.id}`, { name: 'Worship leader', hours: 48 }), 201);
+assert.equal(quick.state, 'open');
+assert.ok(Math.abs(Date.parse(quick.closesAt) - Date.now() - 48 * 3600e3) < 60e3, 'open 48 hours from now');
+assert.ok(Date.parse(quick.expiresAt) > Date.parse(quick.closesAt), 'late changes can still come in after it locks');
+assert.match(quick.url, /\/add\/[A-Za-z0-9_-]+$/);
+ok(await crew2('POST', `/api/guest-links/${worship.id}`, { name: 'Too long', hours: 72 }), 400);
+ok(await crew2('POST', `/api/guest-links/link/${quick.id}/lock`));
+const twoDays = ok(await crew2('POST', `/api/guest-links/link/${quick.id}/reopen`, { minutes: 48 * 60 }));
+assert.ok(Math.abs(Date.parse(twoDays.closesAt) - Date.now() - 48 * 3600e3) < 60e3, 'reopened for 48 hours');
+ok(await crew2('POST', `/api/guest-links/link/${quick.id}/revoke`));
 ok(await guest('PATCH', `/api/guest/${gtoken}/items/${noteItem.id}`, { text: 'Reopened: video back in.' }));
 assert.match(ok(await crew1('GET', `/api/plans/${worship.id}`)).notes, /Reopened: video back in\./);
 // Schedule changes, and a guest can't add anything before it opens
@@ -415,7 +426,7 @@ ok(await guest('POST', `/api/guest/${gtoken}/items`, { kind: 'note', text: 'late
 ok(await guest('GET', '/api/guest/not-a-real-token-1234567890'), 404);
 // Too many wrong codes lock the code until a leader makes a new one
 const gl2 = ok(await crew2('POST', `/api/guest-links/${worship.id}`, { name: 'Choir' }), 201);
-const t2 = gl2.url.split('/guest/')[1];
+const t2 = gl2.url.split('/add/')[1];
 const wrong = gl2.code === '123456' ? '654321' : '123456';
 for (let i = 0; i < 8; i++) await guest('POST', `/api/guest/${t2}/unlock`, { code: wrong });
 ok(await guest('POST', `/api/guest/${t2}/unlock`, { code: gl2.code }), 423);

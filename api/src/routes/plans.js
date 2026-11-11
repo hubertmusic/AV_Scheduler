@@ -113,7 +113,7 @@ const guestView = (g, counts = {}) => ({
   expiresAt: g.expiresAt,
   state: windowState(g),
   active: !g.revoked && g.expiresAt > new Date(),
-  url: `${config.publicUrl}/guest/${g.token}`,
+  url: `${config.publicUrl}/add/${g.token}`,
   live: counts.live || 0, // items of theirs in the plan
   waiting: counts.pending || 0, // late items waiting for approval
 });
@@ -906,12 +906,21 @@ guestAdminRouter.post('/:eventId', requirePerm('plans'), wrap(async (req, res) =
   if (!name) throw bad('Who is this link for?');
   const sched = defaultSchedule(ev, (await getSettings()).timezone);
   const g = new GuestLink({ token: token(24), event: ev._id, name, note: str(req.body.note, 500), createdBy: req.user._id, code: newCode(), ...sched });
-  applySchedule(g, req.body);
+  // { hours: 1–48 } opens it now for that long, instead of picking times
+  const hours = Number(req.body.hours);
+  if (hours) {
+    if (!(hours >= 1 && hours <= MAX_OPEN_HOURS)) throw bad(`Pick between 1 and ${MAX_OPEN_HOURS} hours.`);
+    const now = new Date();
+    g.opensAt = now;
+    g.closesAt = new Date(now.getTime() + hours * 3600 * 1000);
+  }
+  applySchedule(g, hours ? {} : req.body);
   await g.save();
-  res.locals.activity = `Made a guest link for ${name} · ${evName(ev)}`;
+  res.locals.activity = `Made a quick link for ${name}${hours ? ` (open ${hours} h)` : ''} · ${evName(ev)}`;
   res.status(201).json(guestView(g));
 }));
 
+const MAX_OPEN_HOURS = 48;
 const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 const dateIn = (v) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v) : null);
 
@@ -941,7 +950,7 @@ guestAdminRouter.patch('/link/:id', requirePerm('plans'), wrap(async (req, res) 
   if (req.body.note !== undefined) g.note = str(req.body.note, 500);
   applySchedule(g, req.body);
   await g.save();
-  res.locals.activity = `Changed ${g.name}’s guest link schedule · ${evName(g.event)}`;
+  res.locals.activity = `Changed ${g.name}’s quick link schedule · ${evName(g.event)}`;
   res.json(guestView(g));
 }));
 
@@ -949,14 +958,14 @@ guestAdminRouter.patch('/link/:id', requirePerm('plans'), wrap(async (req, res) 
 guestAdminRouter.post('/link/:id/reopen', requirePerm('plans'), wrap(async (req, res) => {
   const g = await loadLinkForLeader(req.params.id);
   if (!g.code) throw bad('This is an older link without a schedule. Make a new link instead.');
-  const minutes = Math.max(15, Math.min(24 * 60, Math.round(Number(req.body.minutes) || 60)));
+  const minutes = Math.max(15, Math.min(MAX_OPEN_HOURS * 60, Math.round(Number(req.body.minutes) || 60)));
   const now = new Date();
   if (!g.opensAt || g.opensAt > now) g.opensAt = now;
   g.closesAt = new Date(now.getTime() + minutes * 60 * 1000);
   g.revoked = false;
   applySchedule(g);
   await g.save();
-  res.locals.activity = `Reopened ${g.name}’s guest link for ${minutes} minutes · ${evName(g.event)}`;
+  res.locals.activity = `Reopened ${g.name}’s quick link for ${minutes >= 120 ? `${minutes / 60} hours` : `${minutes} minutes`} · ${evName(g.event)}`;
   res.json(guestView(g));
 }));
 
@@ -966,7 +975,7 @@ guestAdminRouter.post('/link/:id/lock', requirePerm('plans'), wrap(async (req, r
   if (g.opensAt > now) g.opensAt = new Date(now.getTime() - 1000);
   g.closesAt = now;
   await g.save();
-  res.locals.activity = `Locked ${g.name}’s guest link · ${evName(g.event)}`;
+  res.locals.activity = `Locked ${g.name}’s quick link · ${evName(g.event)}`;
   res.json(guestView(g));
 }));
 
@@ -979,7 +988,7 @@ guestAdminRouter.post('/link/:id/new-code', requirePerm('plans'), wrap(async (re
   if (!g.opensAt) g.opensAt = g.createdAt;
   if (!g.closesAt) g.closesAt = g.expiresAt;
   await g.save();
-  res.locals.activity = `Made a new code for ${g.name}’s guest link · ${evName(g.event)}`;
+  res.locals.activity = `Made a new code for ${g.name}’s quick link · ${evName(g.event)}`;
   res.json(guestView(g));
 }));
 

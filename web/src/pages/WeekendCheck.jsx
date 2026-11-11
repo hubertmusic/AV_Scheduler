@@ -214,7 +214,7 @@ export default function WeekendCheck() {
               ))}
               {d.pendingUploads.map((u) => (
                 <li key={u.event.id}>
-                  {u.count} guest upload{u.count === 1 ? '' : 's'} for {u.event.title}
+                  {u.count} quick-link upload{u.count === 1 ? '' : 's'} for {u.event.title}
                 </li>
               ))}
             </ul>
@@ -226,7 +226,7 @@ export default function WeekendCheck() {
               )}
               {d.pendingUploads.length > 0 && can.plans && (
                 <button type="button" className="btn btn-ghost" onClick={() => app.goTab('plans')}>
-                  Guest uploads
+                  Quick-link uploads
                 </button>
               )}
             </div>

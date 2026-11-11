@@ -104,7 +104,7 @@ const FILTERS = [
   ['login', 'Sign-ins'],
   ['view', 'Page views'],
   ['calendar', 'Calendar syncs'],
-  ['guest', 'Guests'],
+  ['guest', 'Quick links'],
   ['system', 'Reminders'],
 ];
 
