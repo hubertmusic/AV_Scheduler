@@ -116,6 +116,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .user-btn { display: flex; align-items: center; gap: 10px; background: none; border: none; color: #fff; text-align: left; min-height: 44px; padding: 0 6px; border-radius: 8px; }
 .user-btn:hover { background: #22252a; }
 .user-name { display: block; font-weight: 600; font-size: 14px; }
+.team-switch select { min-height: 44px; border-radius: 8px; border: 1px solid #3a3e45; background: #22252a; color: #fff; padding: 0 30px 0 12px; font-weight: 600; font-size: 14px; }
+.team-switch select:focus-visible { outline: 3px solid var(--accent-bright); outline-offset: 2px; }
 .tabs { background: var(--surface); border-bottom: 1px solid var(--line); padding: 0 24px; display: flex; flex-wrap: wrap; gap: 4px; }
 .tab { min-height: 48px; padding: 0 14px; border: none; background: none; border-bottom: 3px solid transparent; color: var(--muted); font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
 .tab:hover { color: var(--ink); }
@@ -787,3 +789,26 @@ a.icon-btn { text-decoration: none; }
   .bl h1 { font-size: 22pt; }
   .rd-table tr { break-inside: avoid; }
 }
+
+/* ---------- who's serving (line-up across teams) ---------- */
+.lu { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.lu-team { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lu-head h3 { font-size: 15px; margin: 0; }
+.lu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lu-list li { display: flex; align-items: center; gap: 8px; min-height: 40px; border-bottom: 1px solid var(--line); padding: 2px 0; }
+.lu-list li:last-child { border-bottom: none; }
+.lu-pos { flex: 0 0 40%; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.lu-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.lu-open .lu-name { font-style: italic; }
+.lu-ok { color: var(--green); font-weight: 700; }
+.lu-reach { display: inline-flex; gap: 4px; flex: 0 0 auto; }
+.icon-btn-sm { width: 40px; height: 40px; flex-basis: 40px; }
+.lu-wa { color: var(--green); }
+.lu-leaders { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+.lu-leader { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.team-chip { background: var(--blue-soft); color: var(--blue-ink); font-size: 12px; }
+.song-notes { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--ground); border-radius: 6px; padding: 6px 8px; }
+.sched-row-rehearsal .sched-service { background: var(--blue-soft); border-radius: 8px; }
+.sched-row-rehearsal .cell-na { background: #eef3fa; }
+.tmpl-row.stack-sm > .check-grid { flex: none; }

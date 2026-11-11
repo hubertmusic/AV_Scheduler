@@ -9,6 +9,25 @@ export function setViewAs(id) {
 }
 export const previewing = () => Boolean(viewAsId);
 
+// Which team's side this browser is working in (for people on more than one team).
+// Sent with every request; the server falls back to their first team if it's not one of theirs.
+let teamKey = null;
+try {
+  teamKey = localStorage.getItem('cc_team');
+} catch {
+  /* storage blocked */
+}
+export function setTeam(key) {
+  teamKey = key || null;
+  try {
+    if (key) localStorage.setItem('cc_team', key);
+    else localStorage.removeItem('cc_team');
+  } catch {
+    /* storage blocked */
+  }
+}
+export const currentTeam = () => teamKey;
+
 // The server signed this browser out (idle timeout, "sign out everywhere", …). App.jsx shows sign-in.
 export function signalSignedOut(message) {
   window.dispatchEvent(new CustomEvent('cc:signed-out', { detail: message || 'Please sign in again.' }));
@@ -26,6 +45,7 @@ export async function api(path, { method = 'GET', body, background = false } = {
   if (viewAsId && path === '/activity/view') return null;
   const headers = body !== undefined ? { 'Content-Type': 'application/json' } : {};
   if (viewAsId) headers['X-View-As'] = viewAsId;
+  if (teamKey) headers['X-Team'] = teamKey;
   if (background) headers['X-Background'] = '1';
   const res = await fetch('/api' + path, {
     method,
@@ -53,6 +73,7 @@ export function uploadFiles(path, files, { field = 'files', onProgress, extra = 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api' + path);
     xhr.withCredentials = true;
+    if (teamKey) xhr.setRequestHeader('X-Team', teamKey);
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
     xhr.onload = () => {
       let data = null;
@@ -183,7 +204,7 @@ export const firstName = (name = '') => name.split(/\s+/)[0] || name;
 export function roleLabel(p) {
   if (!p) return '';
   if (p.role === 'admin') return 'Admin';
-  if (p.role === 'leader') return p.leaderTitle || 'Team leader';
+  if (p.role === 'leader') return p.leaderTitle || (p.head ? 'Head leader' : 'Team leader');
   return 'Crew';
 }
 

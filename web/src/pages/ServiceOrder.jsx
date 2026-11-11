@@ -340,7 +340,7 @@ function SaveTemplate({ ev, order, templates, onClose, onSaved }) {
 }
 
 // The rundown and bulletin links, QR codes and print buttons, plus the bulletin's announcements
-export function ShareCard({ plan, canEdit, canPlans, onSave, setPlan }) {
+export function ShareCard({ plan, canEdit, canAnnounce = canEdit, canPlans, onSave, setPlan }) {
   const [ann, setAnn] = useState(plan.announcements);
   const [busy, setBusy] = useState(false);
   useEffect(() => setAnn(plan.announcements), [plan.announcements]);
@@ -384,7 +384,7 @@ export function ShareCard({ plan, canEdit, canPlans, onSave, setPlan }) {
           setPlan={setPlan}
         />
       </div>
-      {canEdit ? (
+      {canAnnounce ? (
         <label className="field">
           <span>Announcements (bulletin only)</span>
           <textarea rows={4} value={ann} maxLength={5000} placeholder="Potluck after church, prayer meeting Wednesday 7 PM…" onChange={(e) => setAnn(e.target.value)} />

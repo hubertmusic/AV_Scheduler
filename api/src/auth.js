@@ -7,6 +7,7 @@ import { User, Position, Settings } from './models.js';
 import { bad, can, isId, DEFAULT_POSITIONS, DEFAULT_TEMPLATE, forbidden, getSettings, HttpError, normalizePhone, str, token, wrap } from './lib/util.js';
 import { meView } from './lib/views.js';
 import { deviceFrom, logActivity, touchSeen } from './lib/activity.js';
+import { ensureTeams, resolveTeam, teamKeys } from './lib/teams.js';
 
 const COOKIE = 'cc_session';
 const MAX_AGE = 30 * 24 * 3600 * 1000;
@@ -58,6 +59,9 @@ export const requireAuth = wrap(async (req, res, next) => {
   // Activity keeps the session going. Background checks (badges, the live ticker) don't.
   if (idle >= 60 && req.get('x-background') !== '1') await setSession(res, user);
   req.user = user;
+  req.team = await resolveTeam(req, user); // the team this request works in (team switcher)
+  user._team = req.team.key;
+  user._teamKeys = await teamKeys(req);
   req.can = can(user);
   await touchSeen(user);
   // "View as": the admin can look at the app exactly as one person sees it.
@@ -71,6 +75,10 @@ export const requireAuth = wrap(async (req, res, next) => {
     if (!target) throw new HttpError(404, 'That person no longer exists. Exit the preview.');
     req.realUser = user;
     req.user = target;
+    req.team = await resolveTeam(req, target);
+    req._teamKeys = null;
+    target._team = req.team.key;
+    target._teamKeys = await teamKeys(req);
     req.can = can(target);
     req.previewing = true;
   }
@@ -138,6 +146,7 @@ authRouter.post('/setup', loginLimiter, wrap(async (req, res) => {
     positions: DEFAULT_POSITIONS.map((p) => p.key),
     calToken: token(),
   });
+  await ensureTeams(); // creates the AV and Praise teams and puts the admin on AV
   await setSession(res, user);
   await noteLogin(user, req, 'Set up Crew Call');
   res.status(201).json({ me: meView(user) });

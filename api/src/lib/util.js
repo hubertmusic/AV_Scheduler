@@ -78,12 +78,36 @@ export function localToDate(date, time, tz) {
   return DateTime.fromISO(`${date}T${time}`, { zone: tz }).toJSDate();
 }
 
-export function can(user) {
+// A person's place on a team (teams[] entry), or null
+export const membershipOf = (user, team) => (user?.teams || []).find((m) => m.team === team) || null;
+
+// What someone may do, within one team (by default the team they're working in right now,
+// set on the signed-in user for each request). The admin may do everything everywhere; a team's
+// head leader everything within that team; other leaders what they've been given.
+export function can(user, team = user?._team) {
   const none = Object.fromEntries(PERMS.map((p) => [p, false]));
   if (!user) return none;
-  if (user.role === 'admin') return Object.fromEntries(PERMS.map((p) => [p, true]));
-  if (user.role === 'leader') return Object.fromEntries(PERMS.map((p) => [p, !!user.perms?.[p]]));
+  const all = Object.fromEntries(PERMS.map((p) => [p, true]));
+  if (user.role === 'admin') return all;
+  if (!user.teams?.length) {
+    // Not moved onto teams yet (only before the first start of this version)
+    return user.role === 'leader' ? Object.fromEntries(PERMS.map((p) => [p, !!user.perms?.[p]])) : none;
+  }
+  const m = team ? membershipOf(user, team) : null;
+  if (!m) return none;
+  if (m.head) return all;
+  if (m.role === 'leader') return Object.fromEntries(PERMS.map((p) => [p, !!m.perms?.[p]]));
   return none;
+}
+
+// 'admin' | 'leader' | 'crew' within a team, or null if they're not on it
+export function roleIn(user, team = user?._team) {
+  if (!user) return null;
+  if (user.role === 'admin') return 'admin';
+  if (!user.teams?.length) return user.role || null;
+  const m = team ? membershipOf(user, team) : null;
+  if (!m) return null;
+  return m.head || m.role === 'leader' ? 'leader' : 'crew';
 }
 
 export const DEFAULT_POSITIONS = [

@@ -98,12 +98,14 @@ step('placing people; can’t place on a position the service doesn’t need');
 
 // Calendar feed
 const me1 = ok(await crew1('GET', '/api/bootstrap')).me;
+// The feed holds your own shifts plus every other service as an info item; count only shifts
+const shiftsIn = (d) => (String(d).replace(/\r\n /g, '').match(/^UID:(?!.*-info-).*$/gm) || []).length;
 const feedPath = new URL(me1.calUrl).pathname;
 let ics = await crew1('GET', feedPath);
 assert.equal(ics.status, 200);
 assert.match(ics.data, /BEGIN:VCALENDAR/);
 assert.match(ics.data, /SUMMARY:FOH Audio — Vespers/);
-assert.equal((ics.data.match(/BEGIN:VEVENT/g) || []).length, 1);
+assert.equal(shiftsIn(ics.data), 1);
 assert.match(ics.data.replace(/\r\n /g, ''), /\r\nURL:http[^\r]*\/#mine\r\n/, 'each event links back to My shifts');
 step('personal calendar feed lists the shift');
 
@@ -120,9 +122,9 @@ assert.equal(r.status, 'approved');
 events = ok(await admin('GET', `/api/events?from=${friday}&to=${sunday}`));
 assert.equal(events.find((e) => e.id === vespers.id).assignments.foh, n.person.id);
 ics = await crew1('GET', feedPath);
-assert.equal((ics.data.match(/BEGIN:VEVENT/g) || []).length, 0);
+assert.equal(shiftsIn(ics.data), 0);
 ics = await crew2('GET', new URL(ok(await crew2('GET', '/api/bootstrap')).me.calUrl).pathname);
-assert.equal((ics.data.match(/BEGIN:VEVENT/g) || []).length, 2);
+assert.equal(shiftsIn(ics.data), 2);
 step('transfer request → approve → schedule and both calendar feeds update');
 
 // Pickup by Marcus of an open spot, then swap
@@ -237,7 +239,14 @@ assert.equal(plan.scriptures.length, 1);
 assert.equal(ok(await crew1('GET', `/api/plans/${worship.id}`)).notes, 'Point 1: thirst\nPoint 2: the well');
 step('pastor notes and Bible texts: plan editors write, everyone reads');
 
-ok(await crew1('POST', '/api/songs', { title: 'x' }), 403);
+// Crew add songs and Bible texts; the sermon, pastor's notes and order stay with leaders
+ok(await crew1('PATCH', `/api/plans/${worship.id}`, { sermonTitle: 'Mine now' }), 403);
+ok(await crew1('PATCH', `/api/plans/${worship.id}`, { notes: 'x' }), 403);
+ok(await crew1('PATCH', `/api/plans/${worship.id}`, { order: [] }), 403);
+const crewSong = ok(await crew1('POST', '/api/songs', { title: 'Crew pick' }), 201);
+ok(await crew1('PATCH', `/api/songs/${crewSong.id}`, { retired: true }), 403);
+ok(await crew1('DELETE', `/api/songs/${crewSong.id}`), 403);
+ok(await crew2('DELETE', `/api/songs/${crewSong.id}`), 204);
 const song = ok(await crew2('POST', '/api/songs', { title: 'Amazing Grace', artist: 'John Newton', lyrics: '[Verse 1]\nAmazing grace how sweet the sound  \nThat saved a wretch like me\n\n\n\nchorus:\nMy chains are gone\n\n' }), 201);
 plan = ok(await crew2('PATCH', `/api/plans/${worship.id}`, { songs: [{ song: song.id, key: 'G' }, { song: '0123456789abcdef01234567' }] }));
 assert.equal(plan.songs.length, 1);
@@ -261,12 +270,15 @@ assert.equal(sv.proOutdated, true, 'editing lyrics flags the stored .pro as outd
 step('.pro files stored per song, downloaded intact, flagged when lyrics change');
 
 const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
-ok(await crew1.upload(`/api/plans/${worship.id}/media`, [{ name: 'x.png', type: 'image/png', bytes: png }]), 403);
+// Crew can add slides and remove their own; only leaders remove other people's
+const crewSlide = ok(await crew1.upload(`/api/plans/${worship.id}/media`, [{ name: 'x.png', type: 'image/png', bytes: png }]), 201).media[0];
+ok(await crew1('DELETE', `/api/media/${crewSlide.id}`), 204);
 plan = ok(await crew2.upload(`/api/plans/${worship.id}/media`, [
   { name: 'Sermon slide.png', type: 'image/png', bytes: png },
   { name: 'evil.html', type: 'text/html', bytes: '<script>alert(1)</script>' },
 ]), 201);
 assert.equal(plan.media.length, 2);
+ok(await crew1('DELETE', `/api/media/${plan.media[0].id}`), 403);
 const img = await crew1('GET', plan.media.find((m) => m.originalName === 'Sermon slide.png').url);
 assert.equal(img.headers.get('content-type'), 'image/png');
 assert.match(img.headers.get('content-disposition'), /^inline/);

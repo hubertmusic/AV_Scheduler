@@ -8,6 +8,7 @@ import { LivestreamCard, OrderOfService, ShareCard } from './ServiceOrder.jsx';
 import WeeklyLinks from './WeeklyLinks.jsx';
 import { DebriefAnswers, featureOn, InputListCard } from './Extras.jsx';
 import { LiveView } from './Live.jsx';
+import { LineupButton } from '../lineup.jsx';
 
 const VIEWS = [
   { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
@@ -131,7 +132,8 @@ function PlanBrowser({ onOpenArchive }) {
   const list = rows ? rows.filter((r) => !r.archived) : null;
   const saved = rows ? rows.filter((r) => r.archived && !r.planDeleted).length : 0;
   const deleted = rows ? rows.filter((r) => r.planDeleted).length : 0;
-  const canArchive = app.can.plans && fri <= thisFri && list?.length > 0;
+  // Archiving a weekend is shared by every team, so it stays with the AV side (and the admin)
+  const canArchive = app.can.plans && app.isAv && fri <= thisFri && list?.length > 0;
   const archived = (r) => {
     setArchiving(false);
     app.toast(r.deleted ? `Deleted ${r.archived} plan${r.archived === 1 ? '' : 's'}` : `Saved ${r.archived} service${r.archived === 1 ? '' : 's'} to the archive`);
@@ -345,7 +347,13 @@ function PlanEditor({ eventId, onChanged }) {
   if (!plan) return <div className="loading-inline">Loading…</div>;
   const ev = plan.event;
   // Past services are read-only. Anything in them can still be copied into an upcoming one.
-  const canEdit = canPlans && !plan.archived;
+  // Leaders edit everything; anyone on a team edits Bible texts, songs, announcements and slides;
+  // the AV team also picks media-library items and keeps the input list.
+  const rights = plan.rights || { lead: canPlans, details: canPlans, av: canPlans };
+  const open = !plan.archived;
+  const canEdit = rights.lead && open;
+  const canDetails = rights.details && open;
+  const canAv = rights.av && open;
 
   return (
     <div className="stack-lg">
@@ -361,7 +369,7 @@ function PlanEditor({ eventId, onChanged }) {
           </div>
           {canPlans && (
             <div className="row-wrap">
-              {plan.archivedEarly && (
+              {plan.archivedEarly && app.isAv && (
                 <button type="button" className="btn btn-outline" disabled={restoring} onClick={putBack}>
                   Put back on the planning page
                 </button>
@@ -384,6 +392,7 @@ function PlanEditor({ eventId, onChanged }) {
             </div>
           </div>
           <div className="row-wrap export-btns">
+            <LineupButton event={ev} className="btn btn-outline" />
             <a className="btn btn-primary" href={`/api/plans/${eventId}/propresenter.zip`} download title="Songs, Bible texts, notes, every uploaded file and a PowerPoint, in one zip">
               <Icon name="doc" size={16} /> Download for ProPresenter
             </a>
@@ -396,12 +405,12 @@ function PlanEditor({ eventId, onChanged }) {
       </section>
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
       <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} onLive={featureOn(app, 'liveShow') && plan.order.length > 0 ? () => setLive(true) : null} />
-      <Scriptures plan={plan} canEdit={canEdit} onSave={patch} />
-      <Songs plan={plan} canEdit={canEdit} onSave={patch} reload={load} />
-      <MediaSection plan={plan} canEdit={canEdit} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
-      {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
-      {featureOn(app, 'inputList') && (canEdit || plan.inputs.length > 0) && <InputListCard plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} />}
-      {ev.kind !== 'soundcheck' && <LivestreamCard plan={plan} />}
+      <Scriptures plan={plan} canEdit={canDetails} onSave={patch} />
+      <Songs plan={plan} canEdit={canDetails} onSave={patch} reload={load} />
+      <MediaSection plan={plan} canEdit={canDetails} canLibrary={canAv} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
+      {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canAnnounce={canDetails} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
+      {featureOn(app, 'inputList') && (app.isAv || plan.inputs.length > 0) && (canAv || plan.inputs.length > 0) && <InputListCard plan={plan} canEdit={canAv} onSave={patch} setPlan={setPlan} />}
+      {ev.kind !== 'soundcheck' && app.isAv && <LivestreamCard plan={plan} />}
       {featureOn(app, 'debrief') && canPlans && <DebriefAnswers plan={plan} />}
       {live && <LiveView eventId={eventId} onClose={() => (setLive(false), load())} />}
       {canEdit && <Guests plan={plan} eventId={eventId} reload={load} />}
@@ -682,6 +691,10 @@ function Songs({ plan, canEdit, onSave, reload }) {
     if (rows[i].key === key) return;
     onSave({ songs: body(rows.map((x, j) => (j === i ? { ...x, key } : x))) });
   };
+  const setNote = (i, note) => {
+    if ((rows[i].note || '') === note) return;
+    onSave({ songs: body(rows.map((x, j) => (j === i ? { ...x, note } : x))) }, 'Note saved');
+  };
   const addSong = (song) => onSave({ songs: [...body(rows), { song: song.id, key: '', note: '' }] }, `Added ${song.title}`);
   const inPlan = new Set(rows.map((x) => x.song.id));
 
@@ -709,10 +722,19 @@ function Songs({ plan, canEdit, onSave, reload }) {
                 x.key && <span className="chip chip-check">Key {x.key}</span>
               )}
               <button type="button" className="btn btn-ghost" aria-expanded={!!open[i]} onClick={() => setOpen({ ...open, [i]: !open[i] })}>
-                {open[i] ? 'Hide lyrics' : 'Lyrics'}
+                {open[i] ? 'Hide lyrics' : x.song.notes ? 'Lyrics & chords' : 'Lyrics'}
               </button>
             </div>
           </div>
+          {canEdit ? (
+            <label className="field">
+              <span className="small">Note for this service (arrangement, who starts, cues)</span>
+              <input defaultValue={x.note || ''} maxLength={300} onBlur={(e) => setNote(i, e.target.value.trim())} placeholder="e.g. Acapella first verse · key change before last chorus" />
+            </label>
+          ) : (
+            x.note && <div className="small">{x.note}</div>
+          )}
+          {open[i] && x.song.notes && <div className="song-notes">{x.song.notes}</div>}
           {open[i] && (x.song.lyrics ? <pre className="lyrics">{x.song.lyrics}</pre> : <p className="muted small">No lyrics yet.</p>)}
           {x.song.proOutdated && <div className="warn-box">Lyrics changed after the .pro was uploaded — re-import in ProPresenter and upload the new .pro.</div>}
           <div className="row-wrap spread">
@@ -786,7 +808,7 @@ function Songs({ plan, canEdit, onSave, reload }) {
   );
 }
 
-function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onChanged }) {
+function MediaSection({ plan, canEdit, canLibrary, canPlans, eventId, setPlan, reload, onChanged }) {
   const app = useApp();
   const [saving, setSaving] = useState(null);
   const upload = async (files, onProgress) => {
@@ -818,7 +840,9 @@ function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onCha
     }
   };
   const assets = plan.assets || [];
-  const showLibrary = assets.length > 0 || canEdit;
+  const showLibrary = assets.length > 0 || canLibrary;
+  // Leaders remove any file; others the ones they uploaded
+  const canRemove = (m) => canPlans || (canEdit && m.uploadedById === app.me.id);
 
   return (
     <section className="card stack" aria-label="Media">
@@ -833,7 +857,7 @@ function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onCha
           <div className="media-grid">
             {assets.map((a) => (
               <MediaCard key={a.id} m={a} sub={`${a.category || 'Library'} · ${fmtSize(a.size)}`}>
-                {canEdit && (
+                {canLibrary && (
                   <button type="button" className="icon-btn" aria-label={`Take ${a.title} out of this service`} onClick={() => setAssets(assets.filter((x) => x.id !== a.id).map((x) => x.id), 'Taken out of this service')}>
                     <Icon name="close" size={16} />
                   </button>
@@ -841,7 +865,7 @@ function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onCha
               </MediaCard>
             ))}
           </div>
-          {canEdit && <AssetPicker have={assets} onAdd={(item) => setAssets([...assets.map((x) => x.id), item.id], `Added ${item.title}`)} />}
+          {canLibrary && <AssetPicker have={assets} onAdd={(item) => setAssets([...assets.map((x) => x.id), item.id], `Added ${item.title}`)} />}
         </div>
       )}
       <div className="stack-sm">
@@ -856,7 +880,7 @@ function MediaSection({ plan, canEdit, canPlans, eventId, setPlan, reload, onCha
                   Save to library
                 </button>
               )}
-              {canPlans && m.status !== 'pending' && m.stored !== 'removed' && (
+              {canRemove(m) && m.status !== 'pending' && m.stored !== 'removed' && (
                 <button type="button" className="icon-btn" aria-label={`Delete ${m.title}`} onClick={() => remove(m)}>
                   <Icon name="close" size={16} />
                 </button>

@@ -11,6 +11,7 @@ import { autoBuildAhead } from '../lib/regularsAuto.js';
 import { runReminders } from '../lib/reminders.js';
 import { mailerReady } from '../lib/mailer.js';
 import { dayName } from '../lib/activity.js';
+import { baseKey, teamKeys, teamsList } from '../lib/teams.js';
 
 export const weekendRouter = Router();
 
@@ -22,7 +23,7 @@ const anyLeader = (req, res, next) => (req.can.edit || req.can.approve || req.ca
 
 // ---------- auto-fill ----------
 weekendRouter.get('/autofill', requirePerm('edit'), wrap(async (req, res) => {
-  res.json(await planAutofill(fridayParam(req.query.friday)));
+  res.json(await planAutofill(fridayParam(req.query.friday), { keys: await teamKeys(req) }));
 }));
 
 // POST { friday, picks: [{ eventId, position, userId }] } — applies the picks that still fit.
@@ -32,12 +33,13 @@ weekendRouter.post('/autofill', requirePerm('edit'), wrap(async (req, res) => {
   const events = await Event.find({ date: { $gte: friday, $lte: addDays(friday, 2) } }).lean();
   const evById = Object.fromEntries(events.map((e) => [String(e._id), e]));
   const users = Object.fromEntries((await User.find({ active: true }).lean()).map((u) => [String(u._id), u]));
+  const keys = await teamKeys(req);
   let applied = 0;
   const skipped = [];
   for (const p of picks) {
     const e = evById[p?.eventId];
     const u = users[p?.userId];
-    if (!e || !u || !e.needs.includes(p.position) || !u.positions.includes(p.position)) {
+    if (!e || !u || !keys.has(p.position) || !e.needs.includes(p.position) || !u.positions.includes(p.position)) {
       skipped.push(p);
       continue;
     }
@@ -100,10 +102,11 @@ weekendRouter.post('/copy', requirePerm('edit'), wrap(async (req, res) => {
     unavailableByEvent(targets),
     awayByEvent(targets),
   ]);
+  const keys = await teamKeys(req); // copy this team's people only
   for (const a of prevAsg) {
     const t = map[String(a.event)];
     const u = a.user;
-    if (!t || !u) continue;
+    if (!t || !u || !keys.has(baseKey(a.position))) continue;
     const tid = String(t._id);
     const uid = String(u._id);
     if (!t.needs.includes(baseOf(a.position))) continue;
@@ -132,15 +135,18 @@ weekendRouter.get('/check', anyLeader, wrap(async (req, res) => {
   const today = todayIn(s.timezone);
   const events = await Event.find({ date: { $gte: friday, $lte: addDays(friday, 2) } }).sort({ date: 1, start: 1 }).lean();
   const ids = events.map((e) => e._id);
-  const [asg, unav, away, plans, pendingReqs, pendingSubs, people] = await Promise.all([
+  const keys = await teamKeys(req);
+  const [asgAll, unav, away, plans, pendingReqs, pendingSubs, people] = await Promise.all([
     Assignment.find({ event: { $in: ids } }).populate('user').lean(),
     unavailableByEvent(events),
     awayByEvent(events),
     Plan.find({ event: { $in: ids } }).lean(),
     Request.find({ status: 'pending', $or: [{ event: { $in: ids } }, { targetEvent: { $in: ids } }] }).populate('from', 'name').lean(),
     Submission.find({ status: 'pending', event: { $in: ids } }, { event: 1 }).lean(),
-    User.find({ active: true }).sort({ name: 1 }),
+    User.find({ active: true, 'teams.team': req.team.key }).sort({ name: 1 }),
   ]);
+  // This team's spots and people
+  const asg = asgAll.filter((a) => keys.has(baseKey(a.position)));
   const showPhone = req.can.message || req.can.people;
   const who = (u) => (u ? { id: String(u._id), name: u.name, phone: showPhone ? u.phone : undefined } : null);
   const ev = (e) => ({ id: String(e._id), title: e.title, date: e.date, start: e.start, call: e.call, kind: e.kind || 'service' });
@@ -155,7 +161,7 @@ weekendRouter.get('/check', anyLeader, wrap(async (req, res) => {
     const here = asg.filter((a) => String(a.event) === eid);
     const counts = {};
     for (const a of here) if (a.user) counts[String(a.user._id)] = (counts[String(a.user._id)] || 0) + 1;
-    for (const pos of e.needs) if (!here.some((a) => a.position === pos)) open.push({ event: ev(e), position: pos });
+    for (const pos of e.needs) if (keys.has(pos) && !here.some((a) => a.position === pos)) open.push({ event: ev(e), position: pos });
     for (const a of here) {
       if (!a.user) continue;
       const uid = String(a.user._id);
@@ -191,7 +197,7 @@ weekendRouter.get('/check', anyLeader, wrap(async (req, res) => {
     reminders,
     flags,
     plansMissing,
-    pendingRequests: pendingReqs.map((r) => ({ id: String(r._id), type: r.type, from: r.from?.name || '' })),
+    pendingRequests: pendingReqs.filter((r) => keys.has(baseKey(r.position))).map((r) => ({ id: String(r._id), type: r.type, from: r.from?.name || '' })),
     pendingUploads: events.filter((e) => uploadsBy[String(e._id)]).map((e) => ({ event: ev(e), count: uploadsBy[String(e._id)] })),
     availability: { stale: stale.map((p) => ({ ...who(p), updatedAt: p.availabilityUpdatedAt || null })), total: people.length },
     email: { configured: mailerReady(), on: s.reminderEmails, days: s.reminderDays },
@@ -226,7 +232,12 @@ weekendRouter.get('/runsheet/:eventId', wrap(async (req, res) => {
     Plan.findOne({ event: e._id }).populate('songs.song').lean(),
   ]);
   const label = Object.fromEntries(positions.map((p) => [p.key, p.label]));
-  const order = Object.fromEntries(positions.map((p, i) => [p.key, i]));
+  // Every team's crew, grouped by team (in team order), then by position order
+  const teams = await teamsList();
+  const teamRank = Object.fromEntries(teams.map((t, i) => [t.key, i]));
+  const teamName = Object.fromEntries(teams.map((t) => [t.key, t.name]));
+  const posTeam = Object.fromEntries(positions.map((p) => [p.key, p.team || 'av']));
+  const order = Object.fromEntries(positions.map((p, i) => [p.key, (teamRank[p.team || 'av'] ?? 99) * 1000 + i]));
   const crewOf = (x) =>
     x.needs
       .flatMap((pos) => [pos, `${pos}+shadow`])
@@ -234,10 +245,11 @@ weekendRouter.get('/runsheet/:eventId', wrap(async (req, res) => {
         const a = asg.find((y) => String(y.event) === String(x._id) && y.position === slot);
         if (isShadow(slot) && !a) return null;
         const p = a?.user ? personView(a.user, req.user) : null;
-        return { position: label[baseOf(slot)] || baseOf(slot), shadow: isShadow(slot), name: p?.name || null, phone: p?.phone || '', confirmed: !!a?.confirmedAt };
+        const key = baseOf(slot);
+        return { key, team: teamName[posTeam[key]] || 'AV Team', position: label[key] || key, shadow: isShadow(slot), name: p?.name || null, phone: p?.phone || '', confirmed: !!a?.confirmedAt };
       })
       .filter(Boolean)
-      .sort((a, b) => (order[a.position] ?? 0) - (order[b.position] ?? 0));
+      .sort((a, b) => (order[a.key] ?? 0) - (order[b.key] ?? 0) || a.shadow - b.shadow);
   const groupBy = Object.fromEntries(groups.map((g) => [String(g._id), groupView(g, req.user)]));
   const pack = (x) => ({ ...eventView(x), crew: crewOf(x), groups: (x.groups || []).map((id) => groupBy[String(id)]).filter(Boolean) });
   const files = plan ? await Media.find({ plan: plan._id, status: 'approved' }, { originalName: 1, size: 1 }).lean() : [];

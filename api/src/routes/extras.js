@@ -6,6 +6,7 @@ import { requirePerm } from '../auth.js';
 import { addDays, bad, forbidden, getSettings, isId, notFound, str, todayIn, wrap } from '../lib/util.js';
 import { featureOn, requireFeature } from '../lib/features.js';
 import { evName } from '../lib/activity.js';
+import { isTeamLeader } from '../lib/teams.js';
 
 async function names(ids) {
   const users = await User.find({ _id: { $in: [...new Set(ids.filter(Boolean).map(String))] } }, { name: 1 }).lean();
@@ -214,7 +215,7 @@ signoffsRouter.post('/', wrap(async (req, res) => {
 
 signoffsRouter.get('/', wrap(async (req, res) => {
   const uid = isId(req.query.userId) ? req.query.userId : String(req.user._id);
-  if (uid !== String(req.user._id) && !req.can.people && req.user.role !== 'leader') throw forbidden();
+  if (uid !== String(req.user._id) && !req.can.people && !isTeamLeader(req)) throw forbidden();
   const list = await SignOff.find({ user: uid }).sort({ createdAt: -1 }).lean();
   const who = await names(list.map((s) => s.by));
   res.json(list.map((s) => ({ position: s.position, by: who[String(s.by)] || '', note: s.note, at: s.createdAt })));

@@ -3,7 +3,7 @@
 //  - the bulletin: the order without times or cues, plus sermon, Bible texts, songs and announcements,
 //    for the congregation
 // Both open from a private link (and its QR code) without signing in.
-import { Assignment, ORDER_KINDS, Position } from '../models.js';
+import { Assignment, ORDER_KINDS, Position, Team } from '../models.js';
 import { str } from './util.js';
 import { baseOf, isShadow } from './availability.js';
 
@@ -32,15 +32,21 @@ export const orderView = (order = []) =>
   order.map((x) => ({ id: String(x._id), kind: x.kind, title: x.title, who: x.who, minutes: x.minutes || 0, notes: x.notes, bulletin: x.bulletin !== false }));
 
 // Who's serving, by position (names only: the rundown link can reach guest speakers)
+// Everyone serving, every team, grouped by team in the team order
 async function crewNames(ev) {
-  const [positions, asg] = await Promise.all([Position.find({}).sort({ order: 1 }).lean(), Assignment.find({ event: ev._id }).populate('user', 'name')]);
+  const [positions, asg, teams] = await Promise.all([Position.find({}).sort({ order: 1 }).lean(), Assignment.find({ event: ev._id }).populate('user', 'name'), Team.find({}).sort({ order: 1, name: 1 }).lean()]);
   const label = Object.fromEntries(positions.map((p) => [p.key, p.label]));
-  return (ev.needs || [])
+  const teamOf = Object.fromEntries(positions.map((p) => [p.key, p.team || 'av']));
+  const rank = Object.fromEntries(teams.map((t, i) => [t.key, i]));
+  const teamName = Object.fromEntries(teams.map((t) => [t.key, t.name]));
+  const needs = [...(ev.needs || [])].sort((x, y) => (rank[teamOf[x]] ?? 99) - (rank[teamOf[y]] ?? 99));
+  return needs
     .flatMap((pos) => [pos, `${pos}+shadow`])
     .map((slot) => {
       const a = asg.find((y) => y.position === slot);
       if (isShadow(slot) && !a?.user) return null;
-      return { position: label[baseOf(slot)] || baseOf(slot), shadow: isShadow(slot), name: a?.user?.name || '' };
+      const t = teamOf[baseOf(slot)] || 'av';
+      return { team: teamName[t] || 'AV Team', position: label[baseOf(slot)] || baseOf(slot), shadow: isShadow(slot), name: a?.user?.name || '' };
     })
     .filter(Boolean);
 }

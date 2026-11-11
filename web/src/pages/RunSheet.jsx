@@ -170,7 +170,14 @@ function Crew({ list }) {
   return (
     <table className="rs-crew">
       <tbody>
-        {list.map((c, i) => (
+        {list.map((c, i) => [
+          new Set(list.map((x) => x.team)).size > 1 && c.team && c.team !== list[i - 1]?.team && (
+            <tr key={`t${i}`} className="rd-heading">
+              <th colSpan={4} scope="rowgroup">
+                {c.team}
+              </th>
+            </tr>
+          ),
           <tr key={i}>
             <th scope="row">
               {c.position}
@@ -179,8 +186,8 @@ function Crew({ list }) {
             <td>{c.name || <span className="danger">OPEN</span>}</td>
             <td className="small">{c.phone ? prettyPhone(c.phone) : ''}</td>
             <td className="small">{c.name ? (c.confirmed ? '✓ confirmed' : 'not confirmed') : ''}</td>
-          </tr>
-        ))}
+          </tr>,
+        ])}
       </tbody>
     </table>
   );

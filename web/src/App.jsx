@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { api, fridayOf, roleLabel, setViewAs, signalSignedOut, todayISO, unsaved } from './lib.js';
+import { api, currentTeam, fridayOf, roleLabel, setTeam, setViewAs, signalSignedOut, todayISO, unsaved } from './lib.js';
 import { AppCtx, Avatar, WaSheet } from './ui.jsx';
 import { PreviewBanner, PreviewPicker } from './pages/Preview.jsx';
 import SyncDialog from './pages/SyncDialog.jsx';
@@ -18,6 +18,7 @@ import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
 import RunSheet from './pages/RunSheet.jsx';
 import Gear from './pages/Gear.jsx';
+import TeamSetup from './pages/TeamSetup.jsx';
 // The flow-chart library is big, so the Planning tab loads only when opened
 const Planning = lazy(() => import('./pages/Planning.jsx'));
 import { BulletinPage, RundownPage } from './pages/Share.jsx';
@@ -79,7 +80,9 @@ export default function App() {
           return;
         }
       }
-      if (!b.me.previewing && b.me.role === 'admin') setRoster(b.people);
+      if (!b.me.previewing && b.me.role === 'admin') setRoster(b.everyone.map((p) => b.people.find((x) => x.id === p.id) || p));
+      // The server picked a different team (the saved one isn't theirs any more): remember its choice
+      if (!b.me.previewing && b.team && b.team.key !== currentTeam()) setTeam(b.team.key);
       setBoot(b);
       setPhase('app');
     } catch (e) {
@@ -183,7 +186,7 @@ export default function App() {
   if (runsheetId) return <RunSheet id={runsheetId} />;
   return (
     <Shell
-      key={viewAs?.id || 'me'}
+      key={`${viewAs?.id || 'me'}|${boot.team?.key || ''}`}
       boot={boot}
       reload={load}
       onSignedOut={() => setPhase('login')}
@@ -192,16 +195,18 @@ export default function App() {
   );
 }
 
+// av: this tab belongs to the AV team's side (gear, outside groups), hidden on other teams
 const TABS = [
   { id: 'schedule', label: 'Schedule', show: () => true },
   { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message },
   { id: 'mine', label: 'My shifts', show: () => true },
   { id: 'plans', label: 'Service plans', show: () => true },
   { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader' },
-  { id: 'gear', label: 'Gear', show: () => true },
+  { id: 'gear', label: 'Gear', show: () => true, av: true },
   { id: 'requests', label: 'Requests', show: (c) => c.approve },
-  { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message },
+  { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message, av: true },
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
+  { id: 'setup', label: 'Team setup', show: (c, me) => me.head && me.role !== 'admin' },
   { id: 'resources', label: 'Resources & help', show: () => true },
   { id: 'settings', label: 'Settings', show: (c, me) => me.role === 'admin' },
   { id: 'activity', label: 'Activity', show: (c, me) => me.role === 'admin' },
@@ -214,8 +219,10 @@ function noteView(page, detail) {
 
 function Shell({ boot, reload, onSignedOut, preview }) {
   const { me, settings, positions, people, groups, announcements, academy } = boot;
+  const team = boot.team || { key: 'av', name: 'AV Team', kind: 'av' };
+  const isAv = team.kind === 'av';
   const can = me.can;
-  const tabs = TABS.filter((t) => t.show(can, me));
+  const tabs = TABS.filter((t) => t.show(can, me) && (!t.av || isAv));
   const fromHash = () => {
     const h = window.location.hash.replace('#', '');
     return tabs.some((t) => t.id === h) ? h : 'schedule';
@@ -282,15 +289,25 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   }, [refreshPending]);
 
   const ctx = useMemo(() => {
-    const posMap = Object.fromEntries(positions.map((p) => [p.key, p.label]));
-    const byId = Object.fromEntries(people.map((p) => [p.id, p]));
+    // Labels for every team's positions, so shifts and line-ups from other teams read right
+    const posMap = Object.fromEntries((boot.allPositions || positions).map((p) => [p.key, p.label]));
+    const byId = Object.fromEntries([...(boot.everyone || []), ...people].map((p) => [p.id, p]));
     const groupById = Object.fromEntries(groups.map((g) => [g.id, g]));
+    const teamByKey = Object.fromEntries((boot.allTeams || []).map((t) => [t.key, t]));
     return {
       me,
       can,
       settings,
       positions,
+      allPositions: boot.allPositions || positions,
       people,
+      everyone: boot.everyone || people,
+      team,
+      isAv,
+      teams: boot.teams || [],
+      allTeams: boot.allTeams || [],
+      teamName: (k) => teamByKey[k]?.name || 'AV Team',
+      posTeam: (k) => (boot.allPositions || []).find((p) => p.key === String(k).replace(/\+shadow$/, ''))?.team || 'av',
       groups,
       announcements,
       academy,
@@ -312,6 +329,14 @@ function Shell({ boot, reload, onSignedOut, preview }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot, toast, resFilter, refreshPending, weekend]);
 
+  const switchTeam = (key) => {
+    if (key === team.key) return;
+    if (unsaved.size && !window.confirm('You have unsaved changes on this page. Switch teams without saving?')) return;
+    unsaved.clear();
+    setTeam(key);
+    reload();
+  };
+
   const signOut = async () => {
     await api('/auth/logout', { method: 'POST' }).catch(() => {});
     onSignedOut();
@@ -329,11 +354,26 @@ function Shell({ boot, reload, onSignedOut, preview }) {
           </span>
         </div>
         <div className="topbar-user">
+          {(boot.teams || []).length > 1 && !previewingAs && (
+            <label className="team-switch">
+              <span className="sr-only">Team</span>
+              <select value={team.key} onChange={(e) => switchTeam(e.target.value)} title="Switch between your teams">
+                {boot.teams.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button type="button" className="user-btn" onClick={() => setAccount(true)} aria-label="Your account">
             <Avatar name={me.name} size={32} tone="accent" />
             <span>
               <span className="user-name">{me.name}</span>
-              <span className="topbar-sub">{roleLabel(me)}</span>
+              <span className="topbar-sub">
+                {roleLabel(me)}
+                {(boot.teams || []).length <= 1 && team.key !== 'av' ? ` · ${team.name}` : ''}
+              </span>
             </span>
           </button>
           {preview && !previewingAs && (
@@ -374,6 +414,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'team' && <Team />}
         {tab === 'resources' && <Resources />}
         {tab === 'settings' && <Settings />}
+        {tab === 'setup' && <TeamSetup />}
         {tab === 'check' && <WeekendCheck />}
         {tab === 'activity' && <Activity />}
       </main>

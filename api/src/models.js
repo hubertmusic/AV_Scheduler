@@ -4,7 +4,9 @@ const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 
 export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
-export const EVENT_KINDS = ['service', 'soundcheck'];
+export const EVENT_KINDS = ['service', 'soundcheck', 'rehearsal'];
+// What a team does decides which parts of Crew Call it sees (gear, media, outside groups… are AV's)
+export const TEAM_KINDS = ['av', 'music', 'other'];
 export const REQUEST_TYPES = ['swap', 'transfer', 'pickup', 'drop'];
 // Kinds of reusable files in the media library
 export const LIBRARY_CATEGORIES = ['Backgrounds', 'Countdowns', 'Logos & bumpers', 'Announcement loops', 'Other'];
@@ -45,7 +47,32 @@ const userSchema = new Schema(
       ],
       default: [],
     },
-    maxPerMonth: { type: Number, default: 0 }, // 0 = no limit
+    maxPerMonth: { type: Number, default: 0 }, // 0 = no limit (legacy; per team in teams[])
+    // The teams this person is on, with their role in each. The admin (role 'admin') is over all.
+    teams: {
+      type: [
+        new Schema(
+          {
+            team: { type: String, required: true }, // Team.key
+            role: { type: String, enum: ['leader', 'crew'], default: 'crew' },
+            head: { type: Boolean, default: false }, // the team's leader: manages its people and leaders
+            title: { type: String, default: '' },
+            perms: {
+              edit: { type: Boolean, default: false },
+              approve: { type: Boolean, default: false },
+              message: { type: Boolean, default: false },
+              resources: { type: Boolean, default: false },
+              people: { type: Boolean, default: false },
+              groups: { type: Boolean, default: false },
+              plans: { type: Boolean, default: false },
+            },
+            maxPerMonth: { type: Number, default: 0 }, // 0 = no limit
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     availabilityUpdatedAt: Date,
     lastLoginAt: Date,
     lastSeenAt: Date,
@@ -65,7 +92,21 @@ const positionSchema = new Schema({
   key: { type: String, required: true, unique: true },
   label: { type: String, required: true, trim: true },
   order: { type: Number, default: 0 },
+  team: { type: String, default: 'av', index: true }, // Team.key
 });
+
+// A ministry team with its own people, positions and leaders (AV, Praise…). Services, plans,
+// songs and the calendar are shared between teams.
+const teamSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    name: { type: String, required: true, trim: true },
+    kind: { type: String, enum: TEAM_KINDS, default: 'other' },
+    groupLink: { type: String, default: '' }, // the team's WhatsApp group
+    order: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
 
 const eventSchema = new Schema(
   {
@@ -77,6 +118,7 @@ const eventSchema = new Schema(
     needs: { type: [String], default: [] }, // position keys
     notes: { type: String, default: '' },
     kind: { type: String, enum: EVENT_KINDS, default: 'service' },
+    team: { type: String, default: null }, // whose rehearsal or meeting this is; null = a service for everyone
     groups: [ref('Group')], // outside groups taking part (e.g. praise team at a sound check)
     forEvent: ref('Event'), // sound check: the service it prepares for
     manual: { type: Boolean, default: false }, // added by hand, not from the template
@@ -183,6 +225,7 @@ const resourceSchema = new Schema(
     title: { type: String, required: true, trim: true },
     url: { type: String, default: '' },
     position: { type: String, default: '' }, // '' = general
+    team: { type: String, default: 'av' }, // whose training and help this is
     kind: { type: String, default: 'Link' },
     minutes: { type: Number, default: 0 },
   },
@@ -401,6 +444,8 @@ const boardSchema = new Schema(
     nodes: { type: [Schema.Types.Mixed], default: [] },
     edges: { type: [Schema.Types.Mixed], default: [] },
     rev: { type: Number, default: 0 }, // bumps on every save, so two people can't overwrite each other unknowingly
+    team: { type: String, default: 'av', index: true }, // whose board this is
+    shared: { type: Boolean, default: false }, // shown to every team's leaders
     createdBy: ref('User'),
     updatedBy: ref('User'),
   },
@@ -512,6 +557,7 @@ export const Submission = model('Submission', submissionSchema);
 
 export const User = model('User', userSchema);
 export const Position = model('Position', positionSchema);
+export const Team = model('Team', teamSchema);
 export const Event = model('Event', eventSchema);
 export const Group = model('Group', groupSchema);
 export const Assignment = model('Assignment', assignmentSchema);

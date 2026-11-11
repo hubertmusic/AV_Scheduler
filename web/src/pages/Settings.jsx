@@ -2,28 +2,31 @@ import { useEffect, useState } from 'react';
 import { api, unsaved, uploadFiles } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
 import { ExtraFeaturesCard } from './Extras.jsx';
+import { TeamsAdmin } from './TeamSetup.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
 
 export default function Settings() {
+  const { team, isAv } = useApp();
   return (
     <div className="stack-lg">
       <div className="page-head">
         <div>
           <h1>Settings</h1>
-          <div className="muted">Only you (the admin) see this page.</div>
+          <div className="muted">Only you (the admin) see this page. Positions and the template’s checkboxes are for the {team.name}; switch teams at the top to set up another team.</div>
         </div>
       </div>
       <div className="split">
         <div className="main-col stack-lg">
           <Template />
+          <TeamsAdmin />
         </div>
         <div className="side-col stack-lg">
           <Reminders />
           <SignIn />
           <General />
           <BulletinLogo />
-          <BurnoutWatch />
+          {isAv && <BurnoutWatch />}
           <ExtraFeaturesCard />
           <Positions />
         </div>
@@ -32,7 +35,7 @@ export default function Settings() {
   );
 }
 
-function useSaver() {
+export function useSaver() {
   const app = useApp();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -205,14 +208,14 @@ function Reminders() {
 
 function General() {
   const { settings } = useApp();
-  const [f, setF] = useState({ orgName: settings.orgName, timezone: settings.timezone, countryCode: settings.countryCode, groupLink: settings.groupLink });
+  const [f, setF] = useState({ orgName: settings.orgName, timezone: settings.timezone, countryCode: settings.countryCode });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const { busy, error, run } = useSaver();
   return (
     <section className="card stack" aria-label="General">
       <h2>General</h2>
       <label className="field">
-        <span>Team name</span>
+        <span>Church or ministry name</span>
         <input value={f.orgName} onChange={set('orgName')} />
       </label>
       <label className="field">
@@ -228,11 +231,7 @@ function General() {
         <span>Default country code for phone numbers</span>
         <input value={f.countryCode} onChange={set('countryCode')} inputMode="numeric" />
       </label>
-      <label className="field">
-        <span>WhatsApp crew group invite link (optional)</span>
-        <input type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} value={f.groupLink} onChange={set('groupLink')} placeholder="https://chat.whatsapp.com/…" />
-      </label>
-      <p className="muted small">With a group link, message sheets get a “Copy &amp; open crew group” button. WhatsApp doesn’t let other apps pre-fill a group message, so the text is copied for you to paste.</p>
+      <p className="muted small">Each team’s WhatsApp group link is under Teams.</p>
       {error && <div className="error" role="alert">{error}</div>}
       <button type="button" className="btn btn-primary self-start" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: f }), 'Settings saved')}>
         Save
@@ -305,8 +304,8 @@ function BurnoutWatch() {
   );
 }
 
-function Positions() {
-  const { positions } = useApp();
+export function Positions() {
+  const { positions, team } = useApp();
   const [labels, setLabels] = useState(Object.fromEntries(positions.map((p) => [p.key, p.label])));
   const [newLabel, setNewLabel] = useState('');
   const { busy, error, run } = useSaver();
@@ -322,6 +321,7 @@ function Positions() {
   return (
     <section className="card stack" aria-label="Positions">
       <h2>Positions</h2>
+      <p className="muted small">The {team.name}’s positions. Each team has its own.</p>
       <ul className="pos-list">
         {positions.map((p, i) => (
           <li key={p.key}>
@@ -401,7 +401,7 @@ function PlanAhead() {
 }
 
 function Template() {
-  const { settings, positions, groups } = useApp();
+  const { settings, positions, groups, isAv, team } = useApp();
   const fromSettings = () => settings.weekendTemplate.map((t) => ({ ...t, kind: t.kind || 'service', needs: [...t.needs], groups: (t.groups || []).map(String), off: Boolean(t.off) }));
   const [rows, setRows] = useState(fromSettings);
   const [saved, setSaved] = useState(() => JSON.stringify(fromSettings()));
@@ -435,6 +435,7 @@ function Template() {
           “Build this weekend” on the Schedule creates these services and sound checks. Turn a service <strong>off</strong> to stop using it without losing its settings. For a weekend that’s already built, press <strong>Sync with template</strong> on the Schedule: it adds missing services, offers to update ones you changed here, and offers to take off ones you removed or turned off.
         </p>
       </div>
+      {!isAv && <p className="current-box small">The checkboxes show the {team.name}’s positions; other teams’ positions on each service are kept as they are.</p>}
       <PlanAhead />
       {dirty && (
         <div className="warn-box row-wrap spread">

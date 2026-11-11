@@ -9,13 +9,13 @@ const PERMS = [
   { id: 'message', label: 'Message the crew', help: 'Send lineups and reminders on WhatsApp; see crew phone numbers.' },
   { id: 'resources', label: 'Manage training links', help: 'Add, edit and remove quick-review resources.' },
   { id: 'people', label: 'Manage crew & positions', help: 'Invite crew, set who is trained on what, deactivate crew.' },
-  { id: 'plans', label: 'Edit service plans', help: 'Write sermon notes and Bible texts, manage songs and ProPresenter files, upload media, invite guests and approve what they send.' },
-  { id: 'groups', label: 'Manage outside groups', help: 'Add and edit groups like the praise team or choir, with their contacts and WhatsApp group links.' },
+  { id: 'plans', label: 'Lead service plans', help: 'Set the sermon, speaker, pastor’s notes and order of service; invite guests and approve what they send. (Everyone on the team can add songs, Bible texts, chord notes and slides.)' },
+  { id: 'groups', label: 'Manage outside groups', help: 'Add and edit outside groups like a visiting band or choir, with their contacts and WhatsApp group links.', av: true },
 ];
 
 export default function Team() {
   const app = useApp();
-  const { people, me, positions, posLabel } = app;
+  const { people, me, positions, posLabel, team, isAv } = app;
   const [selId, setSelId] = useState(people[0]?.id);
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState('');
@@ -38,7 +38,7 @@ export default function Team() {
         <div>
           <h1>Team &amp; roles</h1>
           <div className="muted">
-            {counts.all} active · {counts.leaders} leader{counts.leaders === 1 ? '' : 's'} (including admin)
+            {team.name} · {counts.all} active · {counts.leaders} leader{counts.leaders === 1 ? '' : 's'}
           </div>
         </div>
         <div className="row-wrap">
@@ -70,7 +70,7 @@ export default function Team() {
                   <span className="small regular-line">Regular: {p.regulars.map((r) => describeRule(r, posLabel).week.replace(' of the month', '')).join(', ')}</span>
                 )}
               </span>
-              {p.active && app.settings.burnoutWeeks > 0 && load[p.id]?.streak >= app.settings.burnoutWeeks && (
+              {p.active && isAv && app.settings.burnoutWeeks > 0 && load[p.id]?.streak >= app.settings.burnoutWeeks && (
                 <span className="chip chip-pending" title="Burnout watch: consider giving them a weekend off, or say thanks">
                   {load[p.id].streak} weekends in a row
                 </span>
@@ -91,7 +91,10 @@ export default function Team() {
 function PersonPanel({ person, me, positions }) {
   const app = useApp();
   const isAdmin = me.role === 'admin';
-  const editable = isAdmin || person.role === 'crew' || person.id === me.id;
+  // The admin and the team's head leader change leaders and roles; only the admin changes the head
+  const canRoles = !!me.head && (isAdmin || !person.head);
+  const editable = canRoles || person.role === 'crew' || person.id === me.id;
+  const otherTeams = (person.teams || []).filter((k) => k !== app.team.key);
   const [f, setF] = useState({
     name: person.name,
     email: person.email || '',
@@ -120,13 +123,26 @@ function PersonPanel({ person, me, positions }) {
     try {
       const body = { name: f.name, phone: f.phone, positions: f.positions, trainee: f.trainee, leads: f.leads.filter((k) => f.positions.includes(k)), maxPerMonth: Number(f.maxPerMonth) || 0 };
       if (f.email && f.email !== person.email) body.email = f.email;
-      if (isAdmin && person.role !== 'admin') {
+      if (canRoles && person.role !== 'admin' && person.id !== me.id) {
         body.role = f.role;
         body.leaderTitle = f.leaderTitle;
         if (f.role === 'leader' && person.role === 'leader') body.perms = f.perms;
       }
       await api(`/people/${person.id}`, { method: 'PATCH', body });
       app.toast(f.role === 'leader' && person.role !== 'leader' ? `${person.name} is now a team leader — set their privileges below` : 'Saved');
+      await app.reload();
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+
+  const takeOff = async () => {
+    if (!window.confirm(`Take ${person.name} off the ${app.team.name}? They’ll come off the team’s upcoming spots but keep their login${otherTeams.length ? ` and their place on the ${otherTeams.map(app.teamName).join(' and ')}` : ''}.`)) return;
+    setBusy(true);
+    try {
+      await api(`/people/${person.id}`, { method: 'PATCH', body: { onTeam: false } });
+      app.toast(`${person.name} is off the ${app.team.name}`);
       await app.reload();
     } catch (e) {
       setError(e.message);
@@ -181,10 +197,11 @@ function PersonPanel({ person, me, positions }) {
             {roleLabel(person)}
             {person.phone ? ` · ${prettyPhone(person.phone)}` : ''}
           </div>
+          {otherTeams.length > 0 && <div className="muted small">Also on the {otherTeams.map(app.teamName).join(' and ')}</div>}
         </div>
       </div>
 
-      {!editable && <p className="muted small">Only the admin can change team leaders.</p>}
+      {!editable && <p className="muted small">Only the admin or the {app.team.name}’s head leader can change team leaders.</p>}
 
       {editable && (
         <>
@@ -256,7 +273,7 @@ function PersonPanel({ person, me, positions }) {
         </>
       )}
 
-      {isAdmin && person.role !== 'admin' && (
+      {canRoles && person.role !== 'admin' && person.id !== me.id && (
         <div className="row-wrap fields-2">
           <label className="field">
             <span>Role</span>
@@ -277,16 +294,17 @@ function PersonPanel({ person, me, positions }) {
       {person.role === 'leader' && f.role === 'leader' && (
         <fieldset className="fieldset fieldset-strong">
           <legend>Leader privileges</legend>
-          {PERMS.map((p) => (
+          {PERMS.filter((p) => !p.av || app.isAv).map((p) => (
             <label key={p.id} className="check check-top">
-              <input type="checkbox" checked={!!f.perms[p.id]} disabled={!isAdmin} onChange={() => togglePerm(p.id)} />
+              <input type="checkbox" checked={!!f.perms[p.id]} disabled={!canRoles || person.id === me.id} onChange={() => togglePerm(p.id)} />
               <span className="col">
                 <strong>{p.label}</strong>
                 <span className="muted small">{p.help}</span>
               </span>
             </label>
           ))}
-          {!isAdmin && <p className="muted small">Only the admin can change privileges.</p>}
+          {person.head && <p className="muted small">The head leader has every privilege on this team. Only the admin picks the head leader (Settings → Teams).</p>}
+          {!person.head && !canRoles && <p className="muted small">Only the admin or the head leader can change privileges.</p>}
         </fieldset>
       )}
       {person.role === 'admin' && <p className="muted small">The admin always has every privilege.</p>}
@@ -307,7 +325,12 @@ function PersonPanel({ person, me, positions }) {
               Sign out everywhere
             </button>
           )}
-          {person.id !== me.id && person.role !== 'admin' && (
+          {person.id !== me.id && person.role !== 'admin' && me.head && person.active && (isAdmin || !person.head) && (
+            <button type="button" className="btn btn-ghost" onClick={takeOff} disabled={busy}>
+              Take off the {app.team.name}
+            </button>
+          )}
+          {person.id !== me.id && person.role !== 'admin' && (isAdmin || !otherTeams.length) && (
             <button type="button" className={`btn ${person.active ? 'btn-danger' : 'btn-ghost'}`} onClick={() => setActive(!person.active)} disabled={busy}>
               {person.active ? 'Deactivate' : 'Reactivate'}
             </button>
@@ -324,7 +347,7 @@ function InviteLink({ person, url, reset }) {
   const app = useApp();
   const text = reset
     ? `Hi ${firstName(person.name)}, here’s a link to set a new Crew Call password (works for 14 days): ${url}`
-    : `Hi ${firstName(person.name)}, you’ve been added to ${app.settings.orgName} on Crew Call — that’s where you’ll see your AV shifts, swap them and find training links. Set your password here (works for 14 days): ${url}`;
+    : `Hi ${firstName(person.name)}, you’ve been added to the ${app.team.name} at ${app.settings.orgName} on Crew Call — that’s where you’ll see your shifts, who you’re serving with, swap shifts and find training links. Set your password here (works for 14 days): ${url}`;
   return (
     <div className="current-box stack-sm">
       <div className="label-sm">{reset ? 'Password reset link' : 'Invite link'}</div>
@@ -376,11 +399,16 @@ function AddPerson({ onClose }) {
   };
 
   return (
-    <Modal title={done ? `${done.person.name} was added` : 'Add a person'} onClose={onClose}>
+    <Modal title={done ? `${done.person.name} was added` : `Add a person to the ${app.team.name}`} onClose={onClose}>
       {done ? (
         <div className="stack">
-          <p className="muted">Send them this link to set their password. They’ll show up on the schedule right away; the invite works for 14 days.</p>
-          <InviteLink person={done.person} url={done.inviteUrl} />
+          {done.joined && <p className="muted">They already had a Crew Call login from another team, so they keep it. They can switch between their teams at the top of the app.</p>}
+          {done.inviteUrl ? (
+            <>
+              <p className="muted">Send them this link to set their password. They’ll show up on the schedule right away; the invite works for 14 days.</p>
+              <InviteLink person={done.person} url={done.inviteUrl} />
+            </>
+          ) : null}
           <div className="row-wrap">
             <button type="button" className="btn btn-primary" onClick={() => { setDone(null); setF({ name: '', email: '', phone: '', positions: [] }); }}>
               Add another
@@ -400,6 +428,7 @@ function AddPerson({ onClose }) {
             <span>Email (they sign in with this)</span>
             <input type="email" required value={f.email} onChange={set('email')} autoComplete="off" />
           </label>
+          <p className="muted small">Already on another team? Use the same email: they keep one login and one calendar.</p>
           <label className="field">
             <span>Mobile (for WhatsApp)</span>
             <input type="tel" value={f.phone} onChange={set('phone')} placeholder="(423) 555-0100" />

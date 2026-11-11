@@ -9,6 +9,7 @@ const PATHS = {
   chevR: <path d="M9 6l6 6-6 6" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   chat: <path d="M4 19l1.5-4A7.5 7.5 0 1 1 9 18.5L4 19z" />,
+  phone: <path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" />,
   cal: (
     <>
       <rect x="3.5" y="5" width="17" height="15" rx="2" />

@@ -33,8 +33,10 @@ function fold(line) {
 }
 
 /**
- * items: [{ uid, event, positionLabel, crew, updatedAt }]
- * Each calendar entry starts at the call time so people arrive on time.
+ * items: [{ uid, event, positionLabel, crew, lineup, updatedAt }]
+ * A shift (positionLabel set) starts at the call time so people arrive on time, with reminders.
+ * Every other service and rehearsal (positionLabel empty) is shown as free time, with who's
+ * serving on each team, so everyone sees the whole picture from one subscription.
  */
 export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
   const now = fmt(new Date());
@@ -51,6 +53,10 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
   ];
   for (const it of items) {
     const e = it.event;
+    if (!it.positionLabel) {
+      lines.push(...infoEvent(it, tz, now, link));
+      continue;
+    }
     const start = localToDate(e.date, e.call, tz);
     let end = localToDate(e.date, e.end, tz);
     if (end <= start) end = new Date(start.getTime() + 2 * 3600 * 1000);
@@ -61,7 +67,7 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
       it.viaRegular ? `This is your regular ${it.viaRegular} shift.` : '',
       `Call time ${e.call}, ${isCheck ? 'sound check' : 'service'} starts ${e.start}.`,
       it.groups ? `${isCheck ? 'Sound checking' : 'With'}: ${it.groups}` : '',
-      it.crew ? `Crew: ${it.crew}` : '',
+      it.lineup ? `Who's serving:\n${it.lineup}` : it.crew ? `Crew: ${it.crew}` : '',
       link ? `Confirm, swap, transfer or drop this shift in Crew Call: ${link}` : 'Confirm, swap, transfer or drop this shift in Crew Call.',
     ].filter(Boolean);
     const desc = [...top, ...(top.length ? [''] : []), ...body].join('\n');
@@ -96,4 +102,35 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
   }
   lines.push('END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';
+}
+
+// A service or rehearsal you're not on: shown as free time, no reminders
+function infoEvent(it, tz, now, link) {
+  const e = it.event;
+  const start = localToDate(e.date, e.start, tz);
+  let end = localToDate(e.date, e.end, tz);
+  if (end <= start) end = new Date(start.getTime() + 2 * 3600 * 1000);
+  const kind = { soundcheck: 'Sound check', rehearsal: `${it.teamName || 'Team'} rehearsal` }[e.kind] || 'Service';
+  const desc = [
+    `${kind}: ${e.title}. Starts ${e.start}.`,
+    e.notes ? `Note: ${e.notes}` : '',
+    it.lineup ? `Who's serving:\n${it.lineup}` : 'No one is scheduled yet.',
+    link ? `Contacts and details in Crew Call: ${link}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return [
+    'BEGIN:VEVENT',
+    `UID:${it.uid}`,
+    `DTSTAMP:${now}`,
+    `LAST-MODIFIED:${fmt(it.updatedAt || new Date())}`,
+    `DTSTART:${fmt(start)}`,
+    `DTEND:${fmt(end)}`,
+    `SUMMARY:${esc(e.kind === 'rehearsal' ? `${it.teamName || 'Team'} rehearsal — ${e.title}` : e.title)}`,
+    `DESCRIPTION:${esc(desc)}`,
+    ...(link ? [`URL:${link}`] : []),
+    'STATUS:CONFIRMED',
+    'TRANSP:TRANSPARENT',
+    'END:VEVENT',
+  ];
 }
