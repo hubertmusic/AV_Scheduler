@@ -4,6 +4,7 @@ import { Empty, Icon, StatusChip, useApp } from '../ui.jsx';
 import { Notices, noticesFor } from '../notices.jsx';
 import { DebriefPrompt, featureOn, ReportProblem, ShiftChecklist, SignOffButton } from './Extras.jsx';
 import { LiveView } from './Live.jsx';
+import { LineupButton } from '../lineup.jsx';
 
 export default function MyShifts() {
   const app = useApp();
@@ -94,7 +95,9 @@ export default function MyShifts() {
                 <div className="grow stack-sm">
                   <Notices items={noticesFor(app, s.date, s.notes)} compact />
                   <div className="row-wrap tight">
+                    {app.teams.length > 1 && <span className="chip team-chip">{app.teamName(s.team)}</span>}
                     {s.kind === 'soundcheck' && <span className="chip chip-check">Sound check</span>}
+                    {s.kind === 'rehearsal' && <span className="chip team-chip">Rehearsal</span>}
                     {s.shadow && <span className="chip chip-check">Shadowing</span>}
                     {s.confirmed ? <span className="chip chip-approved">✓ Confirmed</span> : <span className="chip chip-pending">Not confirmed</span>}
                     {s.regular && <span className="chip chip-regular" title={`Placed by your regular schedule: ${s.regular}`}>Regular</span>}
@@ -127,6 +130,7 @@ export default function MyShifts() {
                         <button type="button" className="btn btn-ghost" onClick={() => setDraft({ type: 'drop', shift: s })}>Drop</button>
                       </>
                     )}
+                    <LineupButton event={s} className="btn btn-outline" />
                     <button type="button" className="btn btn-soft" onClick={() => { app.setResFilter(s.position); app.goTab('resources'); }}>
                       <Icon name="doc" size={16} /> Quick review
                     </button>
@@ -218,7 +222,7 @@ export default function MyShifts() {
               <h2>Your calendar feed</h2>
             </div>
             <p className="muted small">
-              Subscribe once. Shifts you’re given, swap or pick up appear on their own, and dropped shifts disappear. Apple Calendar can refresh every few minutes; Google checks subscribed calendars less often, sometimes only every several hours.
+              Subscribe once. Your shifts (with reminders) appear on their own and dropped ones disappear. Every other service and rehearsal shows too, as free time, with who’s serving on each team — so you can see who you’re with and who to message. Apple Calendar can refresh every few minutes; Google checks subscribed calendars less often, sometimes only every several hours.
             </p>
             <div className="code-box mono">{me.calUrl}</div>
             <div className={`row-wrap ${me.previewing ? 'preview-off' : ''}`} aria-disabled={me.previewing || undefined}>

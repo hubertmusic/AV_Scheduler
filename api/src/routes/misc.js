@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { IANAZone } from 'luxon';
 import { Assignment, Blackout, Event, EVENT_KINDS, Group, Position, Request, Resource, Unavailable, User } from '../models.js';
 import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
-import { addDays, bad, conflict, DATE_RE, getSettings, isHttpUrl, isId, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
+import { addDays, bad, conflict, DATE_RE, forbidden, getSettings, isHttpUrl, isId, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { eventView, groupView, meView, personView, requestView } from '../lib/views.js';
 import { cleanGroupIds } from './events.js';
 import { announcementsFor, noticeLinesFor } from './announcements.js';
@@ -13,6 +13,7 @@ import { mailerReady, sendMail } from '../lib/mailer.js';
 import { FEATURES } from '../lib/features.js';
 import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
+import { forgetPositions, isAvTeam, positionsList, positionTeams, requireTeamHead, teamsList, teamsOf, teamView } from '../lib/teams.js';
 
 const settingsView = (s) => ({
   orgName: s.orgName,
@@ -37,17 +38,30 @@ const settingsView = (s) => ({
 // ---------- bootstrap: everything the app needs on load ----------
 export const bootstrapRouter = Router();
 bootstrapRouter.get('/', wrap(async (req, res) => {
-  const [s, positions, people, groups] = await Promise.all([
+  const team = req.team.key;
+  const av = isAvTeam(req.team);
+  const [s, positions, people, everyone, groups, myTeams, allTeams] = await Promise.all([
     getSettings(),
-    Position.find({}).sort({ order: 1, label: 1 }).lean(),
-    User.find(req.can.people ? {} : { active: true }).sort({ name: 1 }),
-    Group.find({}).sort({ name: 1 }),
+    positionsList(),
+    // Team screens list the people on the team you're working in
+    User.find({ 'teams.team': team, ...(req.can.people ? {} : { active: true }) }).sort({ name: 1 }),
+    // Names of everyone, for line-ups that cross teams
+    User.find({ active: true }, { name: 1, teams: 1, role: 1 }).sort({ name: 1 }).lean(),
+    av ? Group.find({}).sort({ name: 1 }) : [],
+    teamsOf(req.user),
+    teamsList(),
   ]);
+  const pos = (p) => ({ key: p.key, label: p.label, order: p.order, team: p.team || 'av' });
   res.json({
     me: req.previewing ? { ...meView(req.user), calUrl: `${config.publicUrl}/cal/(their-private-link).ics`, previewing: true } : meView(req.user),
-    settings: settingsView(s),
-    positions: positions.map((p) => ({ key: p.key, label: p.label, order: p.order })),
+    settings: { ...settingsView(s), groupLink: req.team.groupLink || '' },
+    team: teamView(req.team),
+    teams: myTeams, // the teams this person can switch between
+    allTeams: allTeams.map(teamView),
+    positions: positions.filter((p) => (p.team || 'av') === team).map(pos), // this team's positions
+    allPositions: positions.map(pos),
     people: people.map((p) => personView(p, req.user)),
+    everyone: everyone.map((u) => ({ id: String(u._id), name: u.name, teams: u.role === 'admin' && !(u.teams || []).length ? ['av'] : (u.teams || []).map((t) => t.team) })),
     groups: groups.map((g) => groupView(g, req.user)),
     announcements: await announcementsFor(addDays(todayIn(s.timezone), -7), addDays(todayIn(s.timezone), 120)),
     academy: config.academyOn ? { url: config.academyUrl, host: new URL(config.academyUrl).host } : null,
@@ -87,6 +101,9 @@ meRouter.get('/overview', wrap(async (req, res) => {
 
   const shifts = [];
   const pickups = [];
+  // My shifts cover every team I'm on; each shift says which team it's for
+  const posTeam = await positionTeams();
+  const teamOf = (pos) => posTeam[baseOf(pos)] || 'av';
   for (const e of events) {
     const eid = String(e._id);
     for (const pos of [...e.needs, ...e.needs.map((k) => `${k}+shadow`)]) {
@@ -96,14 +113,17 @@ meRouter.get('/overview', wrap(async (req, res) => {
         const a = mine[key];
         // A learner shadowing this spot, for a Lead (or the admin) to sign off
         const learner = !isShadow(pos) && (me.role === 'admin' || me.leads?.includes(pos)) ? slotHolder[`${eid}|${pos}+shadow`] || null : null;
-        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null, learner });
+        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), team: teamOf(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null, learner });
       } else if (!isShadow(pos) && !holder && me.positions.includes(pos) && !unav.has(eid) && !isAway(eid) && !onEvent[eid]) {
-        pickups.push({ ...eventView(e), position: pos, pending: pending[key] === 'pickup' });
+        pickups.push({ ...eventView(e), position: pos, team: teamOf(pos), pending: pending[key] === 'pickup' });
       }
     }
   }
+  // Availability covers services one of my teams serves on (and my teams' rehearsals)
+  const myTeams = new Set((me.teams || []).map((m) => m.team));
+  const forMe = (e) => me.role === 'admin' || !myTeams.size || onEvent[String(e._id)] || (e.team ? myTeams.has(e.team) : (e.needs || []).some((k) => myTeams.has(teamOf(k))));
   const availability = events
-    .filter((e) => e.date <= addDays(today, 56))
+    .filter((e) => e.date <= addDays(today, 56) && forMe(e))
     .map((e) => ({ ...eventView(e), unavailable: unav.has(String(e._id)), away: isAway(String(e._id)), onPosition: onEvent[String(e._id)] ? baseOf(onEvent[String(e._id)]) : null }));
 
   res.json({
@@ -111,7 +131,7 @@ meRouter.get('/overview', wrap(async (req, res) => {
     pickups,
     availability,
     blackouts: blackouts.map((b) => ({ id: String(b._id), from: b.from, to: b.to, note: b.note })),
-    maxPerMonth: me.maxPerMonth || 0,
+    maxPerMonth: (me.teams || []).length ? Math.max(0, ...me.teams.map((t) => t.maxPerMonth || 0)) : me.maxPerMonth || 0,
     availabilityUpdatedAt: me.availabilityUpdatedAt || null,
     requests: myReqs.map(requestView),
   });
@@ -161,6 +181,8 @@ meRouter.post('/availability/ok', wrap(async (req, res) => {
 meRouter.put('/limit', wrap(async (req, res) => {
   const n = Math.max(0, Math.min(31, Math.round(Number(req.body.maxPerMonth) || 0)));
   req.user.maxPerMonth = n;
+  // Their own limit applies on each of their teams (a leader can set a team's limit separately)
+  for (const t of req.user.teams || []) t.maxPerMonth = n;
   req.user.availabilityUpdatedAt = new Date();
   await req.user.save();
   res.locals.activity = n ? `Set a limit of ${n} shifts a month` : 'Removed their monthly limit';
@@ -177,24 +199,25 @@ function readResource(b) {
   return { title, url, position: str(b.position, 40), kind: str(b.kind, 30) || 'Link', minutes: Math.max(0, Math.min(600, Number(b.minutes) || 0)) };
 }
 resourcesRouter.get('/', wrap(async (req, res) => {
-  const list = await Resource.find({}).sort({ position: 1, title: 1 }).lean();
+  // This team's resources (older ones, from before teams, are AV's)
+  const list = await Resource.find(req.team.key === 'av' ? { $or: [{ team: 'av' }, { team: { $exists: false } }] } : { team: req.team.key }).sort({ position: 1, title: 1 }).lean();
   res.json(list.map((r) => ({ id: String(r._id), title: r.title, url: r.url, position: r.position, kind: r.kind, minutes: r.minutes })));
 }));
 resourcesRouter.post('/', requirePerm('resources'), wrap(async (req, res) => {
-  const r = await Resource.create(readResource(req.body));
+  const r = await Resource.create({ ...readResource(req.body), team: req.team.key });
   res.status(201).json({ id: String(r._id), ...readResource(r) });
 }));
 resourcesRouter.patch('/:id', requirePerm('resources'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const r = await Resource.findById(req.params.id);
-  if (!r) throw notFound();
+  if (!r || (r.team || 'av') !== req.team.key) throw notFound();
   Object.assign(r, readResource({ ...r.toObject(), ...req.body }));
   await r.save();
   res.json({ id: String(r._id), ...readResource(r) });
 }));
 resourcesRouter.delete('/:id', requirePerm('resources'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
-  await Resource.deleteOne({ _id: req.params.id });
+  await Resource.deleteOne({ _id: req.params.id, team: req.team.key === 'av' ? { $in: ['av', null] } : req.team.key });
   res.status(204).end();
 }));
 
@@ -317,20 +340,29 @@ settingsRouter.post('/test-email', requireAdmin, wrap(async (req, res) => {
   res.json({ sentTo: req.user.email });
 }));
 
+// Each team's head leader (and the admin) manages that team's positions
 export const positionsRouter = Router();
-positionsRouter.post('/', requireAdmin, wrap(async (req, res) => {
+const posOut = (p) => ({ key: p.key, label: p.label, order: p.order, team: p.team || 'av' });
+async function loadTeamPosition(req) {
+  const p = await Position.findOne({ key: req.params.key });
+  if (!p) throw notFound();
+  if ((p.team || 'av') !== req.team.key) throw forbidden('That position belongs to another team.');
+  return p;
+}
+positionsRouter.post('/', requireTeamHead, wrap(async (req, res) => {
   const label = str(req.body.label, 40);
   if (!label) throw bad('Name the position.');
   let base = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'pos';
   let key = base;
   for (let i = 2; await Position.findOne({ key }); i++) key = `${base}-${i}`;
   const count = await Position.countDocuments({});
-  const p = await Position.create({ key, label, order: count });
-  res.status(201).json({ key: p.key, label: p.label, order: p.order });
+  const p = await Position.create({ key, label, order: count, team: req.team.key });
+  forgetPositions();
+  res.locals.activity = `Added the position ${label} (${req.team.name})`;
+  res.status(201).json(posOut(p));
 }));
-positionsRouter.patch('/:key', requireAdmin, wrap(async (req, res) => {
-  const p = await Position.findOne({ key: req.params.key });
-  if (!p) throw notFound();
+positionsRouter.patch('/:key', requireTeamHead, wrap(async (req, res) => {
+  const p = await loadTeamPosition(req);
   if (req.body.label !== undefined) {
     const label = str(req.body.label, 40);
     if (!label) throw bad('Name the position.');
@@ -338,16 +370,18 @@ positionsRouter.patch('/:key', requireAdmin, wrap(async (req, res) => {
   }
   if (req.body.order !== undefined) p.order = Number(req.body.order) || 0;
   await p.save();
-  res.json({ key: p.key, label: p.label, order: p.order });
+  forgetPositions();
+  res.json(posOut(p));
 }));
-positionsRouter.delete('/:key', requireAdmin, wrap(async (req, res) => {
-  const key = req.params.key;
+positionsRouter.delete('/:key', requireTeamHead, wrap(async (req, res) => {
+  const key = (await loadTeamPosition(req)).key;
   if (await Event.findOne({ needs: key })) throw conflict('Some services still use this position. Remove it from them first.');
   await Position.deleteOne({ key });
-  await User.updateMany({}, { $pull: { positions: key } });
+  await User.updateMany({}, { $pull: { positions: key, trainee: key, leads: key } });
   const s = await getSettings();
   s.weekendTemplate = s.weekendTemplate.map((t) => ({ ...t.toObject(), needs: t.needs.filter((k) => k !== key) }));
   await s.save();
+  forgetPositions();
   res.status(204).end();
 }));
 
@@ -375,31 +409,54 @@ calRouter.get('/:file', wrap(async (req, res) => {
     return res.send(buildCalendar({ name: `${s.orgName} — link no longer active`, tz: s.timezone, items: [] }));
   }
   await noteCalendarFetch(user, req);
-  const since = addDays(todayIn(s.timezone), -30);
-  const [positions, mine] = await Promise.all([Position.find({}).lean(), Assignment.find({ user: user._id }).populate({ path: 'event', populate: { path: 'groups', select: 'name' } }).lean()]);
+  // One feed: your shifts (with reminders), plus every other service and rehearsal from
+  // 30 days ago to 4 months ahead, each with who's serving on every team.
+  const today = todayIn(s.timezone);
+  const since = addDays(today, -30);
+  const [positions, teams, events] = await Promise.all([
+    positionsList(),
+    teamsList(),
+    Event.find({ date: { $gte: since, $lte: addDays(today, 120) } }).populate('groups', 'name').sort({ date: 1, start: 1 }).lean(),
+  ]);
   const base = Object.fromEntries(positions.map((p) => [p.key, p.label]));
   const label = new Proxy(base, { get: (t, k) => (isShadow(k) ? `${t[baseOf(k)] || baseOf(k)} (shadowing)` : t[k]) });
-  const live = mine.filter((a) => a.event && a.event.date >= since);
-  const evIds = live.map((a) => a.event._id);
-  const crewAsg = await Assignment.find({ event: { $in: evIds } }).populate('user').lean();
-  const crewBy = {};
-  for (const a of crewAsg) {
-    if (!a.user) continue;
-    (crewBy[String(a.event)] ||= []).push(`${a.user.name.split(' ')[0]} (${label[a.position] || a.position})`);
-  }
+  const teamOfPos = Object.fromEntries(positions.map((p) => [p.key, p.team || 'av']));
+  const teamName = Object.fromEntries(teams.map((t) => [t.key, t.name]));
+  const order = Object.fromEntries(positions.map((p, i) => [p.key, i]));
+  const allAsg = await Assignment.find({ event: { $in: events.map((e) => e._id) } }).populate('user', 'name').lean();
+  const asgBy = {};
+  for (const a of allAsg) if (a.user) (asgBy[String(a.event)] ||= []).push(a);
+  const lineupOf = (e) => {
+    const rows = (asgBy[String(e._id)] || []).slice().sort((a, b) => (order[baseOf(a.position)] ?? 99) - (order[baseOf(b.position)] ?? 99) || isShadow(a.position) - isShadow(b.position));
+    return teams
+      .map((t) => {
+        const here = rows.filter((a) => (teamOfPos[baseOf(a.position)] || 'av') === t.key);
+        return here.length ? `${t.name} — ${here.map((a) => `${label[a.position] || a.position}: ${a.user.name}`).join(', ')}` : '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  };
   const notices = {};
-  for (const a of live) if (!notices[a.event.date]) notices[a.event.date] = await noticeLinesFor(a.event.date);
-  const items = live.map((a) => ({
-    notices: notices[a.event.date] || [],
-    uid: `${a.event._id}-${a.position}-${user._id}@crew-call`,
-    event: a.event,
-    positionLabel: label[a.position] || a.position,
-    crew: (crewBy[String(a.event._id)] || []).join(', '),
-    groups: (a.event.groups || []).map((g) => g?.name).filter(Boolean).join(', '),
-    updatedAt: a.updatedAt,
-    viaRegular: a.viaRegular || '',
-  }));
-  const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s shifts`, tz: s.timezone, items, link: `${config.publicUrl}/#mine`, alertDays: s.calendarAlertDays ?? 5 });
+  const items = [];
+  for (const e of events) {
+    const mine = (asgBy[String(e._id)] || []).filter((a) => String(a.user._id) === String(user._id));
+    const lineup = lineupOf(e);
+    for (const a of mine) {
+      if (!notices[e.date]) notices[e.date] = await noticeLinesFor(e.date);
+      items.push({
+        notices: notices[e.date],
+        uid: `${e._id}-${a.position}-${user._id}@crew-call`,
+        event: e,
+        positionLabel: label[a.position] || a.position,
+        lineup,
+        groups: (e.groups || []).map((g) => g?.name).filter(Boolean).join(', '),
+        updatedAt: a.updatedAt,
+        viaRegular: a.viaRegular || '',
+      });
+    }
+    if (!mine.length) items.push({ uid: `${e._id}-info-${user._id}@crew-call`, event: e, lineup, teamName: teamName[e.team] || '', updatedAt: e.updatedAt });
+  }
+  const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s calendar`, tz: s.timezone, items, link: `${config.publicUrl}/#mine`, alertDays: s.calendarAlertDays ?? 5 });
   res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-cache, max-age=0', 'Content-Disposition': 'inline; filename="shifts.ics"' });
   res.send(body);
 }));

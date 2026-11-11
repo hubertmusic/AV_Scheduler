@@ -141,6 +141,7 @@ export function mediaView(m) {
     status: m.status,
     createdAt: m.createdAt,
     uploadedBy: m.uploadedBy?.name || null,
+    uploadedById: m.uploadedBy ? String(m.uploadedBy._id || m.uploadedBy) : null,
     guestName: m.guest?.name || null,
     url: `/api/media/${m._id}/file`,
     library: !!m.library,

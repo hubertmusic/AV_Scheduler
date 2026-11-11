@@ -4,6 +4,12 @@ A self-hosted scheduler for an AV crew of 20–50 people (and more). It runs as 
 
 What it does:
 
+- **Teams.** The AV team and the Praise team (and any team you add, like a choir) each have their own side: their own positions, people, schedule spots, leaders, weekend check, requests and month planner. Services, service plans, songs and the calendar are shared, so everyone sees who's doing what.
+  - **One login per person.** Someone on two teams keeps one account and switches teams at the top of the app. Adding someone with an email that already has a login puts them on your team too.
+  - **Head leaders.** Only the admin picks each team's head leader (Settings → Teams), for example after an election; the old head stays a leader. The head leader names the team's other leaders and their privileges, sets up the team (Team setup: name, WhatsApp group, positions, and which positions each weekend service needs), and runs the month planner for the team.
+  - **AV-only parts:** gear, outside groups, the media library, sound checks, the input list, ProPresenter `.pro` files, livestream details, archiving a weekend, and burnout watch. A shared service's name, day and times are set by the AV side; other teams choose which of their positions it needs.
+  - **Rehearsals** belong to a team and show to every team on the schedule and in calendars.
+  - **Who's serving.** Every service has a line-up of every team, with call and WhatsApp buttons for each person and each team's head leader, and the team's WhatsApp group. It's on the Schedule (👥), My shifts and the service plan. The rundown and run sheet list every team's crew, by team.
 - **Weekend schedule grid.** Services down the side, positions across the top. Click a cell to see who's trained and free, ranked by how many shifts they already have this weekend. Optionally jump straight to the next open spot after each placement. Double-booked or unavailable people get flagged.
 - **Weekend template.** One click builds Friday Vespers and the Sabbath services, with their call times and the positions each needs. You can still add one-off services.
 - **Sound checks.**
@@ -17,17 +23,17 @@ What it does:
   - a sermon title and speaker
   - the pastor's notes
   - Bible texts. KJV, BSB (Berean Standard), WEB, ASV, YLT, Darby, BBE and Douay-Rheims look up automatically. **More translations…** searches 1,000+ more by language from the free bible.helloao.org service (for example, Spanish Reina-Valera 1909); the ones you pick are remembered on that device. Copyrighted versions (NKJV, NIV, ESV, NLT and others) are pasted. References like `1 Cor 13:4-7`, `Psalm 23` and `John 3:16-4:2` work; book names must be in English.
-  - an ordered song list with keys
+  - an ordered song list with keys, a note per song for this service, and chord / arrangement notes on each song
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
-  Everyone signed in can read and download a plan. People with the **Edit service plans** privilege can change it.
+  Everyone signed in can read and download a plan. Anyone on a team can add Bible texts, songs (with keys and chord notes), slides and announcements, and remove slides they added. The sermon title and speaker, pastor's notes, order of service, guest links and approvals are for leaders with the **Lead service plans** privilege.
 - **Weekly links** (Service plans → Weekly links): one permanent link and 6-digit code for people who send things every week, like the pastor or worship leader. Each time they open it, it goes to the next matching service's guest page, with the deadline a set number of days before it (e.g. 2 days before at 6 PM). New code or turn off any time.
 - **Order-of-service templates:** save an order as a template; with "Start every new … plan from this", new plans for services of that name start pre-filled. Any template can also be added to a plan by hand.
 - **Announcement slides:** the bulletin's announcements download as a PowerPoint for ProPresenter's pre-service loop (one slide per announcement; separate them with a blank line).
 - **Livestream details:** each plan has a YouTube/Facebook title and description written from the plan, with chapter markers from the order of service's minutes, plus a standard ending set in Settings.
 - **Who can cover?** In the schedule's place panel, each free, trained person has an **Ask** button (a WhatsApp message asking them to cover), and **Ask all who are free** messages them together.
 - **Gear tab:** wireless mics, camera bag, batteries and anything else people borrow. Take it, give it to someone (or a guest), return it, log battery swaps and notes, and report problems; filters for checked out, needs fixing and with me.
-- **Burnout watch:** anyone serving several weekends in a row (default 4, set in Settings) is flagged on Team & roles and in the month planner.
+- **Burnout watch (AV team):** anyone serving several weekends in a row (default 4, set in Settings) is flagged on Team & roles and in the month planner.
 - **Extra features (off until the admin turns them on in Settings → Extra features).** Turning one off hides it again; nothing saved is lost.
   - **Live run-of-show:** "Run it live" on a service plan opens a booth view that follows the order of service: Now, Next, time left on this item, and how far ahead or behind the service is. Everyone with it open sees it move. **Open stage clock** gives a full-screen countdown for a screen the speaker can see (no sign-in; same private link family as the rundown). The real start times are kept and feed the livestream chapters.
   - **Pre-service checklists:** a checklist per position (set in Settings). From the day before a service, the person on that spot ticks it off in My shifts; the live view shows who's ready.
@@ -109,7 +115,7 @@ What it does:
 - **Shift requests.** Crew can ask to swap, transfer, drop, or pick up an open shift. Leaders approve or deny. If the schedule changed since the request was made, approval is refused with a reason rather than corrupting anything.
 - **Calendar feeds.** Each person gets a private subscription link for Apple Calendar or Google Calendar. Approved changes show up there automatically.
 - **WhatsApp.** Lineups, reminders and invites open WhatsApp with the message already written. You tap Send. This needs no Meta business account and costs nothing.
-- **Roles.** Admin (you), team leaders and crew. You choose each leader's privileges: edit the schedule, approve requests, message the crew, manage training links, manage crew and positions, manage outside groups.
+- **Roles.** Admin (you), team leaders and crew, per team. The admin and each team's head leader choose leaders' privileges: edit the schedule, approve requests, message the crew, manage training links, manage crew and positions, lead service plans, manage outside groups (AV).
 - **Resources & help.** Training links per position, a *Quick review* button on each shift, and one-tap WhatsApp contact for leaders.
 - **Availability.** Crew mark services they can't make. Leaders see this when placing people.
 
@@ -145,13 +151,13 @@ docker compose up -d
 
 ## 3. How calendar sync works
 
-Crew Call is the source of truth. Each person's feed (`/cal/<private-token>.ics`) always reflects their current shifts.
+Crew Call is the source of truth. Each person's feed (`/cal/<private-token>.ics`) always reflects their current shifts, on every team they're on. It also shows every other service and rehearsal (30 days back to 4 months ahead) as free time with no alerts, with who's serving on each team, so one subscription shows who you're with and who to contact.
 
 - **Apple Calendar.** Subscribe once and the feed refreshes on its own. On a Mac you can set the calendar's Auto-refresh to every 5 or 15 minutes. iPhones refresh on their own schedule.
 - **Google Calendar.** Google re-reads subscribed calendars on its own schedule, often every several hours. Changes can take that long to appear.
 - **Leaked links.** If someone shares their link by mistake, they can make a new one under **My shifts**. The old link stops working.
 
-Each calendar event starts at the call time, includes the crew list and notes, and has a one-hour alert.
+Each of your shifts starts at the call time, lists who's serving on every team plus the notes, and has a one-hour alert.
 
 ## 4. WhatsApp
 
@@ -410,9 +416,9 @@ web/src/
 
 - **Passwords and sessions.** Passwords are hashed with bcrypt. Sessions are a signed httpOnly cookie lasting 30 days.
 - **Rate limiting.** Sign-in, setup and invite acceptance are rate-limited per visitor (Cloudflare's `CF-Connecting-IP`, when present).
-- **Admin-only actions.** Only the admin can change roles and leader privileges, or reset a leader's password.
-- **Leaders' scope.** Leaders with *Manage crew* can invite and edit crew members only.
-- **Phone numbers.** Crew see leaders' phone numbers. Everyone else's numbers are visible only to people allowed to message the crew or manage people.
+- **Admin-only actions.** Only the admin picks each team's head leader, adds teams, and resets a leader's password. A team's head leader can change roles and privileges on that team only; deactivating someone who is on more than one team is admin-only.
+- **Leaders' scope.** Leaders work on their own team: its positions, people, spots and requests. Leaders with *Manage crew* can invite and edit crew members only.
+- **Phone numbers.** Crew see leaders' phone numbers. On a service's **Who's serving** list, everyone signed in sees the phone numbers of the people serving on it, so they can reach each other. Other numbers are visible only to people allowed to message the crew or manage people.
 - **Deactivation.** Deactivating someone signs them out, frees their upcoming shifts and cancels their open requests.
 - **Uploads.** Files are stored under random names and served with `nosniff`. Only images, video, audio and PDFs open in the browser; everything else (HTML, SVG, scripts) downloads instead of running.
 - **Rundown and bulletin links** are long random tokens, rate-limited, kept out of search engines, and replaceable. The rundown shows names but never phone numbers or emails.

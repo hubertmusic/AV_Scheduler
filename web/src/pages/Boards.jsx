@@ -356,6 +356,19 @@ function BoardEditor({ id, onListChanged }) {
     }
   };
 
+  const toggleShared = async () => {
+    try {
+      const b = await api(`/boards/${id}`, { method: 'PUT', body: { shared: !board.shared, rev: rev.current } });
+      rev.current = b.rev;
+      setBoard((cur) => ({ ...cur, shared: b.shared, updatedAt: b.updatedAt, updatedBy: b.updatedBy }));
+      app.toast(b.shared ? 'Every team’s leaders can see this board now' : `Only the ${app.team.name}’s leaders see this board now`);
+      onListChanged();
+    } catch (e) {
+      app.toast(e.message);
+      if (/changed this board/.test(e.message)) api(`/boards/${id}`).then(apply);
+    }
+  };
+
   if (!board) return <div className="loading-inline">Loading…</div>;
   const canDelete = app.me.role === 'admin' || board.createdById === app.me.id;
   const statusText = { saved: board.updatedBy ? `Saved · ${board.updatedBy}, ${ago(board.updatedAt)}` : 'Saved', waiting: 'Unsaved changes…', saving: 'Saving…', error: 'Couldn’t save. Retrying on your next change.' }[status];
@@ -369,6 +382,12 @@ function BoardEditor({ id, onListChanged }) {
           <span className={`small ${status === 'error' ? 'danger' : 'muted'}`} role="status">
             {statusText}
           </span>
+          {app.allTeams.length > 1 && (
+            <label className="check small">
+              <input type="checkbox" checked={!!board.shared} onChange={toggleShared} />
+              <span>Share with every team</span>
+            </label>
+          )}
         </div>
         <div className="fc-toolbar" role="toolbar" aria-label="Add to the board">
           {ADD.map(([type, label, text]) => (

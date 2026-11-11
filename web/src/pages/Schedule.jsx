@@ -5,6 +5,7 @@ import { groupRecipients, soundcheckText } from '../outreach.js';
 import { AutoFillModal } from './AutoFill.jsx';
 import { buildFromTemplate } from '../template.js';
 import { AnnouncementsModal, canAnnounce, Notices, noticesFor } from '../notices.jsx';
+import { LineupButton } from '../lineup.jsx';
 
 const SH = '+shadow';
 
@@ -14,7 +15,11 @@ export default function Schedule() {
   const { weekend: fri, setWeekend: setFri } = app;
   const [autofill, setAutofill] = useState(false);
   const [announcing, setAnnouncing] = useState(false);
-  const [events, setEvents] = useState(null);
+  // Other teams see only services with their own spots (and every rehearsal) unless they ask
+  const [showAll, setShowAll] = useState(app.isAv);
+  const [allEvents, setAllEvents] = useState(null);
+  const events = useMemo(() => (allEvents && !showAll ? allEvents.filter((e) => e.needs.length > 0 || e.kind === 'rehearsal') : allEvents), [allEvents, showAll]);
+  const hidden = (allEvents?.length || 0) - (events?.length || 0);
   const [error, setError] = useState('');
   const [sel, setSel] = useState(null); // { eventId, pos }
   const [autoNext, setAutoNext] = useState(true);
@@ -27,7 +32,7 @@ export default function Schedule() {
     setError('');
     try {
       const [evs, sk] = await Promise.all([api(`/events?from=${fri}&to=${addDays(fri, 2)}`), api(`/events/skips?from=${fri}&to=${addDays(fri, 2)}`).catch(() => [])]);
-      setEvents(evs);
+      setAllEvents(evs);
       setSkips(sk);
     } catch (e) {
       setError(e.message);
@@ -67,7 +72,7 @@ export default function Schedule() {
   };
 
   useEffect(() => {
-    setEvents(null);
+    setAllEvents(null);
     setSel(null);
     load();
   }, [load]);
@@ -107,7 +112,7 @@ export default function Schedule() {
   const flagFor = (eventId, pos) => stats.flags.find((f) => f.eventId === eventId && f.pos === pos)?.flag || '';
 
   const patchLocal = (eventId, pos, userId) =>
-    setEvents((list) =>
+    setAllEvents((list) =>
       list.map((e) => {
         if (e.id !== eventId) return e;
         const assignments = { ...e.assignments };
@@ -254,9 +259,11 @@ export default function Schedule() {
               <button type="button" className="btn btn-ghost" onClick={buildWeekend} disabled={busy} title="Adds missing template services and offers to update ones that changed">
                 Sync with template
               </button>
-              <button type="button" className="btn btn-ghost" onClick={skipWeekend} disabled={busy} title="We’re not meeting this weekend">
-                No services this weekend
-              </button>
+              {(app.isAv || me.role === 'admin') && (
+                <button type="button" className="btn btn-ghost" onClick={skipWeekend} disabled={busy} title="We’re not meeting this weekend">
+                  No services this weekend
+                </button>
+              )}
               {openKeys.length > 0 && (
                 <button type="button" className="btn btn-primary" onClick={() => setAutofill(true)}>
                   Auto-fill {openKeys.length} open
@@ -293,7 +300,28 @@ export default function Schedule() {
       {error && <div className="error" role="alert">{error}</div>}
       {!events && !error && <div className="loading-inline">Loading…</div>}
 
-      {events && events.length === 0 && (
+      {!app.isAv && allEvents?.length > 0 && (
+        <div className="row-wrap">
+          <label className="check small">
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+            <span>
+              Show every service and sound check{hidden > 0 ? ` (${hidden} without ${app.team.name} spots hidden)` : ''}
+            </span>
+          </label>
+        </div>
+      )}
+
+      {events && events.length === 0 && allEvents?.length > 0 && (
+        <div className="card stack">
+          <h2>No {app.team.name} spots on {weekendLabel(fri)} yet</h2>
+          <p className="muted">
+            {allEvents.length} service{allEvents.length === 1 ? ' is' : 's are'} scheduled this weekend.{' '}
+            {can.edit ? 'Tick “Show every service” above, then use the pencil on a service to choose which of your positions it needs — or the head leader can set them once for every weekend in Team setup.' : 'Your team leaders haven’t added your team’s spots yet.'}
+          </p>
+        </div>
+      )}
+
+      {events && events.length === 0 && !allEvents?.length && (
         <div className="card stack">
           <h2>Nothing scheduled for {weekendLabel(fri)} yet</h2>
           {can.edit ? (
@@ -333,17 +361,23 @@ export default function Schedule() {
                   ))}
                 </div>
                 {events.map((e) => (
-                  <div className={`sched-row ${e.kind === 'soundcheck' ? 'sched-row-check' : ''}`} key={e.id}>
+                  <div className={`sched-row ${e.kind === 'soundcheck' ? 'sched-row-check' : ''} ${e.kind === 'rehearsal' ? 'sched-row-rehearsal' : ''}`} key={e.id}>
                     <div className="sched-service">
                       <div className="grow stack-xs">
                         <div className="muted small strong">{fmtDay(e.date)}</div>
                         {e.kind === 'soundcheck' && <span className="chip chip-check self-start">Sound check</span>}
+                        {e.kind === 'rehearsal' && <span className="chip team-chip self-start">{app.teamName(e.team)} rehearsal</span>}
                         <div className="strong">{e.title}</div>
                         <div className="mono small muted nowrap">{fmtTime(e.start)}</div>
                         <div className="mono small muted nowrap">call {fmtTime(e.call)}</div>
                         {e.notes && (
                           <div className="sched-note" title={e.notes}>
                             ⚠ {e.notes}
+                          </div>
+                        )}
+                        {e.otherNeeds > 0 && (
+                          <div className="small muted" title="Positions other teams fill on this service">
+                            Other teams: {e.otherFilled} of {e.otherNeeds} filled
                           </div>
                         )}
                         {e.groups.length > 0 && (
@@ -360,12 +394,13 @@ export default function Schedule() {
                             <Icon name="chat" />
                           </button>
                         )}
-                        {can.edit && (
+                        {can.edit && (!e.team || e.team === app.team.key || me.role === 'admin') && (
                           <button type="button" className="icon-btn" aria-label={`Edit ${e.title}`} onClick={() => setEditing(e)}>
                             <Icon name="edit" />
                           </button>
                         )}
-                        {can.edit && e.kind !== 'soundcheck' && (
+                        <LineupButton event={e} className="icon-btn" label={<span className="sr-only">Who’s serving on {e.title}</span>} />
+                        {can.edit && app.isAv && e.kind === 'service' && (
                           <button type="button" className="icon-btn" aria-label={`Add a sound check for ${e.title}`} title="Add sound check" onClick={() => setCheckFor(e)}>
                             <Icon name="mic" />
                           </button>
@@ -677,6 +712,7 @@ function PlacePanel({ event, pos, events, busy, autoNext, setAutoNext, onPlace, 
 
 function GroupPicker({ selected, onToggle }) {
   const app = useApp();
+  if (!app.isAv) return null;
   if (!app.groups.length)
     return (
       <p className="muted small">
@@ -813,14 +849,17 @@ function EventModal({ event, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const toggle = (k) => setF({ ...f, needs: f.needs.includes(k) ? f.needs.filter((x) => x !== k) : [...f.needs, k] });
+  // A shared service on another team's side: only its positions and note are this team's to change
+  const locked = !isNew && !event.team && !app.isAv && app.me.role !== 'admin';
 
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
+      const body = locked ? { needs: f.needs, notes: f.notes } : f;
       if (isNew) await api('/events', { method: 'POST', body: f });
-      else await api(`/events/${event.id}`, { method: 'PATCH', body: f });
+      else await api(`/events/${event.id}`, { method: 'PATCH', body });
       onSaved(isNew ? `Added ${f.title}` : `Saved ${f.title}`);
     } catch (err) {
       setError(err.message);
@@ -850,35 +889,43 @@ function EventModal({ event, onClose, onSaved }) {
           <legend>Type</legend>
           <div className="row-wrap">
             <label className="check">
-              <input type="radio" name="kind" checked={f.kind === 'service'} onChange={() => setF({ ...f, kind: 'service' })} />
+              <input type="radio" name="kind" checked={f.kind === 'service'} onChange={() => setF({ ...f, kind: 'service' })} disabled={locked} />
               <span>Service or event</span>
             </label>
+            {app.isAv && (
+              <label className="check">
+                <input type="radio" name="kind" checked={f.kind === 'soundcheck'} onChange={() => setF({ ...f, kind: 'soundcheck' })} disabled={locked} />
+                <span>Sound check</span>
+              </label>
+            )}
             <label className="check">
-              <input type="radio" name="kind" checked={f.kind === 'soundcheck'} onChange={() => setF({ ...f, kind: 'soundcheck' })} />
-              <span>Sound check / rehearsal</span>
+              <input type="radio" name="kind" checked={f.kind === 'rehearsal'} onChange={() => setF({ ...f, kind: 'rehearsal' })} disabled={locked} />
+              <span>{app.team.name} rehearsal</span>
             </label>
           </div>
+          {f.kind === 'rehearsal' && <p className="muted small">Every team sees rehearsals on the schedule and in their calendar, so AV and praise know when the room is in use.</p>}
         </fieldset>
+        {locked && <p className="current-box small">The AV team sets this service’s name, day and times. You can choose which {app.team.name} positions it needs and add a note.</p>}
         <label className="field">
           <span>Name</span>
-          <input required value={f.title} onChange={set('title')} placeholder={f.kind === 'soundcheck' ? 'e.g. Choir sound check' : 'e.g. Youth Vespers'} />
+          <input required value={f.title} onChange={set('title')} disabled={locked} placeholder={f.kind === 'soundcheck' ? 'e.g. Choir sound check' : f.kind === 'rehearsal' ? 'e.g. Praise rehearsal' : 'e.g. Youth Vespers'} />
         </label>
         <div className="row-wrap fields-4">
           <label className="field">
             <span>Date</span>
-            <input type="date" required value={f.date} onChange={set('date')} />
+            <input type="date" required value={f.date} onChange={set('date')} disabled={locked} />
           </label>
           <label className="field">
             <span>Call time</span>
-            <input type="time" required value={f.call} onChange={set('call')} />
+            <input type="time" required value={f.call} onChange={set('call')} disabled={locked} />
           </label>
           <label className="field">
             <span>Starts</span>
-            <input type="time" required value={f.start} onChange={set('start')} />
+            <input type="time" required value={f.start} onChange={set('start')} disabled={locked} />
           </label>
           <label className="field">
             <span>Ends</span>
-            <input type="time" required value={f.end} onChange={set('end')} />
+            <input type="time" required value={f.end} onChange={set('end')} disabled={locked} />
           </label>
         </div>
         <fieldset className="fieldset">
@@ -908,9 +955,9 @@ function EventModal({ event, onClose, onSaved }) {
               Cancel
             </button>
           </div>
-          {!isNew && (
+          {!isNew && !locked && (
             <button type="button" className="btn btn-danger" onClick={remove} disabled={busy}>
-              Remove service
+              Remove {f.kind === 'rehearsal' ? 'rehearsal' : 'service'}
             </button>
           )}
         </div>

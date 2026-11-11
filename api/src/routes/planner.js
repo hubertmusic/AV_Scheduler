@@ -1,18 +1,19 @@
-// The admin's month planner (Planning tab): who's available across a month, where spare people
-// can go, a Lead on every service, and a draft of placements that only reaches the schedule when
-// the admin presses Apply.
+// The month planner (Planning tab), for the admin and each team's head leader, one team at a time:
+// who's available across a month, where spare people can go, a Lead on every service, and a draft
+// of placements that only reaches the schedule when they press Apply.
 import { Router } from 'express';
 import { DateTime } from 'luxon';
 import { Assignment, Event, Position, User } from '../models.js';
-import { requireAdmin } from '../auth.js';
+import { baseKey, isAvTeam, positionTeams, requireTeamHead, teamKeys } from '../lib/teams.js';
+import { membershipOf } from '../lib/util.js';
 import { addDays, bad, fridayOf, getSettings, isId, wrap } from '../lib/util.js';
-import { awayByEvent, baseOf, isShadow, monthCounts, recentLoad, slotValid, unavailableByEvent } from '../lib/availability.js';
+import { awayByEvent, baseOf, isShadow, monthCountsByTeam, recentLoad, slotValid, unavailableByEvent } from '../lib/availability.js';
 import { planAutofill } from '../lib/autofill.js';
 import { evName } from '../lib/activity.js';
 import { streaksEnding } from '../lib/streaks.js';
 
 export const plannerRouter = Router();
-plannerRouter.use(requireAdmin);
+plannerRouter.use(requireTeamHead);
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 function monthRange(m) {
@@ -25,17 +26,23 @@ const monthEvents = ({ first, last }) => Event.find({ date: { $gte: first, $lte:
 // GET /api/planner/month?month=YYYY-MM
 plannerRouter.get('/month', wrap(async (req, res) => {
   const range = monthRange(req.query.month);
-  const events = await monthEvents(range);
-  const [positions, people, asg, unav, away, recent] = await Promise.all([
-    Position.find({}).sort({ order: 1 }).lean(),
-    User.find({ active: true }).sort({ name: 1 }).lean(),
+  const keys = await teamKeys(req);
+  const team = req.team.key;
+  // Services where this team has positions
+  const events = (await monthEvents(range)).filter((e) => (e.needs || []).some((k) => keys.has(k)));
+  const [positions, people, asgAll, unav, away, recent] = await Promise.all([
+    Position.find({ team }).sort({ order: 1 }).lean(),
+    User.find({ active: true, 'teams.team': team }).sort({ name: 1 }).lean(),
     Assignment.find({ event: { $in: events.map((e) => e._id) } }).lean(),
     unavailableByEvent(events),
     awayByEvent(events),
     recentLoad(range.first, 56),
   ]);
-  // Weekends in a row each person served just before this month (burnout watch)
-  const before = await streaksEnding(addDays(fridayOf(range.first), -7));
+  const asg = asgAll.filter((a) => keys.has(baseKey(a.position)));
+  const lens = (list) => (list || []).filter((k) => keys.has(k));
+  // Weekends in a row each person served just before this month (burnout watch, AV only)
+  const av = isAvTeam(req.team);
+  const before = av ? await streaksEnding(addDays(fridayOf(range.first), -7)) : {};
   const off = {};
   for (const e of events) {
     const eid = String(e._id);
@@ -44,12 +51,12 @@ plannerRouter.get('/month', wrap(async (req, res) => {
   res.json({
     month: req.query.month,
     positions: positions.map((p) => ({ key: p.key, label: p.label })),
-    events: events.map((e) => ({ id: String(e._id), date: e.date, title: e.title, kind: e.kind || 'service', start: e.start, call: e.call, needs: e.needs || [], forEvent: e.forEvent ? String(e.forEvent) : null })),
-    people: people.map((p) => ({ id: String(p._id), name: p.name, phone: p.phone || '', positions: p.positions || [], trainee: p.trainee || [], leads: (p.leads || []).filter((k) => (p.positions || []).includes(k)), maxPerMonth: p.maxPerMonth || 0, recent: recent.count[String(p._id)] || 0 })),
+    events: events.map((e) => ({ id: String(e._id), date: e.date, title: e.title, kind: e.kind || 'service', start: e.start, call: e.call, needs: lens(e.needs), forEvent: e.forEvent ? String(e.forEvent) : null })),
+    people: people.map((p) => ({ id: String(p._id), name: p.name, phone: p.phone || '', positions: lens(p.positions), trainee: lens(p.trainee), leads: lens(p.leads).filter((k) => (p.positions || []).includes(k)), maxPerMonth: membershipOf(p, team)?.maxPerMonth || 0, recent: recent.count[String(p._id)] || 0 })),
     unavailable: off,
     assignments: asg.map((a) => ({ eventId: String(a.event), position: a.position, userId: String(a.user), confirmed: !!a.confirmedAt })),
     streakBefore: before,
-    burnoutWeeks: (await getSettings()).burnoutWeeks ?? 4,
+    burnoutWeeks: av ? ((await getSettings()).burnoutWeeks ?? 4) : 0,
   });
 }));
 
@@ -68,13 +75,19 @@ plannerRouter.post('/autofill', wrap(async (req, res) => {
   const dateOf = Object.fromEntries(events.map((e) => [String(e._id), e.date]));
   const draft = readDraft(req.body?.draft, evIds);
 
-  // Monthly counts: the saved schedule outside this month's services, plus the draft
+  // Monthly counts per person and team ("userId|team"): the saved schedule outside this month's
+  // services, plus the draft. The draft is this team's; other teams' saved shifts stay in.
   const m = req.query.month || req.body.month;
-  const saved = await monthCounts(range.first);
+  const keys = await teamKeys(req);
+  const posTeam = await positionTeams();
+  const ck = (uid, pos) => `${uid}|${posTeam[baseKey(pos)] || 'av'}`;
+  const saved = await monthCountsByTeam(range.first, posTeam);
   const savedHere = await Assignment.find({ event: { $in: [...evIds] } }, { user: 1, position: 1 }).lean();
   const counts = { ...saved };
-  for (const a of savedHere) if (!isShadow(a.position)) counts[String(a.user)] = (counts[String(a.user)] || 0) - 1;
-  for (const a of draft) if (!isShadow(a.position)) counts[a.userId] = (counts[a.userId] || 0) + 1;
+  for (const a of savedHere) if (!isShadow(a.position) && keys.has(baseKey(a.position))) counts[ck(a.user, a.position)] = (counts[ck(a.user, a.position)] || 0) - 1;
+  // Other teams' saved shifts on these services stay in the draft the auto-fill sees
+  for (const a of savedHere) if (!keys.has(baseKey(a.position))) draft.push({ eventId: String(a.event), position: a.position, userId: String(a.user) });
+  for (const a of draft) if (!isShadow(a.position) && keys.has(baseKey(a.position))) counts[ck(a.userId, a.position)] = (counts[ck(a.userId, a.position)] || 0) + 1;
 
   // Weekends (Fri–Sun) together, then each weekday service on its own day, in date order
   const isWeekend = (d) => [5, 6, 7].includes(DateTime.fromISO(d).weekday);
@@ -87,12 +100,12 @@ plannerRouter.post('/autofill', wrap(async (req, res) => {
   const unfilled = [];
   const regularNotes = [];
   for (const { friday, dates } of runs) {
-    const r = await planAutofill(friday, { draft, monthly: { [m]: counts }, ...(dates ? { dates } : {}) });
+    const r = await planAutofill(friday, { draft, keys, monthly: { [m]: counts }, ...(dates ? { dates } : {}) });
     for (const p of r.proposals) {
       if (!evIds.has(p.eventId)) continue; // that weekend spills into the next month
       proposals.push(p);
       draft.push({ eventId: p.eventId, position: p.position, userId: p.userId });
-      if (!isShadow(p.position)) counts[p.userId] = (counts[p.userId] || 0) + 1;
+      if (!isShadow(p.position)) counts[ck(p.userId, p.position)] = (counts[ck(p.userId, p.position)] || 0) + 1;
     }
     unfilled.push(...r.unfilled.filter((u) => evIds.has(u.eventId)));
     regularNotes.push(...r.regularNotes.map((n) => ({ ...n, friday })));
@@ -110,10 +123,15 @@ plannerRouter.post('/apply', wrap(async (req, res) => {
   const users = Object.fromEntries((await User.find({ active: true }).lean()).map((u) => [String(u._id), u]));
   const skipped = [];
   const valid = [];
+  const keys = await teamKeys(req);
   for (const c of list) {
     const e = events[c?.eventId];
     if (!e) {
       skipped.push({ ...c, why: 'That service no longer exists.' });
+      continue;
+    }
+    if (typeof c.position !== 'string' || !keys.has(baseKey(c.position))) {
+      skipped.push({ ...c, why: 'That position belongs to another team.' });
       continue;
     }
     if (typeof c.position !== 'string' || !slotValid(e, c.position)) {

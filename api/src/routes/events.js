@@ -8,6 +8,17 @@ import { deletePlanFor } from './plans.js';
 import { awayByEvent, slotValid, touchAvailability } from '../lib/availability.js';
 import { dayName, evName, posName } from '../lib/activity.js';
 import { placeRegulars } from '../lib/regularsAuto.js';
+import { baseKey, isAvTeam, mergeTeam, onlyTeam, positionsList, requireAvTeam, teamKeys, teamsList } from '../lib/teams.js';
+
+// Work another team has on a service (assignments on positions that aren't this team's)
+async function otherTeamsWork(ev, keys) {
+  const asg = await Assignment.find({ event: ev._id }, { position: 1 }).lean();
+  return asg.filter((a) => !keys.has(baseKey(a.position))).length;
+}
+// A rehearsal belongs to its team; only that team (or the admin) changes it
+function assertOwnEvent(req, ev) {
+  if (ev.team && ev.team !== req.team.key && req.user.role !== 'admin') throw forbidden('That belongs to another team.');
+}
 
 export const eventsRouter = Router();
 
@@ -64,11 +75,17 @@ eventsRouter.get('/', wrap(async (req, res) => {
     Unavailable.find(unavFilter).lean(),
     awayByEvent(events, seeAll ? null : req.user._id),
   ]);
-  const out = events.map((e) => ({ ...eventView(e), assignments: {}, confirmed: {}, unavailable: [], away: [...(away[String(e._id)] || [])] }));
+  // Through this team's eyes: its positions and people; other teams as a filled/needed count
+  const keys = await teamKeys(req);
+  const out = events.map((e) => ({ ...eventView(e), needs: onlyTeam(e.needs, keys), otherNeeds: e.needs.filter((k) => !keys.has(k)).length, otherFilled: 0, assignments: {}, confirmed: {}, unavailable: [], away: [...(away[String(e._id)] || [])] }));
   const byId = Object.fromEntries(out.map((e) => [e.id, e]));
   for (const a of asg) {
     const e = byId[String(a.event)];
     if (!e) continue;
+    if (!keys.has(baseKey(a.position))) {
+      if (!a.position.endsWith('+shadow')) e.otherFilled++;
+      continue;
+    }
     e.assignments[a.position] = String(a.user);
     if (a.confirmedAt) e.confirmed[a.position] = true;
   }
@@ -77,7 +94,11 @@ eventsRouter.get('/', wrap(async (req, res) => {
 }));
 
 eventsRouter.post('/', requirePerm('edit'), wrap(async (req, res) => {
-  const ev = await Event.create({ ...(await readEventInput(req.body)), manual: true });
+  const input = await readEventInput(req.body);
+  input.needs = onlyTeam(input.needs, await teamKeys(req));
+  if (input.kind === 'soundcheck' && !isAvTeam(req.team)) input.kind = 'service';
+  // A rehearsal is the team's own (everyone still sees it on the calendar)
+  const ev = await Event.create({ ...input, team: input.kind === 'rehearsal' ? req.team.key : null, manual: true });
   res.locals.activity = `Added ${evName(ev)}`;
   res.status(201).json(eventView(ev));
 }));
@@ -103,6 +124,9 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
   const kept = new Set();
   const createdIds = new Set();
   const skips = await Skip.find({ date: { $gte: friday, $lte: addDays(friday, 2) } }).lean();
+  // Each team syncs its own positions; other teams' positions on a service stay as they are
+  const keys = await teamKeys(req);
+  const av = isAvTeam(req.team) || req.user.role === 'admin';
   const isSkipped = (date, title) => skips.some((k) => k.date === date && k.title === title);
   for (const t of active) {
     const date = addDays(friday, t.day);
@@ -119,21 +143,20 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
     kept.add(String(ev._id));
     const changed = [];
     if (ev.start !== want.start || ev.call !== want.call || ev.end !== want.end) changed.push('times');
-    if (!same(ev.needs, want.needs)) changed.push('positions');
+    if (!same(onlyTeam(ev.needs, keys), onlyTeam(want.needs, keys))) changed.push('positions');
     if ((ev.kind || 'service') !== want.kind) changed.push('type');
-    if (!same((ev.groups || []).map(String), want.groups)) changed.push('groups');
+    if (av && !same((ev.groups || []).map(String), want.groups)) changed.push('groups');
     if (!changed.length) continue;
-    const dropped = ev.needs.filter((k) => !want.needs.includes(k));
+    const dropped = onlyTeam(ev.needs, keys).filter((k) => !want.needs.includes(k));
     const placedOnDropped = dropped.length ? await Assignment.countDocuments({ event: ev._id, position: { $in: [...dropped, ...dropped.map((k) => `${k}+shadow`)] } }) : 0;
     if (!req.body.sync || (syncIds && !syncIds.has(String(ev._id)))) {
       differs.push({ id: String(ev._id), title: ev.title, date, changed, placedOnDropped });
       continue;
     }
-    Object.assign(ev, want);
+    Object.assign(ev, { ...want, needs: mergeTeam(ev.needs, want.needs, keys), ...(av ? {} : { groups: ev.groups }) });
     await ev.save();
     if (dropped.length) {
-      const keep = [...want.needs, ...want.needs.map((k) => `${k}+shadow`)];
-      const r = await Assignment.deleteMany({ event: ev._id, position: { $nin: keep } });
+      const r = await Assignment.deleteMany({ event: ev._id, position: { $in: [...dropped, ...dropped.map((k) => `${k}+shadow`)] } });
       cleared += r.deletedCount || 0;
     }
     updated++;
@@ -149,9 +172,12 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
   const removeIds = new Set(Array.isArray(req.body.remove) ? req.body.remove.map(String) : []);
   for (const e of candidates) {
     if (req.body.sync && removeIds.has(String(e._id))) {
-      await removeEvent(e);
-      removed++;
-      continue;
+      // Not a service another team is scheduled on (unless you're the admin)
+      if (req.user.role === 'admin' || (isAvTeam(req.team) && !(await otherTeamsWork(e, keys)))) {
+        await removeEvent(e);
+        removed++;
+        continue;
+      }
     }
     const day = DateTime.fromISO(e.date).diff(DateTime.fromISO(friday), 'days').days;
     extra.push({
@@ -173,7 +199,7 @@ eventsRouter.post('/weekend', requirePerm('edit'), wrap(async (req, res) => {
 
 // POST /api/events/:id/soundcheck { call, start, end, needs, groups, copyCrew, notes }
 // Creates a sound check tied to a service, optionally placing the service's crew on it.
-eventsRouter.post('/:id/soundcheck', requirePerm('edit'), wrap(async (req, res) => {
+eventsRouter.post('/:id/soundcheck', requireAvTeam, requirePerm('edit'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const svc = await Event.findById(req.params.id);
   if (!svc) throw notFound('That service no longer exists.');
@@ -203,7 +229,17 @@ eventsRouter.patch('/:id', requirePerm('edit'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const ev = await Event.findById(req.params.id);
   if (!ev) throw notFound('That service no longer exists.');
+  assertOwnEvent(req, ev);
   const input = await readEventInput(req.body, true);
+  // A shared service's name, day and times are set by the AV side (or the admin); other teams
+  // choose which of their positions it needs and can add a note
+  if (!ev.team && req.user.role !== 'admin' && !isAvTeam(req.team)) {
+    const changed = ['date', 'title', 'start', 'call', 'end', 'kind'].filter((k) => input[k] !== undefined && input[k] !== (ev[k] ?? (k === 'kind' ? 'service' : '')));
+    if (changed.length) throw forbidden('The service’s name, day and times are set by the AV team. You can change which of your positions it needs, or add a note.');
+  }
+  if (input.needs) input.needs = mergeTeam(ev.needs, input.needs, await teamKeys(req));
+  if (input.kind === 'rehearsal' && !ev.team) input.team = req.team.key;
+  if (input.kind && input.kind !== 'rehearsal') input.team = null;
   Object.assign(ev, input);
   await ev.save();
   res.locals.activity = `Edited ${evName(ev)}`;
@@ -219,6 +255,11 @@ eventsRouter.delete('/:id', requirePerm('edit'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const ev = await Event.findById(req.params.id);
   if (!ev) throw notFound('That service no longer exists.');
+  assertOwnEvent(req, ev);
+  if (!ev.team && req.user.role !== 'admin' && !isAvTeam(req.team)) throw forbidden('Services are added and removed by the AV team. You can take your team’s positions off it instead.');
+  if (req.user.role !== 'admin' && (await otherTeamsWork(ev, await teamKeys(req)))) {
+    throw forbidden('Another team has people on this service, so only the admin can remove it. You can take your team’s positions off it instead.');
+  }
   // A template service taken off one weekend stays off when the weekend is synced.
   if (!ev.manual && (await templateEntryFor(ev))) {
     await Skip.updateOne({ date: ev.date, title: ev.title }, { $setOnInsert: { date: ev.date, title: ev.title, by: req.user._id } }, { upsert: true });
@@ -283,6 +324,8 @@ eventsRouter.put('/:id/assign/:position', requirePerm('edit'), wrap(async (req, 
   if (!ev) throw notFound('That service no longer exists.');
   const position = req.params.position;
   if (!slotValid(ev, position)) throw bad('This service doesn’t need that position.');
+  const keys = await teamKeys(req);
+  if (!keys.has(baseKey(position))) throw forbidden('That position belongs to another team.');
   const label = await posName(position);
   const userId = req.body.userId;
   const existing = await Assignment.findOne({ event: ev._id, position }).populate('user', 'name');
@@ -296,6 +339,7 @@ eventsRouter.put('/:id/assign/:position', requirePerm('edit'), wrap(async (req, 
   if (!isId(userId)) throw bad('Pick a person.');
   const user = await User.findById(userId);
   if (!user || !user.active) throw bad('That person isn’t active.');
+  if (user.role !== 'admin' && !(user.teams || []).some((m) => m.team === req.team.key)) throw bad(`${user.name} isn’t on the ${req.team.name}.`);
   if (existing && String(existing.user?._id) === String(user._id)) return res.json({ ok: true });
   if (existing) {
     // A new person has to confirm and be reminded again.
@@ -306,6 +350,35 @@ eventsRouter.put('/:id/assign/:position', requirePerm('edit'), wrap(async (req, 
   }
   res.locals.activity = `Placed ${user.name} on ${label} · ${evName(ev)}`;
   res.json({ ok: true });
+}));
+
+// GET /api/events/:id/lineup — who's serving on every team, with a way to reach each person.
+// Anyone signed in can see it: it's how a singer finds who's running slides, and the reverse.
+eventsRouter.get('/:id/lineup', wrap(async (req, res) => {
+  if (!isId(req.params.id)) throw notFound();
+  const ev = await Event.findById(req.params.id).lean();
+  if (!ev) throw notFound('That service no longer exists.');
+  const [teams, positions, asg] = await Promise.all([teamsList(), positionsList(), Assignment.find({ event: ev._id }).populate('user', 'name phone teams role').lean()]);
+  const byPos = {};
+  for (const a of asg) byPos[a.position] = a;
+  const out = teams
+    .map((t) => {
+      const mine = positions.filter((p) => (p.team || 'av') === t.key && ev.needs.includes(p.key));
+      const slots = mine.flatMap((p) => {
+        const row = (slot) => {
+          const a = byPos[slot];
+          return { position: p.key, label: p.label, shadow: slot !== p.key, confirmed: !!a?.confirmedAt, person: a?.user ? { id: String(a.user._id), name: a.user.name, phone: a.user.phone || '' } : null };
+        };
+        return [row(p.key), ...(byPos[`${p.key}+shadow`] ? [row(`${p.key}+shadow`)] : [])];
+      });
+      const leaders = []; // filled below
+      return { key: t.key, name: t.name, groupLink: t.groupLink || '', slots, leaders };
+    })
+    .filter((t) => t.slots.length || (ev.team && ev.team === t.key));
+  // Each team's head leader, for questions that aren't about one position
+  const heads = (await User.find({ active: true, 'teams.head': true }, { name: 1, phone: 1, teams: 1 }).lean()).filter((u) => (u.teams || []).some((m) => m.head));
+  for (const t of out) t.leaders = heads.filter((u) => u.teams.some((m) => m.team === t.key && m.head)).map((u) => ({ id: String(u._id), name: u.name, phone: u.phone || '' }));
+  res.json({ event: eventView(ev), teams: out });
 }));
 
 // PUT /api/events/:id/unavailable { unavailable: bool, userId? }

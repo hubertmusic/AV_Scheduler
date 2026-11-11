@@ -67,11 +67,9 @@ export default function SongLibrary() {
               CCLI usage report
             </button>
           )}
-          {can.plans && (
-            <button type="button" className="btn btn-primary" onClick={() => setEditing({ title: '', artist: '', ccli: '', lyrics: '', notes: '' })}>
-              <Icon name="plus" /> New song
-            </button>
-          )}
+          <button type="button" className="btn btn-primary" onClick={() => setEditing({ title: '', artist: '', ccli: '', lyrics: '', notes: '' })}>
+            <Icon name="plus" /> New song
+          </button>
         </div>
       </div>
       {report && <UsageReport />}
@@ -83,16 +81,15 @@ export default function SongLibrary() {
               <h3>
                 {s.title} {s.retired && <span className="chip chip-archived">Retired</span>}
               </h3>
-              {can.plans && (
-                <button type="button" className="icon-btn" aria-label={`Edit ${s.title}`} onClick={() => setEditing(s)}>
-                  <Icon name="edit" />
-                </button>
-              )}
+              <button type="button" className="icon-btn" aria-label={`Edit ${s.title}`} onClick={() => setEditing(s)}>
+                <Icon name="edit" />
+              </button>
             </div>
             <div className="muted small">
               {[s.artist, s.ccli && `CCLI ${s.ccli}`].filter(Boolean).join(' · ') || '—'}
             </div>
             <div className="small">{s.pro ? (s.proOutdated ? '.pro stored — lyrics changed since' : '.pro stored') : 'No .pro file yet'}</div>
+            {s.notes && <div className="small song-notes">{s.notes}</div>}
             <div className="small muted">{usedLine(s)}</div>
             <div className="push-down">
               <SongFiles song={s} compact />
@@ -219,6 +216,10 @@ export function SongModal({ song: initial, onClose, onSaved, onCreated }) {
           <span>Lyrics</span>
           <textarea rows={14} value={f.lyrics} onChange={set('lyrics')} placeholder={LYRICS_HINT} className="mono" />
         </label>
+        <label className="field">
+          <span>Chords &amp; arrangement notes</span>
+          <textarea rows={4} value={f.notes} onChange={set('notes')} placeholder="e.g. Capo 2 · Intro: G D Em C · Bridge builds, drop out on last chorus" className="mono" maxLength={5000} />
+        </label>
         <p className="muted small">
           ProPresenter 7: <strong>File → Import</strong>, pick the downloaded .txt. Section labels (Verse 1, Chorus, Bridge…) become groups; set the delimiter so each blank-line-separated block becomes one slide. Save it there to get your .pro file, then upload it below.
         </p>
@@ -233,6 +234,7 @@ export function SongModal({ song: initial, onClose, onSaved, onCreated }) {
             </button>
           </div>
           {!isNew &&
+            app.can.plans &&
             (song.retired ? (
               <button type="button" className="btn btn-outline" onClick={bringBack}>
                 Bring back to the library
@@ -252,14 +254,16 @@ export function SongModal({ song: initial, onClose, onSaved, onCreated }) {
             <div className="stack-sm">
               <div className="small">
                 Stored: {song.pro.name} · {fmtSize(song.pro.size)}{' '}
-                <button type="button" className="link-btn small" onClick={removePro}>
-                  Remove
-                </button>
+                {app.isAv && (
+                  <button type="button" className="link-btn small" onClick={removePro}>
+                    Remove
+                  </button>
+                )}
               </div>
               {song.proOutdated && <div className="warn-box">The lyrics were edited after this .pro was uploaded. Re-import the .txt in ProPresenter and upload the new .pro.</div>}
             </div>
           ) : null}
-          <DropZone onFiles={uploadPro} multiple={false} accept=".pro" label={song.pro ? 'Replace the .pro file' : 'Upload the .pro file'} hint="The ProPresenter 7 file for this song, so anyone can download it" />
+          {app.isAv && <DropZone onFiles={uploadPro} multiple={false} accept=".pro" label={song.pro ? 'Replace the .pro file' : 'Upload the .pro file'} hint="The ProPresenter 7 file for this song, so anyone can download it" />}
         </div>
       )}
     </Modal>

@@ -1,6 +1,7 @@
 import { Assignment, Event, User } from '../models.js';
 import { addDays } from './util.js';
-import { awayByEvent, isShadow, monthCounts, recentLoad, unavailableByEvent } from './availability.js';
+import { awayByEvent, isShadow, monthCountsByTeam, recentLoad, unavailableByEvent } from './availability.js';
+import { baseKey, positionTeams } from './teams.js';
 import { describeWeek, matchesWeek } from './regulars.js';
 
 /**
@@ -16,6 +17,10 @@ import { describeWeek, matchesWeek } from './regulars.js';
  *   monthly: { 'YYYY-MM': { userId: shifts } } stands in for the saved monthly counts
  *   dates:   [from, to] plans those days instead of the weekend (weekday services; regulars,
  *            which are weekend rules, don't apply)
+ *   keys:    Set of position keys: only fill those (one team's positions)
+ *
+ * Monthly limits and counts are per team: someone can sing twice a month and run slides once.
+ * Monthly counts are keyed "userId|team".
  */
 export async function planAutofill(friday, opts = {}) {
   const [from, to] = opts.dates || [friday, addDays(friday, 2)];
@@ -30,10 +35,25 @@ export async function planAutofill(friday, opts = {}) {
     recentLoad(friday, 56),
   ]);
   const asg = opts.draft ? opts.draft.filter((a) => evIds.has(String(a.eventId))).map((a) => ({ event: a.eventId, position: a.position, user: a.userId })) : saved;
+  const posTeam = await positionTeams();
+  const teamOf = (pos) => posTeam[baseKey(pos)] || 'av';
   const months = [...new Set(events.map((e) => e.date.slice(0, 7)))];
-  const monthly = Object.fromEntries(await Promise.all(months.map(async (m) => [m, opts.monthly?.[m] ? { ...opts.monthly[m] } : await monthCounts(`${m}-01`)])));
+  const monthly = Object.fromEntries(await Promise.all(months.map(async (m) => [m, opts.monthly?.[m] ? { ...opts.monthly[m] } : await monthCountsByTeam(`${m}-01`, posTeam)])));
   const personById = Object.fromEntries(people.map((p) => [String(p._id), p]));
-  const leadOn = {}; // eventId -> true once someone who's a Lead on their position is on it
+  const leadOn = {}; // "eventId|team" -> true once someone who's a Lead on their position is on it
+  const leadKey = (e, pos) => `${e._id ?? e}|${teamOf(pos)}`;
+  const limitOf = (p, pos) => {
+    const m = (p.teams || []).find((t) => t.team === teamOf(pos));
+    return m ? m.maxPerMonth || 0 : p.maxPerMonth || 0;
+  };
+  const countKey = (uid, pos) => `${uid}|${teamOf(pos)}`;
+  const monthCount = (m, uid, pos) => (monthly[m]?.[countKey(uid, pos)] || 0) + (added[m]?.[countKey(uid, pos)] || 0);
+  const atLimit = (p, m, pos) => {
+    const lim = limitOf(p, pos);
+    return lim > 0 && monthCount(m, String(p._id), pos) >= lim;
+  };
+  const addCount = (m, uid, pos) => ((added[m] ||= {})[countKey(uid, pos)] = (added[m][countKey(uid, pos)] || 0) + 1);
+  const fillable = (pos) => !opts.keys || opts.keys.has(baseKey(pos));
 
   const holder = {}; // "eventId|pos" -> userId
   const onEvent = {}; // eventId -> Set(userId)
@@ -45,7 +65,7 @@ export async function planAutofill(friday, opts = {}) {
     holder[`${eid}|${pos}`] = uid;
     (onEvent[eid] ||= new Set()).add(uid);
     if (isShadow(pos)) return;
-    if (personById[uid]?.leads?.includes(pos)) leadOn[eid] = true;
+    if (personById[uid]?.leads?.includes(pos)) leadOn[leadKey(e, pos)] = true;
     weekend[uid] = (weekend[uid] || 0) + 1;
     (sameDay[e.date] ||= {})[uid] = (sameDay[e.date][uid] || 0) + 1;
   };
@@ -54,7 +74,7 @@ export async function planAutofill(friday, opts = {}) {
     if (!e) continue;
     holder[`${e._id}|${a.position}`] = String(a.user);
     (onEvent[String(e._id)] ||= new Set()).add(String(a.user));
-    if (!isShadow(a.position) && personById[String(a.user)]?.leads?.includes(a.position)) leadOn[String(e._id)] = true;
+    if (!isShadow(a.position) && personById[String(a.user)]?.leads?.includes(a.position)) leadOn[leadKey(e, a.position)] = true;
     if (!isShadow(a.position)) {
       weekend[String(a.user)] = (weekend[String(a.user)] || 0) + 1;
       (sameDay[e.date] ||= {})[String(a.user)] = (sameDay[e.date][String(a.user)] || 0) + 1;
@@ -69,8 +89,7 @@ export async function planAutofill(friday, opts = {}) {
       if (!p.positions.includes(pos)) return false;
       if (onEvent[eid]?.has(uid)) return false;
       if (unav[eid]?.has(uid) || away[eid]?.has(uid)) return false;
-      const m = e.date.slice(0, 7);
-      if (p.maxPerMonth && (monthly[m][uid] || 0) + (added[m]?.[uid] || 0) >= p.maxPerMonth) return false;
+      if (atLimit(p, e.date.slice(0, 7), pos)) return false;
       return true;
     });
 
@@ -108,20 +127,17 @@ export async function planAutofill(friday, opts = {}) {
         continue;
       }
       const m = e.date.slice(0, 7);
-      if (p.maxPerMonth && (monthly[m][uid] || 0) + (added[m]?.[uid] || 0) >= p.maxPerMonth) {
-        why = 'Already at their monthly limit.';
-        continue;
-      }
-      const wanted = r.positions.length ? r.positions.filter((k) => p.positions.includes(k)) : p.positions;
-      const open = wanted.filter((k) => e.needs.includes(k) && !holder[`${eid}|${k}`]);
+      const wanted = (r.positions.length ? r.positions.filter((k) => p.positions.includes(k)) : p.positions).filter(fillable);
+      const free = wanted.filter((k) => e.needs.includes(k) && !holder[`${eid}|${k}`]);
+      const open = free.filter((k) => !atLimit(p, m, k));
       if (!open.length) {
-        why = 'Their positions are already filled on that service.';
+        why = free.length ? 'Already at their monthly limit.' : 'Their positions are already filled on that service.';
         continue;
       }
       // Listed positions keep their order of preference; otherwise take the hardest spot to fill.
       const pos = r.positions.length ? open[0] : open.map((k) => [k, eligible(e, k).length]).sort((a, b) => a[1] - b[1])[0][0];
       add(e, pos, uid);
-      (added[m] ||= {})[uid] = (added[m][uid] || 0) + 1;
+      addCount(m, uid, pos);
       proposals.push({ eventId: eid, position: pos, userId: uid, userName: p.name, reason: `Regular: ${label}`, regular: true });
       placed = true;
       break;
@@ -131,7 +147,7 @@ export async function planAutofill(friday, opts = {}) {
 
   // 2) Everyone else for the spots still open.
   let slots = [];
-  for (const e of events) for (const pos of e.needs) if (!holder[`${e._id}|${pos}`]) slots.push({ e, pos });
+  for (const e of events) for (const pos of e.needs) if (fillable(pos) && !holder[`${e._id}|${pos}`]) slots.push({ e, pos });
   // Services before sound checks (so checks can follow their service), scarcest spots first.
   slots = slots
     .map((s) => ({ ...s, n: eligible(s.e, s.pos).length, check: s.e.kind === 'soundcheck' ? 1 : 0 }))
@@ -154,9 +170,8 @@ export async function planAutofill(friday, opts = {}) {
     if (!pick) {
       const score = (p) => {
         const uid = String(p._id);
-        const lead = !leadOn[String(e._id)] && p.leads?.includes(pos) ? -60 : 0;
-        const m = e.date.slice(0, 7);
-        const month = (monthly[m]?.[uid] || 0) + (added[m]?.[uid] || 0); // spreads shifts across the month
+        const lead = !leadOn[leadKey(e, pos)] && p.leads?.includes(pos) ? -60 : 0;
+        const month = monthCount(e.date.slice(0, 7), uid, pos); // spreads shifts across the month
         return (weekend[uid] || 0) * 100 + (sameDay[e.date]?.[uid] || 0) * 40 + month * 25 + (recent.count[uid] || 0) * 5 + lead;
       };
       list.sort((a, b) => score(a) - score(b) || (recent.last[String(a._id)] || '').localeCompare(recent.last[String(b._id)] || '') || a.name.localeCompare(b.name));
@@ -165,11 +180,10 @@ export async function planAutofill(friday, opts = {}) {
       const w = weekend[String(pick._id)] || 0;
       reason = `${w ? `${w} other shift${w === 1 ? '' : 's'} this weekend · ` : ''}${n} shift${n === 1 ? '' : 's'} in the last 8 weeks`;
     }
-    if (!leadOn[String(e._id)] && pick.leads?.includes(pos)) reason = `Lead on this position · ${reason}`;
+    if (!leadOn[leadKey(e, pos)] && pick.leads?.includes(pos)) reason = `Lead on this position · ${reason}`;
     const uid = String(pick._id);
     add(e, pos, uid);
-    const m = e.date.slice(0, 7);
-    (added[m] ||= {})[uid] = (added[m][uid] || 0) + 1;
+    addCount(e.date.slice(0, 7), uid, pos);
     proposals.push({ eventId: String(e._id), position: pos, userId: uid, userName: pick.name, reason });
   }
   const order = Object.fromEntries(events.map((e, i) => [String(e._id), i]));

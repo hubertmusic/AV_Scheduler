@@ -47,6 +47,21 @@ export async function monthCounts(date) {
   return out;
 }
 
+// Shifts in a month per person and team: { "userId|team": n }. posTeam maps position -> team.
+export async function monthCountsByTeam(date, posTeam) {
+  const first = `${date.slice(0, 7)}-01`;
+  const last = `${date.slice(0, 7)}-31`;
+  const events = await Event.find({ date: { $gte: first, $lte: last } }, { _id: 1 }).lean();
+  const asg = await Assignment.find({ event: { $in: events.map((e) => e._id) } }, { user: 1, position: 1 }).lean();
+  const out = {};
+  for (const a of asg) {
+    if (isShadow(a.position)) continue;
+    const k = `${a.user}|${posTeam[a.position] || 'av'}`;
+    out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+
 // Shifts per person over the last `days` days, and the date of their most recent one.
 export async function recentLoad(today, days = 56) {
   const events = await Event.find({ date: { $gte: addDays(today, -days), $lt: today } }, { _id: 1, date: 1 }).lean();

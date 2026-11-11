@@ -154,18 +154,25 @@ export function RundownPage({ token }) {
         )}
         {d.crew.length > 0 && (
           <section className="rs-block">
-            <h2>AV team</h2>
+            <h2>Who’s serving</h2>
             <table className="rs-crew">
               <tbody>
-                {d.crew.map((c, i) => (
+                {d.crew.map((c, i) => [
+                  c.team && c.team !== d.crew[i - 1]?.team && (
+                    <tr key={`t${i}`} className="rd-heading">
+                      <th colSpan={2} scope="rowgroup">
+                        {c.team}
+                      </th>
+                    </tr>
+                  ),
                   <tr key={i}>
                     <th scope="row">
                       {c.position}
                       {c.shadow ? ' (shadow)' : ''}
                     </th>
                     <td>{c.name || <span className="muted">open</span>}</td>
-                  </tr>
-                ))}
+                  </tr>,
+                ])}
               </tbody>
             </table>
           </section>

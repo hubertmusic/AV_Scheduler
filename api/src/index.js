@@ -13,6 +13,8 @@ import { groupsRouter } from './routes/groups.js';
 import { guestAdminRouter, mediaRouter, plansRouter, songsRouter, submissionsRouter } from './routes/plans.js';
 import { guestRouter } from './routes/guest.js';
 import { publicRouter } from './routes/public.js';
+import { ensureTeams, requireAvTeam } from './lib/teams.js';
+import { teamsRouter } from './routes/teams.js';
 import { boardsRouter } from './routes/boards.js';
 import { standingRouter } from './routes/standing.js';
 import { templatesRouter } from './routes/templates.js';
@@ -52,11 +54,11 @@ app.use('/api/me', meRouter);
 app.use('/api/events', eventsRouter);
 app.use('/api/requests', requestsRouter);
 app.use('/api/people', peopleRouter);
-app.use('/api/groups', groupsRouter);
+app.use('/api/groups', requireAvTeam, groupsRouter); // AV's side
 app.use('/api/plans', plansRouter);
 app.use('/api/songs', songsRouter);
 app.use('/api/media', mediaRouter);
-app.use('/api/library', libraryRouter);
+app.use('/api/library', requireAvTeam, libraryRouter); // AV's side
 app.use('/api/guest-links', guestAdminRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/weekend', weekendRouter);
@@ -65,10 +67,11 @@ app.use('/api/activity', activityRouter);
 app.use('/api/resources', resourcesRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/positions', positionsRouter);
+app.use('/api/teams', teamsRouter);
 app.use('/api/boards', boardsRouter);
 app.use('/api/standing-links', standingRouter);
 app.use('/api/order-templates', templatesRouter);
-app.use('/api/gear', gearRouter);
+app.use('/api/gear', requireAvTeam, gearRouter); // AV's side
 app.use('/api/checklists', checklistsRouter);
 app.use('/api/issues', issuesRouter);
 app.use('/api/debrief', debriefRouter);
@@ -91,6 +94,7 @@ app.use((err, req, res, next) => {
 async function runMigrations() {
   const s = await Settings.findOne({ key: 'main' });
   if (!s) return; // first run: setup creates settings with today's defaults
+  await ensureTeams(); // AV and Praise teams; everyone so far joins AV
   if (!s.migrations.includes('leaders-edit-plans')) {
     // Team leaders can edit service plans unless the admin turns it off for someone.
     const r = await User.updateMany({ role: 'leader' }, { $set: { 'perms.plans': true } });

@@ -5,7 +5,8 @@ import { DateTime } from 'luxon';
 import { config } from '../config.js';
 import { Assignment, Event, GuestLink, Media, OrderTemplate, Plan, Song, Submission, User } from '../models.js';
 import { requirePerm } from '../auth.js';
-import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, str, token, wrap } from '../lib/util.js';
+import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, roleIn, str, token, wrap } from '../lib/util.js';
+import { isAvTeam, requireMember } from '../lib/teams.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
 import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '../lib/archive.js';
 import { orderView, readOrder } from '../lib/serviceOrder.js';
@@ -38,6 +39,20 @@ export const escapeRx = (q) => q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function assertOpen(ev) {
   if (isArchived(ev, await orgToday())) throw bad(ARCHIVED);
 }
+
+// Who can change which part of a service plan:
+//   lead     — team leaders (plans permission): sermon, speaker, pastor's notes, order of service,
+//              guest links, archiving, everything below
+//   details  — anyone on a team: Bible texts, songs (keys, chord notes), announcements, slides
+//   av       — anyone on the AV team: media-library items, input list, ProPresenter files
+export function planRights(req) {
+  const lead = !!req.can?.plans;
+  const member = lead || !!roleIn(req.user, req.team?.key);
+  const av = req.user?.role === 'admin' || isAvTeam(req.team);
+  return { lead, details: member, av: member && av };
+}
+const LEAD_ONLY = 'Only a team leader can change that part of the plan.';
+const requireAvMember = (req, res, next) => (planRights(req).av ? next() : next(forbidden('That’s part of the AV team’s side.')));
 
 // Library items for a plan, in the plan's order
 async function planAssets(plan) {
@@ -136,7 +151,9 @@ async function readPlanSongs(list) {
     .map((x) => ({ song: x.song, key: str(x.key, 12), note: str(x.note, 300) }));
 }
 
-async function fullPlan(ev, viewerCan) {
+async function fullPlan(ev, req) {
+  const viewerCan = req.can || {};
+  const rights = planRights(req);
   const plan = await planFor(ev._id);
   if (!plan.rundownToken || !plan.bulletinToken) {
     plan.rundownToken ||= token(18);
@@ -168,6 +185,7 @@ async function fullPlan(ev, viewerCan) {
     share: { rundown: plan.rundownToken, bulletin: plan.bulletinToken },
     updatedAt: plan.updatedAt,
     updatedBy: plan.updatedBy?.name || null,
+    rights,
   };
   if (viewerCan.plans) {
     const [guests, subs] = await Promise.all([
@@ -266,7 +284,7 @@ async function closeGuestsFor(eventId, by) {
 // Archive services now instead of waiting for Monday, so the planning page is a clean slate
 // for next weekend. Saved services go to the Archive, read-only. With delete (admin only),
 // their plans and files are deleted instead; the schedule of who served stays.
-plansRouter.post('/archive-weekend', requirePerm('plans'), wrap(async (req, res) => {
+plansRouter.post('/archive-weekend', requirePerm('plans'), requireAvMember, wrap(async (req, res) => {
   const b = req.body || {};
   const ids = Array.isArray(b.events) ? [...new Set(b.events.filter(isId))].slice(0, 30) : [];
   if (!ids.length) throw bad('Pick the services to archive.');
@@ -330,7 +348,7 @@ plansRouter.get('/archive', wrap(async (req, res) => {
 
 plansRouter.get('/:eventId', wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
-  res.json(await fullPlan(ev, req.can));
+  res.json(await fullPlan(ev, req));
 }));
 
 // POST /api/plans/:eventId/share/rundown|bulletin — replace a share link (the old link and QR stop working)
@@ -342,7 +360,7 @@ plansRouter.post('/:eventId/share/:which', requirePerm('plans'), wrap(async (req
   plan[field] = token(18);
   await plan.save();
   res.locals.activity = `Made a new ${req.params.which} link · ${evName(ev)}`;
-  res.json(await fullPlan(ev, req.can));
+  res.json(await fullPlan(ev, req));
 }));
 
 // POST /api/plans/:eventId/order/copy-last — start from the latest earlier service's order of
@@ -359,7 +377,7 @@ plansRouter.post('/:eventId/order/copy-last', requirePerm('plans'), wrap(async (
   plan.updatedBy = req.user._id;
   await plan.save();
   res.locals.activity = `Copied the order of service from ${evName(src)} · ${evName(ev)}`;
-  res.json({ ...(await fullPlan(ev, req.can)), copiedFrom: { title: src.title, date: src.date } });
+  res.json({ ...(await fullPlan(ev, req)), copiedFrom: { title: src.title, date: src.date } });
 }));
 
 // ---------- input list (extra feature) ----------
@@ -385,7 +403,7 @@ plansRouter.post('/:eventId/inputs/copy-last', requireFeature('inputList'), requ
   plan.updatedBy = req.user._id;
   await plan.save();
   res.locals.activity = `Copied the input list from ${evName(src)} · ${evName(ev)}`;
-  res.json({ ...(await fullPlan(ev, req.can)), copiedFrom: { title: src.title, date: src.date } });
+  res.json({ ...(await fullPlan(ev, req)), copiedFrom: { title: src.title, date: src.date } });
 }));
 
 // ---------- live run-of-show (extra feature) ----------
@@ -452,7 +470,7 @@ plansRouter.post('/:eventId/order/template/:id', requirePerm('plans'), wrap(asyn
   plan.updatedBy = req.user._id;
   await plan.save();
   res.locals.activity = `Added the “${tpl.name}” template to the order of service · ${evName(ev)}`;
-  res.json(await fullPlan(ev, req.can));
+  res.json(await fullPlan(ev, req));
 }));
 
 // GET /api/plans/:eventId/announcements.pptx — the bulletin's announcements as slides
@@ -467,7 +485,7 @@ plansRouter.get('/:eventId/announcements.pptx', wrap(async (req, res) => {
 }));
 
 // Put a service archived by hand back on the planning page (only until its Monday).
-plansRouter.post('/:eventId/unarchive', requirePerm('plans'), wrap(async (req, res) => {
+plansRouter.post('/:eventId/unarchive', requirePerm('plans'), requireAvMember, wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
   if (!ev.archivedAt) throw bad('That service isn’t archived.');
   if (ev.planDeletedAt) throw bad('That service’s plan was deleted, so there’s nothing to put back.');
@@ -476,14 +494,18 @@ plansRouter.post('/:eventId/unarchive', requirePerm('plans'), wrap(async (req, r
   ev.archivedBy = undefined;
   await ev.save();
   res.locals.activity = `Put ${evName(ev)} back on the planning page`;
-  res.json(await fullPlan(ev, req.can));
+  res.json(await fullPlan(ev, req));
 }));
 
-plansRouter.patch('/:eventId', requirePerm('plans'), wrap(async (req, res) => {
+plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
   await assertOpen(ev);
   const plan = await planFor(ev._id);
-  const b = req.body;
+  const b = req.body || {};
+  const rights = planRights(req);
+  const has = (k) => b[k] !== undefined;
+  if (!rights.lead && ['speaker', 'sermonTitle', 'notes', 'order'].some(has)) throw forbidden(LEAD_ONLY);
+  if (!rights.av && ['assets', 'inputs'].some(has)) throw forbidden('The media library and input list are part of the AV team’s side.');
   if (b.speaker !== undefined) plan.speaker = str(b.speaker, 80);
   if (b.sermonTitle !== undefined) plan.sermonTitle = str(b.sermonTitle, 160);
   if (b.notes !== undefined) plan.notes = str(b.notes, 50000);
@@ -501,7 +523,7 @@ plansRouter.patch('/:eventId', requirePerm('plans'), wrap(async (req, res) => {
   const names = { sermonTitle: 'sermon title', speaker: 'speaker', notes: 'notes', scriptures: 'Bible texts', songs: 'songs', assets: 'library items', order: 'order of service', announcements: 'announcements' };
   const what = Object.keys(names).filter((k) => b[k] !== undefined).map((k) => names[k]);
   res.locals.activity = `Edited ${what.join(', ') || 'the plan'} · ${evName(ev)}`;
-  res.json(await fullPlan(ev, req.can));
+  res.json(await fullPlan(ev, req));
 }));
 
 // POST /api/plans/:eventId/copy — reuse parts of another (usually archived) service in this one.
@@ -567,10 +589,10 @@ plansRouter.post('/:eventId/copy', requirePerm('plans'), wrap(async (req, res) =
   plan.updatedBy = req.user._id;
   await plan.save();
   res.locals.activity = `Copied ${done.join(', ') || 'nothing'} from ${evName(src)} · ${evName(ev)}`;
-  res.json({ ...(await fullPlan(ev, req.can)), copied: done, failed });
+  res.json({ ...(await fullPlan(ev, req)), copied: done, failed });
 }));
 
-plansRouter.post('/:eventId/media', requirePerm('plans'), uploader({ maxCount: 20 }), wrap(async (req, res) => {
+plansRouter.post('/:eventId/media', requireMember, uploader({ maxCount: 20 }), wrap(async (req, res) => {
   const files = filesOf(req);
   let ev;
   try {
@@ -598,7 +620,7 @@ plansRouter.post('/:eventId/media', requirePerm('plans'), uploader({ maxCount: 2
   }
   if (rows.length) await Media.insertMany(rows);
   if (linked.length) await plan.save();
-  res.status(201).json({ ...(await fullPlan(ev, req.can)), linked });
+  res.status(201).json({ ...(await fullPlan(ev, req)), linked });
 }));
 
 // Download everything for ProPresenter: each song as an importable .txt (and its .pro if
@@ -680,7 +702,7 @@ plansRouter.get('/:eventId/service.pptx', wrap(async (req, res) => {
 function readSong(b) {
   const title = str(b.title, 120);
   if (!title) throw bad('Give the song a title.');
-  return { title, artist: str(b.artist, 120), ccli: str(b.ccli, 20), lyrics: str(b.lyrics, 30000), notes: str(b.notes, 1000) };
+  return { title, artist: str(b.artist, 120), ccli: str(b.ccli, 20), lyrics: str(b.lyrics, 30000), notes: str(b.notes, 5000) };
 }
 
 // When each song was sung: services up to today, newest first. { songId: ['2026-11-07', …] }
@@ -733,13 +755,14 @@ songsRouter.get('/usage.csv', requirePerm('plans'), wrap(async (req, res) => {
   res.send('\ufeff' + lines.join('\r\n') + '\r\n');
 }));
 
-songsRouter.post('/', requirePerm('plans'), wrap(async (req, res) => {
+songsRouter.post('/', requireMember, wrap(async (req, res) => {
   const s = await Song.create({ ...readSong(req.body), lyricsUpdatedAt: new Date(), updatedBy: req.user._id });
   res.status(201).json(songView(s));
 }));
 
-songsRouter.patch('/:id', requirePerm('plans'), wrap(async (req, res) => {
+songsRouter.patch('/:id', requireMember, wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
+  if (req.body.retired !== undefined && !req.can.plans) throw forbidden('Only a team leader can retire a song.');
   const s = await Song.findById(req.params.id).populate('proMedia');
   if (!s) throw notFound('That song no longer exists.');
   const input = readSong({ ...s.toObject(), ...req.body });
@@ -791,7 +814,7 @@ songsRouter.get('/:id/propresenter.txt', wrap(async (req, res) => {
 }));
 
 // Attach (or replace) the ProPresenter .pro file for a song
-songsRouter.post('/:id/pro', requirePerm('plans'), uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
+songsRouter.post('/:id/pro', requireAvMember, uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
   const files = filesOf(req);
   const s = isId(req.params.id) ? await Song.findById(req.params.id).populate('proMedia') : null;
   if (!s) {
@@ -816,7 +839,7 @@ songsRouter.post('/:id/pro', requirePerm('plans'), uploader({ field: 'file', max
   res.json(songView(s));
 }));
 
-songsRouter.delete('/:id/pro', requirePerm('plans'), wrap(async (req, res) => {
+songsRouter.delete('/:id/pro', requireAvMember, wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const s = await Song.findById(req.params.id).populate('proMedia');
   if (!s) throw notFound();
@@ -838,19 +861,24 @@ mediaRouter.get('/:id/file', wrap(async (req, res) => {
   sendStored(res, m, { download: req.query.download === '1' });
 }));
 
-mediaRouter.patch('/:id', requirePerm('plans'), wrap(async (req, res) => {
+// Leaders can rename or remove any service file; others only the files they uploaded
+const ownsMedia = (req, m) => req.can.plans || (!m.library && !m.song && String(m.uploadedBy) === String(req.user._id));
+
+mediaRouter.patch('/:id', requireMember, wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const m = await Media.findById(req.params.id);
   if (!m) throw notFound();
+  if (!ownsMedia(req, m)) throw forbidden('Only a team leader, or the person who added this file, can rename it.');
   if (req.body.title !== undefined) m.title = str(req.body.title, 160);
   await m.save();
   res.json(mediaView(m));
 }));
 
-mediaRouter.delete('/:id', requirePerm('plans'), wrap(async (req, res) => {
+mediaRouter.delete('/:id', requireMember, wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const m = await Media.findById(req.params.id);
   if (!m) throw notFound();
+  if (!ownsMedia(req, m)) throw forbidden('Only a team leader, or the person who added this file, can remove it.');
   if (m.song) throw bad('Remove .pro files from the song instead.');
   if (m.library) throw bad('That’s in the media library. Take it out of the service instead, or delete it from the library.');
   const plan = m.plan ? await Plan.findById(m.plan, { event: 1 }).lean() : null;

@@ -5,6 +5,7 @@ import { bad, conflict, forbidden, getSettings, isId, notFound, str, todayIn, wr
 import { requestView } from '../lib/views.js';
 import { awayByEvent } from '../lib/availability.js';
 import { evName, posName } from '../lib/activity.js';
+import { baseKey, teamKeys } from '../lib/teams.js';
 
 export const requestsRouter = Router();
 
@@ -113,12 +114,20 @@ requestsRouter.post('/', wrap(async (req, res) => {
 
 // GET /api/requests — for leaders who approve requests
 requestsRouter.get('/', requirePerm('approve'), wrap(async (req, res) => {
+  // Each team's leaders handle requests for their own positions
+  const keys = [...(await teamKeys(req))];
+  const mine = { position: { $in: [...keys, ...keys.map((k) => `${k}+shadow`)] } };
   const [pending, recent] = await Promise.all([
-    populate(Request.find({ status: 'pending' }).sort({ createdAt: 1 })),
-    populate(Request.find({ status: { $ne: 'pending' } }).sort({ updatedAt: -1 }).limit(40)),
+    populate(Request.find({ status: 'pending', ...mine }).sort({ createdAt: 1 })),
+    populate(Request.find({ status: { $ne: 'pending' }, ...mine }).sort({ updatedAt: -1 }).limit(40)),
   ]);
   res.json([...pending, ...recent].map(requestView));
 }));
+
+// The request must be for one of this team's positions
+async function assertTeamRequest(req, r) {
+  if (!(await teamKeys(req)).has(baseKey(r.position))) throw forbidden('That request is for another team’s position.');
+}
 
 async function apply(r) {
   const a = await Assignment.findOne({ event: r.event, position: r.position });
@@ -169,6 +178,7 @@ async function loadPending(id) {
 
 requestsRouter.post('/:id/approve', requirePerm('approve'), wrap(async (req, res) => {
   const r = await loadPending(req.params.id);
+  await assertTeamRequest(req, r);
   const problem = await apply(r);
   await r.populate(['from', 'event']);
   res.locals.activity = `${problem ? 'Tried to approve' : 'Approved'} ${r.from?.name}\u2019s ${r.type} request · ${evName(r.event)}`;
@@ -182,6 +192,7 @@ requestsRouter.post('/:id/approve', requirePerm('approve'), wrap(async (req, res
 
 requestsRouter.post('/:id/deny', requirePerm('approve'), wrap(async (req, res) => {
   const r = await loadPending(req.params.id);
+  await assertTeamRequest(req, r);
   r.status = 'denied';
   r.reason = str(req.body.reason, 300);
   r.decidedBy = req.user._id;

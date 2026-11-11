@@ -3,9 +3,12 @@
 import { Router } from 'express';
 import { Board, User } from '../models.js';
 import { bad, conflict, forbidden, isId, notFound, str, wrap } from '../lib/util.js';
+import { isTeamLeader } from '../lib/teams.js';
 
 export const boardsRouter = Router();
-boardsRouter.use((req, res, next) => (['admin', 'leader'].includes(req.user?.role) ? next() : next(forbidden('Boards are for the admin and team leaders.'))));
+// Each team's leaders see their team's boards, plus boards shared with every team
+boardsRouter.use((req, res, next) => (isTeamLeader(req) ? next() : next(forbidden('Boards are for the admin and team leaders.'))));
+const visible = (req) => ({ $or: [{ team: req.team.key }, { shared: true }, ...(req.team.key === 'av' ? [{ team: { $exists: false } }] : [])] });
 
 export const NODE_TYPES = ['box', 'note', 'decision', 'person', 'text'];
 export const COLORS = ['plain', 'yellow', 'blue', 'green', 'orange', 'red', 'purple'];
@@ -58,11 +61,13 @@ const view = (b, who = {}) => ({
   updatedBy: who[String(b.updatedBy)] || null,
   createdBy: who[String(b.createdBy)] || null,
   createdById: b.createdBy ? String(b.createdBy) : null,
+  team: b.team || 'av',
+  shared: !!b.shared,
 });
 
-async function load(id) {
+async function load(id, req) {
   if (!isId(id)) throw notFound();
-  const b = await Board.findById(id);
+  const b = await Board.findOne({ _id: id, ...visible(req) });
   if (!b) throw notFound('That board was deleted.');
   return b;
 }
@@ -83,7 +88,7 @@ function weekTemplate() {
 }
 
 boardsRouter.get('/', wrap(async (req, res) => {
-  const list = await Board.find({}, { title: 1, updatedAt: 1, updatedBy: 1, createdBy: 1, rev: 1, nodes: 1 }).sort({ updatedAt: -1 }).limit(200).lean();
+  const list = await Board.find(visible(req), { title: 1, updatedAt: 1, updatedBy: 1, createdBy: 1, rev: 1, nodes: 1, team: 1, shared: 1 }).sort({ updatedAt: -1 }).limit(200).lean();
   const who = await names(list.flatMap((b) => [b.updatedBy, b.createdBy]));
   res.json(list.map((b) => ({ ...view(b, who), nodes: undefined, edges: undefined, size: (b.nodes || []).length })));
 }));
@@ -91,19 +96,19 @@ boardsRouter.get('/', wrap(async (req, res) => {
 boardsRouter.post('/', wrap(async (req, res) => {
   const title = str(req.body?.title, 120) || 'Untitled board';
   const start = req.body?.template === 'week' ? weekTemplate() : { nodes: [], edges: [] };
-  const b = await Board.create({ title, ...start, createdBy: req.user._id, updatedBy: req.user._id });
+  const b = await Board.create({ title, ...start, team: req.team.key, createdBy: req.user._id, updatedBy: req.user._id });
   res.locals.activity = `Made the board “${title}”`;
   res.status(201).json(view(b, await names([b.createdBy])));
 }));
 
 boardsRouter.get('/:id', wrap(async (req, res) => {
-  const b = await load(req.params.id);
+  const b = await load(req.params.id, req);
   res.json(view(b, await names([b.updatedBy, b.createdBy])));
 }));
 
 // PUT /api/boards/:id { title?, nodes, edges, rev } — rev must match, or someone else saved first
 boardsRouter.put('/:id', wrap(async (req, res) => {
-  const b = await load(req.params.id);
+  const b = await load(req.params.id, req);
   const body = req.body || {};
   if (Number(body.rev) !== b.rev) {
     const who = await names([b.updatedBy]);
@@ -115,6 +120,7 @@ boardsRouter.put('/:id', wrap(async (req, res) => {
     if (title !== b.title) res.locals.activity = `Renamed a board to “${title}”`;
     b.title = title;
   }
+  if (body.shared !== undefined) b.shared = !!body.shared;
   if (body.nodes !== undefined) {
     b.nodes = readNodes(body.nodes);
     b.edges = readEdges(body.edges ?? b.edges, new Set(b.nodes.map((n) => n.id)));
@@ -128,7 +134,7 @@ boardsRouter.put('/:id', wrap(async (req, res) => {
 }));
 
 boardsRouter.delete('/:id', wrap(async (req, res) => {
-  const b = await load(req.params.id);
+  const b = await load(req.params.id, req);
   if (req.user.role !== 'admin' && String(b.createdBy) !== String(req.user._id)) throw forbidden('Only the person who made this board, or the admin, can delete it.');
   await b.deleteOne();
   res.locals.activity = `Deleted the board “${b.title}”`;

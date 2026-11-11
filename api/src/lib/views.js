@@ -1,26 +1,35 @@
 import { config } from '../config.js';
-import { can } from './util.js';
+import { can, membershipOf, roleIn } from './util.js';
 
-// What everyone may see about a person. Phones of leaders and the admin are
-// visible to everyone (so crew can reach them); everyone else's phone only to
-// people who message the crew or manage people.
+// What everyone may see about a person, through the team the viewer is working in: their role,
+// title, positions and monthly limit on that team. Phones of leaders and the admin are visible to
+// everyone (so crew can reach them); everyone else's phone only to people who message the crew or
+// manage people.
 export function personView(u, viewer) {
+  const team = viewer._team;
+  const keys = viewer._teamKeys; // positions on the viewer's team (unset = no filtering)
+  const lens = (list) => (keys ? (list || []).filter((k) => keys.has(String(k).replace(/\+shadow$/, ''))) : list || []);
   const vc = can(viewer);
   const isSelf = String(u._id) === String(viewer._id);
-  const isLead = u.role === 'admin' || u.role === 'leader';
+  const m = membershipOf(u, team);
+  const role = roleIn(u, team);
+  const isLead = u.role === 'admin' || (u.teams || []).some((t) => t.head || t.role === 'leader');
   const out = {
     id: String(u._id),
     name: u.name,
-    role: u.role,
-    leaderTitle: u.leaderTitle,
-    positions: u.positions,
-    trainee: u.trainee || [],
-    leads: u.leads || [],
+    role: role || 'crew',
+    onTeam: !!role,
+    head: u.role === 'admin' || !!m?.head,
+    leaderTitle: m?.title || (u.role === 'admin' ? u.leaderTitle : ''),
+    teams: (u.teams || []).map((t) => t.team),
+    positions: lens(u.positions),
+    trainee: lens(u.trainee),
+    leads: lens(u.leads),
     active: u.active,
   };
   if (isSelf || vc.people || vc.edit) {
     out.regulars = (u.regulars || []).map((r) => ({ id: String(r._id), week: r.week, anchor: r.anchor, service: r.service, positions: r.positions, note: r.note }));
-    out.maxPerMonth = u.maxPerMonth || 0;
+    out.maxPerMonth = m ? m.maxPerMonth || 0 : u.maxPerMonth || 0;
     out.availabilityUpdatedAt = u.availabilityUpdatedAt || null;
   }
   if (isLead || isSelf || vc.message || vc.people) out.phone = u.phone;
@@ -28,18 +37,22 @@ export function personView(u, viewer) {
     out.email = u.email;
     out.invited = !u.passwordHash;
   }
-  if (isLead) out.perms = can(u);
+  if (role === 'leader' || role === 'admin') out.perms = can(u, team);
   return out;
 }
 
 export function meView(u) {
+  const team = u._team;
+  const m = membershipOf(u, team);
   return {
     id: String(u._id),
     name: u.name,
     email: u.email,
     phone: u.phone,
-    role: u.role,
-    leaderTitle: u.leaderTitle,
+    role: roleIn(u, team) || 'crew', // in the team they're working in; 'admin' is over all teams
+    head: u.role === 'admin' || !!m?.head,
+    leaderTitle: m?.title || (u.role === 'admin' ? u.leaderTitle : ''),
+    team: team || null,
     positions: u.positions,
     regulars: (u.regulars || []).map((r) => ({ id: String(r._id), week: r.week, anchor: r.anchor, service: r.service, positions: r.positions, note: r.note })),
     can: can(u),
@@ -58,6 +71,7 @@ export function eventView(e) {
     needs: e.needs,
     notes: e.notes,
     kind: e.kind || 'service',
+    team: e.team || null,
     groups: (e.groups || []).map(String),
     forEvent: e.forEvent ? String(e.forEvent) : null,
     manual: Boolean(e.manual),
