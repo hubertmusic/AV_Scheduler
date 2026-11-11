@@ -9,7 +9,7 @@ const PERMS = [
   { id: 'message', label: 'Message the crew', help: 'Send lineups and reminders on WhatsApp; see crew phone numbers.' },
   { id: 'resources', label: 'Manage training links', help: 'Add, edit and remove quick-review resources.' },
   { id: 'people', label: 'Manage crew & positions', help: 'Invite crew, set who is trained on what, deactivate crew.' },
-  { id: 'plans', label: 'Lead service plans', help: 'Set the sermon, speaker, pastor’s notes and order of service; invite guests and approve what they send. (Everyone on the team can add songs, Bible texts, chord notes and slides.)' },
+  { id: 'plans', label: 'Lead service plans', help: 'Set the sermon, speaker, pastor’s notes and order of service; send quick links and approve late changes. (Everyone on the team can add songs, Bible texts, chord notes and slides.)' },
   { id: 'groups', label: 'Manage outside groups', help: 'Add and edit outside groups like a visiting band or choir, with their contacts and WhatsApp group links.', av: true },
 ];
 

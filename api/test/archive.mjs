@@ -258,7 +258,7 @@ const libItem = ok(await admin('GET', '/api/library')).items[0];
 ok(await admin('PATCH', `/api/plans/${sun.id}`, { notes: 'Youth notes', assets: [libItem.id] }));
 const sunFile = ok(await admin.upload(`/api/plans/${sun.id}/media`, [{ name: 'youth loop.mp4', type: 'video/mp4', bytes: Buffer.from('youth loop video') }]), 201).media.find((m) => m.title.startsWith('youth loop'));
 const link = ok(await admin('POST', `/api/guest-links/${sat.id}`, { name: 'Pastor' }), 201);
-const linkToken = link.url.split('/guest/')[1];
+const linkToken = link.url.split('/add/')[1];
 ok(await crew('POST', '/api/plans/archive-weekend', { events: [sat.id] }), 403);
 ok(await admin('POST', '/api/plans/archive-weekend', { events: [] }), 400);
 

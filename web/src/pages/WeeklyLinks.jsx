@@ -36,7 +36,7 @@ export default function WeeklyLinks() {
         <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
           New weekly link
         </button>
-        <span className="small muted">Send it once. Each week it opens the next service, so you don’t make a new guest link every time.</span>
+        <span className="small muted">Send it once. Each week it opens the next service, so you don’t make a new quick link every time.</span>
       </div>
       {d.links.length === 0 && <Empty>No weekly links yet. Make one for your pastor or worship leader.</Empty>}
       <div className="wl-grid">
@@ -177,7 +177,7 @@ function WeeklyModal({ link, titles, onClose, onSaved }) {
             <input type="time" value={f.deadlineTime} onChange={set('deadlineTime')} required />
           </label>
         </div>
-        <p className="small muted">Before the deadline, what they send goes straight into the plan. After it, it waits for a leader’s approval, the same as other guest links.</p>
+        <p className="small muted">Before the deadline, what they send goes straight into the plan. After it, it waits for a leader’s approval, the same as quick links.</p>
         <label className="field">
           <span>Note for them (optional)</span>
           <input maxLength={300} value={f.note} onChange={set('note')} placeholder="Sermon notes, Bible texts and any videos" />
@@ -195,12 +195,12 @@ function WeeklyModal({ link, titles, onClose, onSaved }) {
   );
 }
 
-// /weekly/<token>: find this week's guest page and go there
+// /weekly/<token>: find this week's quick-link page and go there
 export function WeeklyRedirect({ token }) {
   const [error, setError] = useState('');
   useEffect(() => {
     api(`/public/weekly/${token}`).then(
-      (r) => window.location.replace(`/guest/${r.token}`),
+      (r) => window.location.replace(`/add/${r.token}`),
       (e) => setError(e.message)
     );
   }, [token]);

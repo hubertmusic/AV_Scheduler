@@ -26,8 +26,8 @@ What it does:
   - an ordered song list with keys, a note per song for this service, and chord / arrangement notes on each song
   - media (photos, videos, audio, slides, documents, up to 80 MB each)
 
-  Everyone signed in can read and download a plan. Anyone on a team can add Bible texts, songs (with keys and chord notes), slides and announcements, and remove slides they added. The sermon title and speaker, pastor's notes, order of service, guest links and approvals are for leaders with the **Lead service plans** privilege.
-- **Weekly links** (Service plans → Weekly links): one permanent link and 6-digit code for people who send things every week, like the pastor or worship leader. Each time they open it, it goes to the next matching service's guest page, with the deadline a set number of days before it (e.g. 2 days before at 6 PM). New code or turn off any time.
+  Everyone signed in can read and download a plan. Anyone on a team can add Bible texts, songs (with keys and chord notes), slides and announcements, and remove slides they added. The sermon title and speaker, pastor's notes, order of service, quick links and approvals are for leaders with the **Lead service plans** privilege.
+- **Weekly links** (Service plans → Weekly links): one permanent link and 6-digit code for people who send things every week, like the pastor or worship leader. Each time they open it, it goes to the next matching service's quick-link page, with the deadline a set number of days before it (e.g. 2 days before at 6 PM). New code or turn off any time.
 - **Order-of-service templates:** save an order as a template; with "Start every new … plan from this", new plans for services of that name start pre-filled. Any template can also be added to a plan by hand.
 - **Announcement slides:** the bulletin's announcements download as a PowerPoint for ProPresenter's pre-service loop (one slide per announcement; separate them with a blank line).
 - **Livestream details:** each plan has a YouTube/Facebook title and description written from the plan, with chapter markers from the order of service's minutes, plus a standard ending set in Settings.
@@ -51,7 +51,7 @@ What it does:
   - **Congregation bulletin:** the order without times or cues, sermon and speaker, Bible references, songs and the week's announcements, under your church logo (Settings → Bulletin logo). Print it full page, or as **half sheets**: two copies side by side on a landscape page, to cut in half.
   - **New link…** replaces either one; the old link and any printed QR code stop working.
 - **Archive.** Each weekend moves to the archive on Monday morning (the org's time zone). Archived services leave the planning page and become read-only, so last week's slides never get mixed into this week, but nothing is deleted.
-  - **Archive this weekend…** at the bottom of the planning page does it right away, so the page is a clean slate for next weekend. Pick the services, then **Save to the archive** or, for the admin only, **Delete** (removes the plans, uploaded files and guest links; songs, media library items and the schedule of who served stay). Late guest items still waiting for approval are turned down and guest links close.
+  - **Archive this weekend…** at the bottom of the planning page does it right away, so the page is a clean slate for next weekend. Pick the services, then **Save to the archive** or, for the admin only, **Delete** (removes the plans, uploaded files and quick links; songs, media library items and the schedule of who served stay). Late quick-link items still waiting for approval are turned down and quick links close.
   - A service saved early can be **put back on the planning page** from the Archive until its Monday.
   - The **Archive** view lists past services, newest first. Search by sermon title, speaker, song, Bible text or service name.
   - **Copy to this week** on any archived service copies its songs (with keys), Bible texts, notes, sermon title, media library items or individual files into an upcoming service. Things already there aren't added twice.
@@ -68,12 +68,12 @@ What it does:
   - Each song's lyrics download as a `.txt` that ProPresenter 7 imports. Section labels such as Verse 1 or Chorus become groups.
   - You can store the song's real `.pro` file with it so anyone can download it. If the lyrics are edited after the `.pro` was uploaded, the app flags it.
   - **Download for ProPresenter** on a plan gives one zip with every song (`.txt`, plus `.pro` where stored), the Bible texts and the notes.
-- **Guest links.** For a guest speaker or visiting group. The admin or any leader who can edit plans makes one on the service plan and sends it on WhatsApp.
-  - **Link + 6-digit code.** The guest opens the link and enters the code that came with it. Eight wrong codes lock it until a leader makes a new code.
-  - **Schedule.** Each link opens at a set time and locks at a deadline (by default 6 PM the evening before the service). The guest sees the service's date and times and the deadline.
+- **Quick links.** For anyone who needs to get slides, videos, notes, Bible texts or lyrics in for a service without an account: a guest speaker, the worship leader, a visiting group, someone with a last-minute announcement. A leader who leads service plans makes one on the service plan (Quick links) and sends it on WhatsApp.
+  - **Link + 6-digit code.** They open the link (`/add/…`) and enter the code that came with it. Eight wrong codes lock it until a leader makes a new code. Older `/guest/…` links keep working.
+  - **How long it's open.** Pick 1, 2, 4, 12, 24 or 48 hours from now, pick the times yourself, or leave the default (open now, locks at 6 PM the evening before the service). They see the service's date and times and when it locks.
   - **Before the deadline**, what they submit goes straight into the plan. They can save drafts (private until submitted), edit what they submitted, or take it back out. Their edits update the plan in place.
-  - **After the deadline** it locks. New items and changes go to the leaders for approval. Or reopen the link for 30 minutes, an hour, or longer.
-  - Guests only ever see what they sent. No team files, no downloads, nothing else from the plan.
+  - **After the deadline** it locks. New items and changes go to the leaders for approval. Or reopen the link for 30 minutes up to 48 hours.
+  - People using a quick link only ever see what they sent. No team files, no downloads, nothing else from the plan.
 - **Announcements.** Three levels, shown at the top of every shift (My shifts, the schedule, Weekend check, run sheets), in reminder emails and in everyone's calendar entries:
   - **Permanent:** stays until you change or clear it.
   - **Weekly:** only on that weekend's shifts, then drops off on its own.
@@ -197,7 +197,7 @@ Crew Call doesn't write `.pro` files itself. The format is undocumented, and gen
 ## 7. Accounts and guests
 
 - **Crew and leaders** each have their own account. Add people on **Team & roles**, send each one their invite link, and they set a password. Any number can be signed in at once.
-- **Outside guests** don't get accounts. On a service plan, use **Guest links**: each comes with a 6-digit code, opens and locks on a schedule, and can be reopened, given a new code, or turned off. Guests see only what they sent.
+- **Outside guests** don't get accounts. On a service plan, use **Quick links**: each comes with a 6-digit code, opens and locks on a schedule, and can be reopened, given a new code, or turned off. Guests see only what they sent.
 - **Approving late guest changes.** The **Service plans** tab shows a badge when something sent after a guest's deadline is waiting for approval.
 
 ### Signing out
@@ -422,5 +422,5 @@ web/src/
 - **Deactivation.** Deactivating someone signs them out, frees their upcoming shifts and cancels their open requests.
 - **Uploads.** Files are stored under random names and served with `nosniff`. Only images, video, audio and PDFs open in the browser; everything else (HTML, SVG, scripts) downloads instead of running.
 - **Rundown and bulletin links** are long random tokens, rate-limited, kept out of search engines, and replaceable. The rundown shows names but never phone numbers or emails.
-- **Guest links.** Each link is a long random token tied to one service, plus a 6-digit code (8 wrong tries lock it; tries are also rate-limited). The code unlocks a cookie that only works for that one link, and a new code signs out anyone using the old one. Links stop working at the end of the service day (or an hour after a later deadline), are rate-limited, and are capped at 40 files and 60 notes or texts. Late uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
+- **Quick links.** Each link is a long random token tied to one service, plus a 6-digit code (8 wrong tries lock it; tries are also rate-limited). The code unlocks a cookie that only works for that one link, and a new code signs out anyone using the old one. Links stop working at the end of the service day (or an hour after a later deadline), are rate-limited, and are capped at 40 files and 60 notes or texts. Late uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
 - **Sessions.** Each sign-in carries a per-person session version, so "sign out everywhere" and admin sign-outs take effect on the next request from every device.

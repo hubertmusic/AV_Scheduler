@@ -269,7 +269,7 @@ function ArchiveWeekendModal({ fri, services, onClose, onDone }) {
               <input type="radio" name="archive-mode" checked={del} onChange={() => setMode('delete')} />
               <span>
                 <strong>Delete</strong>
-                <span className="small muted block">Deletes the plans: notes, Bible texts, song lists, uploaded files and guest links. Songs stay in the song library and media library items stay in the library. The schedule of who served is kept.</span>
+                <span className="small muted block">Deletes the plans: notes, Bible texts, song lists, uploaded files and quick links. Songs stay in the song library and media library items stay in the library. The schedule of who served is kept.</span>
               </span>
             </label>
           ) : (
@@ -922,15 +922,26 @@ function scheduleLine(g) {
   return `Locked since ${fmtWhen(g.closesAt)} · late changes need approval until ${fmtWhen(g.expiresAt)}`;
 }
 
+// Quick-pick windows for a quick link (the server allows up to 48 hours)
+const OPEN_FOR = [
+  [1, '1 hour'],
+  [2, '2 hours'],
+  [4, '4 hours'],
+  [12, '12 hours'],
+  [24, '24 hours'],
+  [48, '48 hours'],
+];
+
 function Guests({ plan, eventId, reload }) {
   const app = useApp();
-  const [f, setF] = useState({ name: '', note: '', opensAt: '', closesAt: '' });
+  const blank = { name: '', note: '', open: '', opensAt: '', closesAt: '' };
+  const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null); // link whose schedule is being changed
   const ev = plan.event;
 
   const message = (g) =>
-    `Hi ${g.name}, it’s ${app.me.name.split(' ')[0]} from ${app.settings.orgName}. Here’s your link to add your slides, videos, notes, Bible texts and song lyrics for ${ev.title} on ${fmtDay(ev.date)} at ${fmtTime(ev.start)}:\n\n${g.url}\n\nYour code: ${g.code}\n\nYou can add and change things until ${fmtWhen(g.closesAt)}. After that it locks, and changes go to the team for approval. Files up to 80 MB; for bigger videos, AirDrop or email them.${g.note ? `\n\n${g.note}` : ''}`;
+    `Hi ${g.name}, it’s ${app.me.name.split(' ')[0]} from ${app.settings.orgName}. Here’s a link to add slides, videos, notes, Bible texts and song lyrics for ${ev.title} on ${fmtDay(ev.date)} at ${fmtTime(ev.start)}:\n\n${g.url}\n\nYour code: ${g.code}\n\nYou can add and change things until ${fmtWhen(g.closesAt)}. After that it locks, and changes go to the team for approval. Files up to 80 MB; for bigger videos, AirDrop or email them.${g.note ? `\n\n${g.note}` : ''}`;
   const share = (g) => app.openWa({ title: `Send ${g.name} their link and code`, text: message(g), recipients: [], groupLink: '' });
   const copy = (g) => navigator.clipboard.writeText(message(g)).then(() => app.toast('Link and code copied'), () => app.toast(g.url));
 
@@ -950,20 +961,21 @@ function Guests({ plan, eventId, reload }) {
   };
   const create = async (e) => {
     e.preventDefault();
-    const g = await run(() => api(`/guest-links/${eventId}`, { method: 'POST', body: { name: f.name, note: f.note, opensAt: fromLocalInput(f.opensAt), closesAt: fromLocalInput(f.closesAt) } }));
+    const when = f.open === 'custom' ? { opensAt: fromLocalInput(f.opensAt), closesAt: fromLocalInput(f.closesAt) } : f.open ? { hours: Number(f.open) } : {};
+    const g = await run(() => api(`/guest-links/${eventId}`, { method: 'POST', body: { name: f.name, note: f.note, ...when } }));
     if (g) {
-      setF({ name: '', note: '', opensAt: '', closesAt: '' });
+      setF(blank);
       share(g);
     }
   };
   const post = (g, action, body, msg) => run(() => api(`/guest-links/link/${g.id}/${action}`, { method: 'POST', body }), msg);
 
   return (
-    <section className="card stack" aria-label="Guest links">
+    <section className="card stack" aria-label="Quick links">
       <div>
-        <h2>Guest links</h2>
+        <h2>Quick links</h2>
         <p className="muted small">
-          For a guest speaker or visiting group. They open the link, enter the 6-digit code, and add files, notes, Bible texts and lyrics for this service. They only ever see what they sent. Until the deadline, what they submit goes straight into this plan and they can change it. After that it locks, and changes need your approval, or you can reopen it for a while.
+          A link and 6-digit code for anyone who needs to get slides, videos, notes, Bible texts or lyrics in for this service, with no account: a speaker, the worship leader, someone with a last-minute announcement. They only see what they sent. While it’s open, what they send goes straight into this plan and they can change it. After that it locks, and changes need your approval, or you can reopen it.
         </p>
       </div>
       <form className="stack-sm" onSubmit={create}>
@@ -977,17 +989,30 @@ function Guests({ plan, eventId, reload }) {
             <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Please include your sermon outline" />
           </label>
         </div>
-        <div className="row-wrap fields-2">
-          <label className="field">
-            <span>Opens (optional)</span>
-            <input type="datetime-local" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Deadline: locks at (optional)</span>
-            <input type="datetime-local" value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} />
-          </label>
-        </div>
-        <p className="muted small">Leave them blank to open it now and lock it at 6 PM the evening before the service.</p>
+        <label className="field">
+          <span>How long is it open?</span>
+          <select value={f.open} onChange={(e) => setF({ ...f, open: e.target.value })}>
+            <option value="">Until 6 PM the evening before the service</option>
+            {OPEN_FOR.map(([h, label]) => (
+              <option key={h} value={h}>
+                {label} from now
+              </option>
+            ))}
+            <option value="custom">Pick the times…</option>
+          </select>
+        </label>
+        {f.open === 'custom' && (
+          <div className="row-wrap fields-2">
+            <label className="field">
+              <span>Opens</span>
+              <input type="datetime-local" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>Locks at</span>
+              <input type="datetime-local" required value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} />
+            </label>
+          </div>
+        )}
         <button className="btn btn-primary self-start" disabled={busy}>
           Make link and code
         </button>
@@ -1036,10 +1061,11 @@ function Guests({ plan, eventId, reload }) {
                       >
                         <option value="">Reopen for…</option>
                         <option value="30">30 minutes</option>
-                        <option value="60">1 hour</option>
-                        <option value="120">2 hours</option>
-                        <option value="240">4 hours</option>
-                        <option value="1440">24 hours</option>
+                        {OPEN_FOR.map(([h, label]) => (
+                          <option key={h} value={h * 60}>
+                            {label}
+                          </option>
+                        ))}
                       </select>
                     </label>
                   )}
@@ -1144,7 +1170,7 @@ function Approvals({ plan, onDone }) {
     <section className="card card-strong stack" aria-label="Waiting for approval">
       <div>
         <h2>Waiting for your approval ({pending.length})</h2>
-        <p className="muted small">Sent after the guest’s deadline. Approve to put it in the plan, or reopen their link if they need more time.</p>
+        <p className="muted small">Sent after a quick link locked. Approve to put it in the plan, or reopen their link if they need more time.</p>
       </div>
       {pending.map((s) => (
         <div key={s.id} className="sub-item">
