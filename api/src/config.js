@@ -4,6 +4,8 @@ export const config = {
   port: Number(env.PORT) || 4000,
   mongoUrl: env.MONGO_URL || 'mongodb://localhost:27017/crewcall',
   jwtSecret: env.JWT_SECRET || '',
+  // Encrypts the team vaults and personal notes. Falls back to a key made from JWT_SECRET.
+  vaultKey: (env.VAULT_KEY || '').trim(),
   // The address people use to reach the app, e.g. https://crew.example.org
   publicUrl: (env.PUBLIC_URL || 'http://localhost:8080').replace(/\/+$/, ''),
   // true when the app is served over HTTPS (e.g. behind a Cloudflare Tunnel)

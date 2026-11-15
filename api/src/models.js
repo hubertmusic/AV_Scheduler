@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 
-export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
+export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans', 'vault'];
 export const EVENT_KINDS = ['service', 'soundcheck', 'rehearsal'];
 // What a team does decides which parts of Crew Call it sees (gear, media, outside groups… are AV's)
 export const TEAM_KINDS = ['av', 'music', 'other', 'office'];
@@ -29,6 +29,7 @@ const userSchema = new Schema(
       people: { type: Boolean, default: false },
       groups: { type: Boolean, default: false },
       plans: { type: Boolean, default: false },
+      vault: { type: Boolean, default: false },
     },
     positions: { type: [String], default: [] },
     trainee: { type: [String], default: [] }, // positions they're learning (can shadow)
@@ -67,6 +68,7 @@ const userSchema = new Schema(
               people: { type: Boolean, default: false },
               groups: { type: Boolean, default: false },
               plans: { type: Boolean, default: false },
+              vault: { type: Boolean, default: false }, // open and keep the team's vault (head leaders always can)
             },
             maxPerMonth: { type: Number, default: 0 }, // 0 = no limit
             // Office teams: the committees they sit on, and offices they hold (Secretary of the
@@ -312,6 +314,7 @@ const settingsSchema = new Schema({
   // Shown at the top of every shift until changed
   permanentNote: { type: String, default: '' },
   migrations: { type: [String], default: [] }, // one-time data updates already applied
+  vaultCheck: { type: String, default: '' }, // a known value encrypted with the vault key, to notice a wrong key
   permanentNoteAt: Date,
   permanentNoteBy: { type: String, default: '' },
 });
@@ -808,5 +811,68 @@ const officeRequestSchema = new Schema(
   { timestamps: true }
 );
 export const OfficeRequest = model('OfficeRequest', officeRequestSchema);
+
+// ---------- team vaults and personal notes (secrets are encrypted: lib/secrets.js) ----------
+export const VAULT_CATEGORIES = ['Streaming', 'Software & licenses', 'Accounts', 'Wi-Fi & network', 'Devices', 'Other'];
+const vaultEntrySchema = new Schema(
+  {
+    team: { type: String, required: true, index: true },
+    title: { type: String, required: true, trim: true },
+    category: { type: String, enum: VAULT_CATEGORIES, default: 'Other' },
+    url: { type: String, default: '' },
+    username: { type: String, default: '' }, // encrypted
+    secret: { type: String, default: '' }, // encrypted
+    notes: { type: String, default: '' }, // encrypted
+    leadersOnly: { type: Boolean, default: false }, // never shared with crew, even with access
+    createdBy: ref('User'),
+    updatedBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const VaultEntry = model('VaultEntry', vaultEntrySchema);
+
+// Crew access to a team's vault, given by its leaders: everything (not leaders-only) or chosen
+// entries, until a time or with no end
+const vaultGrantSchema = new Schema(
+  {
+    team: { type: String, required: true, index: true },
+    user: { ...ref('User'), required: true },
+    all: { type: Boolean, default: true },
+    entries: [ref('VaultEntry')],
+    expiresAt: { type: Date, default: null }, // null = until taken back
+    grantedBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const VaultGrant = model('VaultGrant', vaultGrantSchema);
+
+// Who opened what, for the team's leaders
+const vaultLogSchema = new Schema(
+  {
+    team: { type: String, required: true, index: true },
+    user: ref('User'),
+    action: { type: String, enum: ['viewed', 'added', 'changed', 'removed', 'granted', 'revoked', 'asked'], required: true },
+    entry: ref('VaultEntry'),
+    entryTitle: { type: String, default: '' },
+    detail: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
+export const VaultLog = model('VaultLog', vaultLogSchema);
+
+// Personal notes: private to the person who wrote them unless they share one with a whole team
+// they're on, or with chosen people (who can read it, not change it). The body is encrypted.
+const noteSchema = new Schema(
+  {
+    user: { ...ref('User'), required: true, index: true },
+    title: { type: String, default: '', trim: true },
+    body: { type: String, default: '' }, // encrypted
+    pinned: { type: Boolean, default: false },
+    shareTeams: { type: [String], default: [], index: true }, // Team.key: everyone on that team can read it
+    shareUsers: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [], index: true },
+  },
+  { timestamps: true }
+);
+export const Note = model('Note', noteSchema);
 
 export { Types };

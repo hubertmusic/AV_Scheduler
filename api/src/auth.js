@@ -11,6 +11,7 @@ import { deviceFrom, logActivity, touchSeen } from './lib/activity.js';
 import { mailerReady, sendMail, sentForTests } from './lib/mailer.js';
 import { ensureTeams, resolveTeam, teamKeys } from './lib/teams.js';
 import { ensureOffice } from './lib/office.js';
+import { ensureVaultKey } from './lib/secrets.js';
 
 const COOKIE = 'cc_session';
 const MAX_AGE = 30 * 24 * 3600 * 1000;
@@ -151,6 +152,7 @@ authRouter.post('/setup', loginLimiter, wrap(async (req, res) => {
   });
   await ensureTeams(); // creates the AV and Praise teams and puts the admin on AV
   await ensureOffice(); // and the Church Admin team
+  await ensureVaultKey();
   await setSession(res, user);
   await noteLogin(user, req, 'Set up Crew Call');
   res.status(201).json({ me: meView(user) });

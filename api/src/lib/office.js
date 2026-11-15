@@ -2,7 +2,7 @@
 // yearly rhythm, and the daily job (fill repeats a year ahead, action-item and term reminders).
 import { DateTime } from 'luxon';
 import { config } from '../config.js';
-import { ActionItem, Committee, OfficeEvent, OfficeSeries, Team, User } from '../models.js';
+import { ActionItem, Committee, OfficeEvent, OfficeSeries, Team, User, VaultGrant, VaultLog } from '../models.js';
 import { addDays, forbidden, getSettings, membershipOf, todayIn } from './util.js';
 import { forgetTeams, teamsList } from './teams.js';
 import { mailerReady, sendMail } from './mailer.js';
@@ -39,7 +39,7 @@ export function sees(user, item) {
 }
 // Privileges on an office team from the person's own membership (head: all; leader: theirs; crew:
 // none). The admin gets no extra powers over the team's items this way.
-const PERM_KEYS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
+const PERM_KEYS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans', 'vault'];
 export function officePerms(user, team) {
   const m = membershipOf(user, team);
   const on = (f) => Object.fromEntries(PERM_KEYS.map((p) => [p, f(p)]));
@@ -241,6 +241,9 @@ export async function runOfficeJob() {
   let added = 0;
   for (const series of await OfficeSeries.find({ $or: [{ until: '' }, { until: { $gte: today } }] })) added += await fillSeries(series, today);
   const mail = await remindActionItems(today);
+  // Tidy the vaults: ended access, and look-ups older than about a year
+  await VaultGrant.deleteMany({ expiresAt: { $ne: null, $lt: new Date() } });
+  await VaultLog.deleteMany({ createdAt: { $lt: new Date(Date.now() - 400 * 24 * 3600 * 1000) } });
   return { added, reminders: mail.sent };
 }
 

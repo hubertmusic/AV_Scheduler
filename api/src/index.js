@@ -22,6 +22,8 @@ import { gearRouter } from './routes/gear.js';
 import { checklistsRouter, debriefRouter, issuesRouter, signoffsRouter } from './routes/extras.js';
 import { plannerRouter } from './routes/planner.js';
 import { officeRouter } from './routes/office.js';
+import { notesRouter, vaultRouter } from './routes/vault.js';
+import { ensureVaultKey } from './lib/secrets.js';
 import { ensureOffice, onServiceTeam, startOfficeJob } from './lib/office.js';
 import { wrap } from './lib/util.js';
 import { libraryRouter } from './routes/library.js';
@@ -88,6 +90,8 @@ app.use('/api/debrief', debriefRouter);
 app.use('/api/signoffs', signoffsRouter);
 app.use('/api/planner', plannerRouter);
 app.use('/api/office', officeRouter);
+app.use('/api/vault', vaultRouter);
+app.use('/api/notes', notesRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
@@ -107,6 +111,7 @@ async function runMigrations() {
   if (!s) return; // first run: setup creates settings with today's defaults
   await ensureTeams(); // AV and Praise teams; everyone so far joins AV
   await ensureOffice(); // the Church Admin team and its first committees
+  await ensureVaultKey(); // notices a changed vault key (or moves to a new VAULT_KEY)
   if (!s.migrations.includes('leaders-edit-plans')) {
     // Team leaders can edit service plans unless the admin turns it off for someone.
     const r = await User.updateMany({ role: 'leader' }, { $set: { 'perms.plans': true } });
