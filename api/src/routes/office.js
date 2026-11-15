@@ -14,6 +14,7 @@ import { addDays, bad, DATE_RE, forbidden, getSettings, isHttpUrl, isId, members
 import { deleteStored, filesOf, originalName, removeUploads, uploader } from '../lib/media.js';
 import { mailerReady, sendMail } from '../lib/mailer.js';
 import { forgetTeams, isTeamHead, requireTeamHead, teamsList } from '../lib/teams.js';
+import { officePerms, seesRoster } from '../lib/office.js';
 import { assertSees, audienceOf, describeSeries, edits, fillSeries, isOfficeTeam, isSecretary, officeTeamKeys, requireOfficeTeam, sees, visibleFilter, yearPlanDate } from '../lib/office.js';
 
 export const officeRouter = Router();
@@ -21,8 +22,11 @@ export const officeRouter = Router();
 const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'yellow', 'teal', 'gray'];
 const nameOf = async (ids) => Object.fromEntries((await User.find({ _id: { $in: ids.filter(Boolean) } }, { name: 1 }).lean()).map((u) => [String(u._id), u.name]));
 const idList = (list) => (Array.isArray(list) ? [...new Set(list.filter(isId).map(String))] : []);
-const head = (req) => isTeamHead(req);
+const head = (req) => !!membershipOf(req.user, req.team.key)?.head; // the team's own head leader (not the admin)
 const today = async () => todayIn((await getSettings()).timezone);
+// The Activity log is read by the admin, so it never names a confidential item: only items shared
+// with every team are named; everything else is described in general terms.
+const named = (item, fallback) => (item?.visibility === 'everyone' ? `“${item.title}”` : fallback);
 const toMin = (t) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3)) : 0);
 const fromMin = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
@@ -111,6 +115,22 @@ officeRouter.post('/bulletin/:id/:action(add|decline)', wrap(async (req, res) =>
 
 // ======================= the Church Admin side =======================
 const office = Router();
+// Church Admin details are confidential: never shown in the admin's "View as" preview, and every
+// change is logged without naming what changed (unless a route names an item shared with everyone).
+office.use((req, res, next) => {
+  if (req.previewing) return next(forbidden('Church Admin details aren’t shown in a preview, to keep them confidential.'));
+  // Privileges here come from the person's own place on the team, not from being the admin
+  req.ocan = officePerms(req.user, req.team.key);
+  const member = !!membershipOf(req.user, req.team.key);
+  // The admin (or anyone not on the team) can manage committees, rooms and event requests, but
+  // can't add or change the team's confidential items
+  const managing = /^\/(committees|setup|requests)(\/|$)/.test(req.path);
+  if (req.method !== 'GET' && !member && !managing) return next(forbidden('Only people on Church Admin can do that. Its head leader can add you.'));
+  if (req.method !== 'GET') res.locals.activity = 'Worked on the Church Admin side';
+  next();
+});
+const need = (perm) => (req, res, next) => (req.ocan?.[perm] ? next() : next(forbidden()));
+const needOrAdmin = (perm) => (req, res, next) => (req.ocan?.[perm] || req.user.role === 'admin' ? next() : next(forbidden()));
 officeRouter.use(requireOfficeTeam, office);
 
 // ---------- committees ----------
@@ -119,7 +139,8 @@ office.get('/committees', wrap(async (req, res) => {
   res.json(
     list.map((c) => {
       const members = people.filter((u) => membershipOf(u, req.team.key)?.committees?.includes(c.key));
-      return { key: c.key, name: c.name, color: c.color, quorum: c.quorum, members: members.map((u) => ({ id: String(u._id), name: u.name })) };
+      // Who sits on which committee: the admin and the team's leaders only
+      return { key: c.key, name: c.name, color: c.color, quorum: c.quorum, members: seesRoster(req.user, req.team.key) ? members.map((u) => ({ id: String(u._id), name: u.name })) : [] };
     })
   );
 }));
@@ -144,12 +165,14 @@ office.patch('/committees/:key', requireTeamHead, wrap(async (req, res) => {
   if (req.body.color !== undefined && COLORS.includes(req.body.color)) c.color = req.body.color;
   if (req.body.quorum !== undefined) c.quorum = Math.max(0, Math.min(200, Number(req.body.quorum) || 0));
   await c.save();
-  if (Array.isArray(req.body.members)) await setMembers(req.team.key, c.key, idList(req.body.members));
+  if (Array.isArray(req.body.members)) await setMembers(req.team.key, c.key, idList(req.body.members), head(req) ? null : req.user._id);
   res.json({ ok: true });
 }));
-async function setMembers(team, key, wanted) {
+// keep: someone whose own membership isn't changed (the admin can't add or remove themselves)
+async function setMembers(team, key, wanted, keep = null) {
   const people = await User.find({ 'teams.team': team });
   for (const u of people) {
+    if (keep && String(u._id) === String(keep)) continue;
     const m = membershipOf(u, team);
     const has = (m.committees || []).includes(key);
     const want = wanted.includes(String(u._id));
@@ -172,7 +195,7 @@ office.delete('/committees/:key', requireTeamHead, wrap(async (req, res) => {
 // ---------- team setup: rooms, reminders ----------
 office.get('/setup', wrap(async (req, res) => {
   const t = await Team.findOne({ key: req.team.key }).lean();
-  res.json({ rooms: t.rooms || [], remindMinutes: t.remindMinutes ?? 60, remindDays: t.remindDays ?? 1, yearPlan: (t.yearPlan || []).map(yearItemView) });
+  res.json({ rooms: t.rooms || [], remindMinutes: t.remindMinutes ?? 60, remindDays: t.remindDays ?? 1, yearPlan: (t.yearPlan || []).filter((y) => sees(req.user, { ...y, team: t.key })).map(yearItemView) });
 }));
 office.patch('/setup', requireTeamHead, wrap(async (req, res) => {
   const t = await Team.findOne({ key: req.team.key });
@@ -244,7 +267,7 @@ function myRsvp(ev, user) {
   return (ev.rsvps || []).find((r) => String(r.user) === String(user._id))?.status || '';
 }
 function eventView(ev, req, ctx = {}) {
-  const c = req.can || {};
+  const c = req.ocan || {};
   const counts = { yes: 0, no: 0, maybe: 0 };
   for (const r of ev.rsvps || []) counts[r.status]++;
   return {
@@ -297,7 +320,7 @@ async function loadEvent(req, id = req.params.id) {
   return ev;
 }
 const assertEdits = (req, ev) => {
-  if (!edits(req.user, ev, req.can.edit)) throw forbidden('You can’t change this one.');
+  if (!edits(req.user, ev, req.ocan.edit)) throw forbidden('You can’t change this one.');
 };
 
 // GET /api/office/events/:id — everything about one item, meetings included
@@ -336,22 +359,22 @@ async function fullEvent(ev, req) {
     minutesApprovedBy: names[String(e.minutesApprovedBy)] || null,
     motions: (e.motions || []).map(motionView),
     actions: actions.map((a) => actionView(a, req, names)),
-    canAgenda: !!req.can.plans && edits(req.user, e, true),
+    canAgenda: !!req.ocan.plans && edits(req.user, e, true),
     canMinutes: rights,
-    canApprove: !!req.can.plans && edits(req.user, e, true),
+    canApprove: !!req.ocan.plans && edits(req.user, e, true),
   };
 }
 
 // Minutes: the secretary by default; anyone in the meeting once a leader opens it up; the head and admin always
 function minutesRights(req, ev) {
   if (ev.minutesApprovedAt) return false; // approved minutes are locked; a leader can reopen them
-  if (req.user.role === 'admin' || membershipOf(req.user, ev.team)?.head) return true;
+  if (membershipOf(req.user, ev.team)?.head) return true;
   if (isSecretary(req.user, ev)) return true;
   return !!ev.minutesOpen && sees(req.user, { ...ev, visibility: 'office', sharedWith: [] });
 }
 
 // POST /api/office/events { …fields, repeat?: { freq, interval, nth, weekday, monthDay, until } }
-office.post('/events', requirePerm('edit'), wrap(async (req, res) => {
+office.post('/events', need('edit'), wrap(async (req, res) => {
   const fields = await readEvent(req, req.body || {});
   const base = { ...fields, team: req.team.key, createdBy: req.user._id, updatedBy: req.user._id };
   const rep = req.body.repeat;
@@ -360,12 +383,12 @@ office.post('/events', requirePerm('edit'), wrap(async (req, res) => {
     const first = await OfficeEvent.findOne({ series: series._id }).sort({ date: 1 });
     if (!first) throw bad('That repeat has no dates. Check when it ends.');
     for (const ev of await OfficeEvent.find({ series: series._id })) await syncAv(ev, req);
-    res.locals.activity = `Added “${fields.title}” (${describeSeries(series)})`;
+    res.locals.activity = `Added ${named(fields, 'a Church Admin calendar item')} (${describeSeries(series)})`;
     return res.status(201).json(await fullEvent(first, req));
   }
   const ev = await OfficeEvent.create(base);
   await syncAv(ev, req);
-  res.locals.activity = `Added “${ev.title}” on ${ev.date}`;
+  res.locals.activity = `Added ${named(ev, 'a Church Admin calendar item')}`;
   res.status(201).json(await fullEvent(ev, req));
 }));
 
@@ -395,7 +418,7 @@ async function makeSeries(req, base, rep) {
 
 // PATCH /api/office/events/:id?scope=one|future
 const SERIES_FIELDS = ['title', 'type', 'start', 'end', 'allDay', 'room', 'notes', 'visibility', 'committees', 'sharedWith', 'attendees', 'needsAv', 'avNote'];
-office.patch('/events/:id', requirePerm('edit'), wrap(async (req, res) => {
+office.patch('/events/:id', need('edit'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   assertEdits(req, ev);
   const fields = await readEvent(req, req.body || {}, ev);
@@ -418,13 +441,13 @@ office.patch('/events/:id', requirePerm('edit'), wrap(async (req, res) => {
       s.markModified('template');
       await s.save();
     }
-    res.locals.activity = `Changed “${ev.title}” from ${ev.date} on`;
-  } else res.locals.activity = `Changed “${ev.title}” on ${ev.date}`;
+    res.locals.activity = `Changed ${named(ev, 'a repeating Church Admin item')} from one date on`;
+  } else res.locals.activity = `Changed ${named(ev, 'a Church Admin calendar item')}`;
   res.json(await fullEvent(ev, req));
 }));
 
 // DELETE /api/office/events/:id?scope=one|future
-office.delete('/events/:id', requirePerm('edit'), wrap(async (req, res) => {
+office.delete('/events/:id', need('edit'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   assertEdits(req, ev);
   const doomed = req.query.scope === 'future' && ev.series ? await OfficeEvent.find({ series: ev.series, date: { $gte: ev.date } }) : [ev];
@@ -434,7 +457,7 @@ office.delete('/events/:id', requirePerm('edit'), wrap(async (req, res) => {
     await ActionItem.updateMany({ meeting: x._id }, { $unset: { meeting: 1 } });
     await x.deleteOne();
   }
-  res.locals.activity = doomed.length > 1 ? `Removed “${ev.title}” from ${ev.date} on (${doomed.length} dates)` : `Removed “${ev.title}” on ${ev.date}`;
+  res.locals.activity = doomed.length > 1 ? `Removed ${named(ev, 'a repeating Church Admin item')} (${doomed.length} dates)` : `Removed ${named(ev, 'a Church Admin calendar item')}`;
   res.status(204).end();
 }));
 
@@ -490,18 +513,18 @@ async function unlinkAv(ev, linked) {
 }
 
 // ---------- meetings: agenda, minutes, motions ----------
-office.put('/events/:id/agenda', requirePerm('plans'), wrap(async (req, res) => {
+office.put('/events/:id/agenda', need('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   if (!edits(req.user, ev, true)) throw forbidden('You can’t change this meeting.');
   const list = Array.isArray(req.body.agenda) ? req.body.agenda.slice(0, 80) : [];
   ev.agenda = list.map((x) => ({ kind: x?.kind === 'heading' ? 'heading' : 'item', title: str(x?.title, 200), presenter: str(x?.presenter, 80), minutes: Math.max(0, Math.min(600, Number(x?.minutes) || 0)), notes: str(x?.notes, 1000) })).filter((x) => x.title);
   await ev.save();
-  res.locals.activity = `Updated the agenda for “${ev.title}” (${ev.date})`;
+  res.locals.activity = `Updated the agenda for ${named(ev, 'a Church Admin meeting')}`;
   res.json(await fullEvent(ev, req));
 }));
 
 // POST /api/office/events/:id/send-agenda — email it to everyone in the meeting
-office.post('/events/:id/send-agenda', requirePerm('plans'), wrap(async (req, res) => {
+office.post('/events/:id/send-agenda', need('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   if (!mailerReady()) throw bad('Email isn’t set up yet. Send it on WhatsApp instead.');
   if (!ev.agenda.length) throw bad('Add agenda items first.');
@@ -519,7 +542,7 @@ office.post('/events/:id/send-agenda', requirePerm('plans'), wrap(async (req, re
   }
   ev.agendaSentAt = new Date();
   await ev.save();
-  res.locals.activity = `Emailed the agenda for “${ev.title}” to ${sent} people`;
+  res.locals.activity = `Emailed the agenda for ${named(ev, 'a Church Admin meeting')} to ${sent} people`;
   res.json({ sent, of: people.length });
 }));
 export function agendaText(ev, orgName) {
@@ -541,15 +564,15 @@ office.put('/events/:id/minutes', wrap(async (req, res) => {
   res.json(await fullEvent(ev, req));
 }));
 // POST /api/office/events/:id/minutes-open { open } — a leader lets anyone in the meeting take minutes
-office.post('/events/:id/minutes-open', requirePerm('plans'), wrap(async (req, res) => {
+office.post('/events/:id/minutes-open', need('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   ev.minutesOpen = !!req.body.open;
   await ev.save();
-  res.locals.activity = `${ev.minutesOpen ? 'Opened' : 'Closed'} the minutes of “${ev.title}” (${ev.date}) ${ev.minutesOpen ? 'to anyone in the meeting' : 'back to the secretary'}`;
+  res.locals.activity = `${ev.minutesOpen ? 'Opened' : 'Closed'} the minutes of ${named(ev, 'a Church Admin meeting')} ${ev.minutesOpen ? 'to anyone in the meeting' : 'back to the secretary'}`;
   res.json(await fullEvent(ev, req));
 }));
 // POST /api/office/events/:id/minutes-approve { approved }
-office.post('/events/:id/minutes-approve', requirePerm('plans'), wrap(async (req, res) => {
+office.post('/events/:id/minutes-approve', need('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   if (req.body.approved === false) {
     ev.minutesApprovedAt = null;
@@ -560,7 +583,7 @@ office.post('/events/:id/minutes-approve', requirePerm('plans'), wrap(async (req
     ev.minutesApprovedBy = req.user._id;
   }
   await ev.save();
-  res.locals.activity = `${ev.minutesApprovedAt ? 'Approved' : 'Reopened'} the minutes of “${ev.title}” (${ev.date})`;
+  res.locals.activity = `${ev.minutesApprovedAt ? 'Approved' : 'Reopened'} the minutes of ${named(ev, 'a Church Admin meeting')}`;
   res.json(await fullEvent(ev, req));
 }));
 
@@ -576,7 +599,7 @@ office.post('/events/:id/motions', wrap(async (req, res) => {
   if (!minutesRights(req, ev.toObject())) throw forbidden('Only whoever takes the minutes can record motions.');
   ev.motions.push(readMotion(req.body || {}));
   await ev.save();
-  res.locals.activity = `Recorded a motion in “${ev.title}” (${ev.date})`;
+  res.locals.activity = `Recorded a motion in ${named(ev, 'a Church Admin meeting')}`;
   res.status(201).json(await fullEvent(ev, req));
 }));
 office.patch('/events/:id/motions/:mid', wrap(async (req, res) => {
@@ -608,7 +631,7 @@ office.get('/motions', wrap(async (req, res) => {
 }));
 
 // Announcement for a service's bulletin: PUT /api/office/events/:id/bulletin { service, text }
-office.put('/events/:id/bulletin', requirePerm('edit'), wrap(async (req, res) => {
+office.put('/events/:id/bulletin', need('edit'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   assertEdits(req, ev);
   if (!req.body.service) {
@@ -619,7 +642,7 @@ office.put('/events/:id/bulletin', requirePerm('edit'), wrap(async (req, res) =>
     ev.bulletin = { service: req.body.service, text: str(req.body.text, 1000), status: 'pending' };
   }
   await ev.save();
-  res.locals.activity = ev.bulletin.status ? `Asked to put “${ev.title}” in a service’s announcements` : `Took back the announcement for “${ev.title}”`;
+  res.locals.activity = ev.bulletin.status ? `Asked to put ${named(ev, 'a church event')} in a service’s announcements` : `Took back the announcement for ${named(ev, 'a church event')}`;
   res.json(await fullEvent(ev, req));
 }));
 
@@ -639,7 +662,7 @@ function goalView(g, req, names = {}) {
     milestones: ms.map((m) => ({ id: String(m._id), title: m.title, due: m.due, owner: m.owner ? { id: String(m.owner), name: names[String(m.owner)] || '' } : null, done: m.done })),
     committees: g.committees || [],
     sharedWith: g.sharedWith || [],
-    canEdit: edits(req.user, g, req.can.plans),
+    canEdit: edits(req.user, g, req.ocan.plans),
   };
 }
 async function goalsOut(list, req) {
@@ -676,9 +699,9 @@ office.get('/goals', wrap(async (req, res) => {
   const list = await Goal.find(visibleFilter(req.user, req.team.key)).sort({ due: 1, createdAt: 1 }).lean();
   res.json(await goalsOut(list.filter((g) => sees(req.user, { ...g, visibility: 'office' })), req));
 }));
-office.post('/goals', requirePerm('plans'), wrap(async (req, res) => {
+office.post('/goals', need('plans'), wrap(async (req, res) => {
   const g = await Goal.create({ ...(await readGoal(req, req.body || {})), team: req.team.key, createdBy: req.user._id });
-  res.locals.activity = `Added the goal “${g.title}”`;
+  res.locals.activity = 'Added a Church Admin goal';
   res.status(201).json((await goalsOut([g.toObject()], req))[0]);
 }));
 async function loadGoal(req) {
@@ -690,7 +713,7 @@ async function loadGoal(req) {
 office.patch('/goals/:id', wrap(async (req, res) => {
   const g = await loadGoal(req);
   const b = req.body || {};
-  const onlyTicks = Object.keys(b).length === 1 && Array.isArray(b.milestones) && !edits(req.user, g, req.can.plans);
+  const onlyTicks = Object.keys(b).length === 1 && Array.isArray(b.milestones) && !edits(req.user, g, req.ocan.plans);
   if (onlyTicks) {
     // A milestone's owner can tick it off without the planning privilege
     for (const m of b.milestones) {
@@ -701,19 +724,19 @@ office.patch('/goals/:id', wrap(async (req, res) => {
       }
     }
   } else {
-    if (!edits(req.user, g, req.can.plans)) throw forbidden('You can’t change this goal.');
+    if (!edits(req.user, g, req.ocan.plans)) throw forbidden('You can’t change this goal.');
     Object.assign(g, await readGoal(req, b, g));
   }
   if (g.milestones.length && g.milestones.every((m) => m.done) && g.status !== 'done' && b.status === undefined) g.status = 'done';
   await g.save();
   res.json((await goalsOut([g.toObject()], req))[0]);
 }));
-office.delete('/goals/:id', requirePerm('plans'), wrap(async (req, res) => {
+office.delete('/goals/:id', need('plans'), wrap(async (req, res) => {
   const g = await loadGoal(req);
   if (!edits(req.user, g, true)) throw forbidden();
   await ActionItem.updateMany({ goal: g._id }, { $unset: { goal: 1 } });
   await g.deleteOne();
-  res.locals.activity = `Removed the goal “${g.title}”`;
+  res.locals.activity = 'Removed a Church Admin goal';
   res.status(204).end();
 }));
 
@@ -729,8 +752,8 @@ function actionView(a, req, names = {}) {
     meeting: a.meeting ? String(a.meeting) : null,
     goal: a.goal ? String(a.goal) : null,
     committees: a.committees || [],
-    canEdit: edits(req.user, a, req.can.edit || req.can.plans) || String(a.createdBy) === String(req.user._id),
-    canTick: String(a.owner) === String(req.user._id) || edits(req.user, a, req.can.edit || req.can.plans),
+    canEdit: edits(req.user, a, req.ocan.edit || req.ocan.plans) || String(a.createdBy) === String(req.user._id),
+    canTick: String(a.owner) === String(req.user._id) || edits(req.user, a, req.ocan.edit || req.ocan.plans),
   };
 }
 office.get('/actions', wrap(async (req, res) => {
@@ -747,17 +770,17 @@ office.post('/actions', wrap(async (req, res) => {
   if (isId(b.meeting)) {
     // From a meeting's minutes: whoever takes the minutes can add them; they belong with the meeting
     const ev = await loadEvent(req, b.meeting);
-    if (!minutesRights(req, ev.toObject()) && !(req.can.plans && edits(req.user, ev, true))) throw forbidden('Only whoever takes the minutes, or a leader, can add action items here.');
+    if (!minutesRights(req, ev.toObject()) && !(req.ocan.plans && edits(req.user, ev, true))) throw forbidden('Only whoever takes the minutes, or a leader, can add action items here.');
     committees = ev.committees;
     meeting = ev._id;
   } else {
-    if (!req.can.edit && !req.can.plans) throw forbidden('Only a leader can add action items.');
+    if (!req.ocan.edit && !req.ocan.plans) throw forbidden('Only a leader can add action items.');
     committees = await cleanCommittees(req, b.committees);
   }
   const title = str(b.title, 200);
   if (!title) throw bad('What needs doing?');
   const a = await ActionItem.create({ team: req.team.key, committees, title, notes: str(b.notes, 1000), owner: isId(b.owner) ? b.owner : null, due: DATE_RE.test(b.due || '') ? b.due : '', meeting, goal: isId(b.goal) ? b.goal : null, createdBy: req.user._id });
-  res.locals.activity = `Added the action item “${title}”`;
+  res.locals.activity = 'Added a Church Admin action item';
   res.status(201).json(actionView(a, req, await nameOf([a.owner])));
 }));
 office.patch('/actions/:id', wrap(async (req, res) => {
@@ -792,14 +815,14 @@ office.delete('/actions/:id', wrap(async (req, res) => {
 }));
 
 // ---------- documents ----------
-const docView = (d, req) => ({ id: String(d._id), title: d.title, category: d.category, url: d.url, file: d.file?.stored ? { name: d.file.originalName, size: d.file.size } : null, notes: d.notes, committees: d.committees || [], sharedWith: d.sharedWith || [], updatedAt: d.updatedAt, canEdit: edits(req.user, d, req.can.resources) });
+const docView = (d, req) => ({ id: String(d._id), title: d.title, category: d.category, url: d.url, file: d.file?.stored ? { name: d.file.originalName, size: d.file.size } : null, notes: d.notes, committees: d.committees || [], sharedWith: d.sharedWith || [], updatedAt: d.updatedAt, canEdit: edits(req.user, d, req.ocan.resources) });
 office.get('/docs', wrap(async (req, res) => {
   const list = (await OfficeDoc.find(visibleFilter(req.user, req.team.key)).sort({ category: 1, title: 1 }).lean()).filter((d) => sees(req.user, { ...d, visibility: 'office' }));
   // Approved minutes are listed with the documents too
   const minutes = await OfficeEvent.find({ ...visibleFilter(req.user, req.team.key), minutesApprovedAt: { $ne: null } }, { title: 1, date: 1, committees: 1, minutesApprovedAt: 1 }).sort({ date: -1 }).limit(100).lean();
   res.json({ docs: list.map((d) => docView(d, req)), minutes: minutes.map((m) => ({ id: String(m._id), title: m.title, date: m.date, committees: m.committees })), categories: DOC_CATEGORIES });
 }));
-office.post('/docs', requirePerm('resources'), uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
+office.post('/docs', need('resources'), uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
   const files = filesOf(req);
   try {
     const b = req.body || {};
@@ -820,14 +843,14 @@ office.post('/docs', requirePerm('resources'), uploader({ field: 'file', maxCoun
       sharedWith: await cleanCommittees(req, parse(b.sharedWith), { own: false }),
       createdBy: req.user._id,
     });
-    res.locals.activity = `Added the document “${title}”`;
+    res.locals.activity = 'Added a Church Admin document';
     res.status(201).json(docView(d, req));
   } catch (e) {
     removeUploads(files);
     throw e;
   }
 }));
-office.patch('/docs/:id', requirePerm('resources'), wrap(async (req, res) => {
+office.patch('/docs/:id', need('resources'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const d = await OfficeDoc.findOne({ _id: req.params.id, team: req.team.key });
   if (!d || !edits(req.user, d, true)) throw notFound();
@@ -840,13 +863,13 @@ office.patch('/docs/:id', requirePerm('resources'), wrap(async (req, res) => {
   await d.save();
   res.json(docView(d, req));
 }));
-office.delete('/docs/:id', requirePerm('resources'), wrap(async (req, res) => {
+office.delete('/docs/:id', need('resources'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const d = await OfficeDoc.findOne({ _id: req.params.id, team: req.team.key });
   if (!d || !edits(req.user, d, true)) throw notFound();
   if (d.file?.stored) deleteStored(d.file.stored);
   await d.deleteOne();
-  res.locals.activity = `Removed the document “${d.title}”`;
+  res.locals.activity = 'Removed a Church Admin document';
   res.status(204).end();
 }));
 office.get('/docs/:id/file', wrap(async (req, res) => {
@@ -860,12 +883,12 @@ office.get('/docs/:id/file', wrap(async (req, res) => {
 }));
 
 // ---------- event requests (from anyone) ----------
-office.get('/requests', requirePerm('approve'), wrap(async (req, res) => {
+office.get('/requests', needOrAdmin('approve'), wrap(async (req, res) => {
   const list = await OfficeRequest.find({ team: req.team.key }).sort({ status: -1, date: 1 }).limit(200).lean();
   const names = await nameOf(list.flatMap((r) => [r.requestedBy, r.decidedBy]));
   res.json(list.map((r) => requestView(r, names)));
 }));
-office.post('/requests/:id/:action(approve|decline)', requirePerm('approve'), wrap(async (req, res) => {
+office.post('/requests/:id/:action(approve|decline)', needOrAdmin('approve'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const r = await OfficeRequest.findOne({ _id: req.params.id, team: req.team.key });
   if (!r) throw notFound();
@@ -900,7 +923,7 @@ office.post('/requests/:id/:action(approve|decline)', requirePerm('approve'), wr
 
 // ---------- the yearly rhythm ----------
 const yearItemView = (y) => ({ id: String(y._id), title: y.title, type: y.type, month: y.month, day: y.day, nth: y.nth, weekday: y.weekday, start: y.start, end: y.end, committees: y.committees, visibility: y.visibility });
-office.put('/year-plan', requirePerm('plans'), wrap(async (req, res) => {
+office.put('/year-plan', need('plans'), wrap(async (req, res) => {
   const t = await Team.findOne({ key: req.team.key });
   const keys = new Set((await teamCommittees(req.team.key)).map((c) => c.key));
   t.yearPlan = (Array.isArray(req.body.items) ? req.body.items : []).slice(0, 120).map((y) => ({
@@ -920,7 +943,7 @@ office.put('/year-plan', requirePerm('plans'), wrap(async (req, res) => {
   res.json({ items: t.yearPlan.map(yearItemView) });
 }));
 // POST /api/office/year-plan/fill { year } — add the yearly items to that year's calendar (once)
-office.post('/year-plan/fill', requirePerm('plans'), wrap(async (req, res) => {
+office.post('/year-plan/fill', need('plans'), wrap(async (req, res) => {
   const year = Number(req.body.year);
   if (!(year >= 2020 && year <= 2100)) throw bad('Pick a year.');
   const t = await Team.findOne({ key: req.team.key }).lean();

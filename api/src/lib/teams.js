@@ -21,6 +21,20 @@ export async function positionsList() {
   return posCache.list;
 }
 export const forgetTeams = () => (teamCache.at = 0);
+// Church Admin team keys from the cache (it's loaded on every signed-in request)
+export const officeKeysCached = () => new Set(teamCache.list.filter((t) => t.kind === 'office').map((t) => t.key));
+// Who's on Church Admin is shown only to the admin and that team's own leaders (and to the person)
+export function teamsShownTo(viewer, u) {
+  const office = officeKeysCached();
+  const isSelf = viewer && String(viewer._id) === String(u._id);
+  return (u.teams || [])
+    .map((t) => t.team)
+    .filter((k) => {
+      if (!office.has(k) || isSelf || viewer?.role === 'admin') return true;
+      const m = (viewer?.teams || []).find((x) => x.team === k);
+      return !!m && (m.head || m.role === 'leader');
+    });
+}
 export const forgetPositions = () => (posCache.at = 0);
 
 export const teamView = (t) => ({ key: t.key, name: t.name, kind: t.kind, groupLink: t.groupLink || '', order: t.order || 0 });

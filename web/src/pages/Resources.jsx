@@ -252,7 +252,7 @@ function DocumentLibrary() {
     <section className="card stack" aria-label="Documents">
       <div className="row-wrap spread">
         <h2>Documents</h2>
-        {app.can.resources && (
+        {app.officeCan.resources && (
           <button type="button" className="btn btn-outline btn-sm" onClick={() => setAdding(true)}>
             <Icon name="plus" size={16} /> Add a document
           </button>

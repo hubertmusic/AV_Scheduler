@@ -308,6 +308,19 @@ accountRouter.patch('/', wrap(async (req, res) => {
   res.json({ me: meView(req.user) });
 }));
 
+// Answer a team's request to join (Church Admin): POST /api/account/invites/:team/accept|decline
+accountRouter.post('/invites/:team/:action(accept|decline)', wrap(async (req, res) => {
+  if (req.previewing) throw forbidden('Exit the preview first.');
+  const inv = (req.user.teamInvites || []).find((i) => i.team === req.params.team);
+  if (!inv) throw new HttpError(404, 'That request was taken back.');
+  req.user.teamInvites = req.user.teamInvites.filter((i) => i.team !== req.params.team);
+  const joined = req.params.action === 'accept' && !(req.user.teams || []).some((m) => m.team === req.params.team);
+  if (joined) req.user.teams.push({ team: req.params.team, role: 'crew' });
+  await req.user.save();
+  res.locals.activity = joined ? 'Accepted a request to join a team' : 'Declined a request to join a team';
+  res.json({ ok: true, joined });
+}));
+
 accountRouter.post('/calendar/reset', wrap(async (req, res) => {
   req.user.calToken = token();
   await req.user.save();

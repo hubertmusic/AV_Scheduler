@@ -74,14 +74,16 @@ async function signIn(p, team) {
   ok(await c('POST', `/api/auth/invite/${p.token}`, { password: 'password123' }));
   return c;
 }
+// The admin starts the team with its head leader; after that only Church Admin's own leaders add people
 const olivia = await invite(adminO, 'Olivia', 'olivia@example.com');
-const lee = await invite(adminO, 'Lee', 'lee@example.com');
-const sam = await invite(adminO, 'Sam', 'sam@example.com');
-const bea = await invite(adminO, 'Bea', 'bea@example.com');
-const fred = await invite(adminO, 'Fred', 'fred@example.com');
-const ben = await invite(admin, 'Ben', 'ben@example.com');
 ok(await admin('PUT', `/api/teams/${O}/head`, { userId: olivia.id }));
 const oliviaC = await signIn(olivia, O);
+ok(await adminO('POST', '/api/people', { name: 'Nope', email: 'nope@example.com' }), 403);
+const lee = await invite(oliviaC, 'Lee', 'lee@example.com');
+const sam = await invite(oliviaC, 'Sam', 'sam@example.com');
+const bea = await invite(oliviaC, 'Bea', 'bea@example.com');
+const fred = await invite(oliviaC, 'Fred', 'fred@example.com');
+const ben = await invite(admin, 'Ben', 'ben@example.com');
 const leeC = await signIn(lee, O);
 const samC = await signIn(sam, O);
 let beaC = await signIn(bea, O);
@@ -354,5 +356,93 @@ ok(await oliviaC('PATCH', '/api/office/setup', { rooms: [{ name: 'Sanctuary', se
 assert.deepEqual(ok(await oliviaC('GET', '/api/bootstrap')).office.rooms.map((r) => r.name), ['Sanctuary', 'Chapel']);
 ok(await leeC('PATCH', '/api/office/setup', { remindMinutes: 5 }), 403);
 step('the head leader adds and removes committees and sets rooms and reminders');
+
+// ---------- confidential: even the admin sees only what their membership allows ----------
+let adminEvents = ok(await adminO('GET', `/api/office/events?from=${iso(0)}&to=${iso(400)}`));
+assert.ok(adminEvents.length > 0 && adminEvents.every((e) => e.visibility === 'everyone'), 'the admin sees only items shared with every team');
+ok(await adminO('GET', `/api/office/events/${board.id}`), 403);
+assert.equal(ok(await adminO('GET', '/api/office/goals')).length, 0);
+assert.equal(ok(await adminO('GET', '/api/office/motions')).length, 0);
+assert.equal(ok(await adminO('GET', '/api/office/docs')).docs.filter((d) => d.title === 'Church bylaws').length, 0);
+assert.ok(!ok(await adminO('GET', '/api/office/overview?zoom=year')).events.some((e) => e.id === board.id));
+assert.equal(ok(await adminO('GET', '/api/office/actions')).length, 0);
+ok(await adminO('PUT', `/api/office/events/${board.id}/agenda`, { agenda: [] }), 403);
+ok(await adminO('POST', '/api/office/events', { title: 'x', date: iso(3), start: '10:00' }), 403);
+ok(await adminO('PATCH', `/api/office/events/${biz.id}`, { title: 'x' }), 403);
+// …but still manages it: committees, rooms, people's roles, event requests
+ok(await adminO('POST', '/api/office/committees', { name: 'Building Committee' }), 201);
+ok(await adminO('PATCH', '/api/office/setup', { remindMinutes: 45 }));
+ok(await adminO('PATCH', `/api/people/${fred.id}`, { role: 'leader' }));
+ok(await adminO('PATCH', `/api/people/${fred.id}`, { role: 'crew' }));
+assert.ok(ok(await adminO('GET', '/api/office/committees')).find((c) => c.key === 'board').members.length > 0, 'the admin sees who is on each committee');
+// The admin's "View as" preview doesn't open Church Admin
+const peek = await fetch(`${BASE}/api/office/events`, { headers: { Cookie: (await (async () => { const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'admin@example.com', password: 'adminpass1' }) }); return r.headers.get('set-cookie').split(';')[0]; })()), 'X-Team': O, 'X-View-As': bea.id } });
+assert.equal(peek.status, 403, 'no peeking through a preview');
+// The Activity log never names confidential items
+const feed = [];
+for (let before = ''; ; ) {
+  const page = ok(await admin('GET', `/api/activity/feed?limit=200${before ? `&before=${encodeURIComponent(before)}` : ''}`));
+  feed.push(...page);
+  if (page.length < 200) break;
+  before = page[page.length - 1].at || page[page.length - 1].createdAt;
+}
+const activity = JSON.stringify(feed);
+for (const secret of ['Church board', 'roof', 'Roof', 'bylaws', 'Budget review']) assert.ok(!activity.includes(secret), `the activity log mentions “${secret}”`);
+assert.match(activity, /Church business meeting/, 'items shared with every team can be named');
+step('confidential: the admin manages people, committees and rooms but can’t read Church Admin items, preview them, or see them in the log');
+
+// The admin joins the board only when Church Admin asks, and accepts
+ok(await oliviaC('PATCH', `/api/people/${adminId}`, { committees: ['board'] }), 403);
+ok(await oliviaC('POST', '/api/people', { name: 'Hub', email: 'admin@example.com' }), 201);
+let ab = ok(await admin('GET', '/api/bootstrap'));
+assert.deepEqual(ab.invites.map((i) => i.teamName), ['Church Admin']);
+ok(await admin('POST', `/api/account/invites/${O}/accept`));
+ok(await oliviaC('PATCH', '/api/office/committees/board', { members: [lee.id, sam.id, bea.id, adminId] }));
+assert.ok(ok(await adminO('GET', `/api/office/events/${board.id}`)), 'now on the board, the admin sees its meetings');
+ok(await adminO('PATCH', '/api/office/committees/finance', { members: [fred.id, adminId] }));
+assert.ok(!ok(await adminO('GET', '/api/office/committees')).find((c) => c.key === 'finance').members.some((m) => m.id === adminId), 'the admin can’t put themselves on a committee');
+step('the admin is on Church Admin only when its leaders ask and they accept; committee places come from the head leader');
+
+// ---------- tiers: the pastor on the AV team is asked to join ----------
+ok(await oliviaC('POST', '/api/people', { name: 'Ben', email: 'ben@example.com' }), 201);
+let benBoot = ok(await benC('GET', '/api/bootstrap'));
+assert.deepEqual(benBoot.teams.map((t) => t.key), ['av'], 'not on their profile until they accept');
+assert.equal(benBoot.invites[0].from, 'Olivia');
+assert.ok(ok(await oliviaC('GET', '/api/people/asked')).some((p) => p.name === 'Ben'));
+ok(await samC('GET', '/api/people/asked'), 200);
+assert.equal(ok(await samC('GET', '/api/people/asked')).length, 0, 'only leaders see who has been asked');
+ok(await oliviaC('POST', '/api/people', { name: 'Ben', email: 'ben@example.com' }), 409);
+ok(await benC('POST', `/api/account/invites/${O}/accept`));
+benBoot = ok(await benC('GET', '/api/bootstrap'));
+assert.deepEqual(benBoot.teams.map((t) => t.key).sort(), ['av', O].sort());
+// Declining
+const tia = await invite(admin, 'Tia', 'tia@example.com');
+const tiaC = await signIn(tia, 'av');
+ok(await leeC('POST', '/api/people', { name: 'Tia', email: 'tia@example.com' }), 403);
+ok(await oliviaC('POST', '/api/people', { name: 'Tia', email: 'tia@example.com' }), 201);
+ok(await tiaC('POST', `/api/account/invites/${O}/decline`));
+assert.deepEqual(ok(await tiaC('GET', '/api/bootstrap')).teams.map((t) => t.key), ['av']);
+step('tiers: someone on AV (the pastor) is asked to join, and Church Admin shows on their profile only once they accept');
+
+// ---------- who's on Church Admin shows only to the admin and its leaders ----------
+const tiaBoot = ok(await tiaC('GET', '/api/bootstrap'));
+assert.deepEqual(tiaBoot.everyone.find((p) => p.id === ben.id).teams, ['av'], 'AV crew don’t see that Ben is on Church Admin');
+assert.ok(ok(await admin('GET', '/api/bootstrap')).everyone.find((p) => p.id === ben.id).teams.includes(O));
+assert.deepEqual(ok(await tiaC('GET', '/api/teams')).find((t) => t.key === O).heads, []);
+const fredPeople = ok(await fredC('GET', '/api/bootstrap')).people.map((p) => p.name).sort();
+assert.ok(!fredPeople.includes('Bea') && !fredPeople.includes('Sam'), `Finance doesn’t see the board’s members: ${fredPeople}`);
+assert.ok(fredPeople.includes('Olivia'));
+const samView = ok(await samC('GET', '/api/office/committees'));
+assert.equal(samView.find((c) => c.key === 'board').members.length, 0, 'committee lists are for leaders');
+step('who’s on Church Admin and its committees shows only to the admin and Church Admin leaders');
+
+// Reset links and email changes are announced to the person
+const before = ok(await client()('GET', '/api/auth/test-mail')).length;
+ok(await oliviaC('POST', `/api/people/${sam.id}/reset-link`));
+ok(await oliviaC('PATCH', `/api/people/${sam.id}`, { email: 'sam2@example.com' }));
+const after = ok(await client()('GET', '/api/auth/test-mail')).slice(before - 30 > 0 ? 0 : 0);
+assert.ok(after.some((m) => m.to === 'sam@example.com' && /sign-in link was made/.test(m.subject)));
+assert.ok(after.some((m) => m.to === 'sam@example.com' && /email was changed/.test(m.subject)));
+step('a reset link or an email change is always announced to the person, so nobody can quietly take over an account');
 
 console.log('\nAll Church Admin checks passed.');

@@ -22,12 +22,13 @@ export const requireOfficeTeam = (req, res, next) => (isOfficeTeam(req.team) ? n
 const ids = (list) => (list || []).map(String);
 const overlap = (a, b) => a.some((x) => b.includes(x));
 
-// Can this person see an office item? Admin and the team's head see everything; others see items
-// for the whole team, their committees, or committees it was shared with. Calendar items marked
-// "everyone" also show to people who aren't on the team.
+// Can this person see an office item? Church Admin information is confidential: what someone sees
+// comes only from their place on the team — the team's head leader sees everything; others see
+// items for the whole team, their committees, or committees it was shared with. Calendar items
+// marked "everyone" also show to people who aren't on the team. The Crew Call admin is no
+// exception: they manage people, committees and rooms, but see only what their own membership allows.
 export function sees(user, item) {
   if (!user || !item) return false;
-  if (user.role === 'admin') return true;
   const m = membershipOf(user, item.team);
   if (!m) return item.visibility === 'everyone';
   if (m.head) return true;
@@ -36,11 +37,39 @@ export function sees(user, item) {
   if (!owners.length) return true;
   return overlap(mine, owners) || overlap(mine, item.sharedWith || []) || item.visibility === 'everyone';
 }
+// Privileges on an office team from the person's own membership (head: all; leader: theirs; crew:
+// none). The admin gets no extra powers over the team's items this way.
+const PERM_KEYS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
+export function officePerms(user, team) {
+  const m = membershipOf(user, team);
+  const on = (f) => Object.fromEntries(PERM_KEYS.map((p) => [p, f(p)]));
+  if (!m) return on(() => false);
+  if (m.head) return on(() => true);
+  if (m.role === 'leader') return on((p) => !!m.perms?.[p]);
+  return on(() => false);
+}
+
+// Who's on the team (and on which committee) shows only to the admin and the team's leaders. Others
+// on the team see the people who share a committee with them, and the leaders.
+export function seesRoster(user, team) {
+  if (user?.role === 'admin') return true;
+  const m = membershipOf(user, team);
+  return !!m && (m.head || m.role === 'leader');
+}
+export function rosterFor(req, people) {
+  if (!isOfficeTeam(req.team) || seesRoster(req.user, req.team.key)) return people;
+  const mine = membershipOf(req.user, req.team.key)?.committees || [];
+  return people.filter((u) => {
+    if (String(u._id) === String(req.user._id)) return true;
+    const m = membershipOf(u, req.team.key);
+    return !!m && (m.head || m.role === 'leader' || (m.committees || []).some((k) => mine.includes(k)));
+  });
+}
+
 // Can they change it? They need the privilege on the team, and to be in one of its own committees
 // (shared-with committees only read it).
 export function edits(user, item, can) {
   if (!user || !item) return false;
-  if (user.role === 'admin') return true;
   const m = membershipOf(user, item.team);
   if (!m || !can) return false;
   if (m.head) return true;
@@ -51,9 +80,8 @@ export const assertSees = (user, item, what = 'that') => {
   if (!sees(user, item)) throw forbidden(`You can’t see ${what}.`);
 };
 
-// Mongo filter for the office items a member can see (the team's head and the admin see all)
+// Mongo filter for the office items a member can see (the team's head leader sees all)
 export function visibleFilter(user, team) {
-  if (user.role === 'admin') return { team };
   const m = membershipOf(user, team);
   if (!m) return { team, visibility: 'everyone' };
   if (m.head) return { team };

@@ -223,6 +223,35 @@ const TABS = [
   { id: 'activity', label: 'Activity', show: (c, me) => me.role === 'admin' },
 ];
 
+// A team's leaders asked this person to join (Church Admin): it's on their profile once they accept
+function JoinBanner({ invite, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const answer = async (action) => {
+    setBusy(true);
+    try {
+      const r = await api(`/account/invites/${invite.team}/${action}`, { method: 'POST' });
+      onDone(r.joined);
+    } catch {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="join-bar" role="region" aria-label={`Request to join ${invite.teamName}`}>
+      <span>
+        <strong>{invite.from}</strong> asked you to join <strong>{invite.teamName}</strong>.
+      </span>
+      <span className="row-wrap tight">
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => answer('accept')}>
+          Join
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => answer('decline')}>
+          No thanks
+        </button>
+      </span>
+    </div>
+  );
+}
+
 // Lets the admin see who's keeping up. The server ignores the admin's own views.
 function noteView(page, detail) {
   api('/activity/view', { method: 'POST', body: { page, detail } }).catch(() => {});
@@ -325,6 +354,9 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       serviceSide: boot.serviceSide !== false,
       committees: boot.committees || [],
       office: boot.office || null,
+      officeCan: boot.officeAccess?.can || can,
+      officeMember: boot.officeAccess ? boot.officeAccess.member : true,
+      seesRoster: boot.seesRoster !== false,
       officeMeeting,
       openMeeting: (id) => {
         setOfficeMeeting(id);
@@ -416,6 +448,12 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         </div>
       </header>
       {previewingAs && <PreviewBanner me={me} onSwitch={() => setPicking(true)} onExit={preview.exit} />}
+      {!previewingAs && (boot.invites || []).map((i) => <JoinBanner key={i.team} invite={i} onDone={(joined) => { if (joined) setTeam(i.team); reload(); }} />)}
+      {isOffice && boot.officeAccess && !boot.officeAccess.member && (
+        <div className="confidential-bar" role="note">
+          <strong>Church Admin is confidential.</strong> You can manage its people, committees, rooms and event requests. You only see its items shared with every team — or a committee’s items if its leaders ask you to join it.
+        </div>
+      )}
       <nav className="tabs" aria-label="Sections">
         {tabs.map((t) => (
           <button key={t.id} type="button" className={`tab ${tab === t.id ? 'tab-on' : ''}`} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>

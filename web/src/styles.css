@@ -948,3 +948,6 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 .agenda-edit input, .ms-edit input, .ms-edit select, .year-row input:not([type='checkbox']), .year-row select, .office-row input, .office-row select, .input-sm, .row-wrap > input.grow {
   min-height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--field); background: var(--surface); font: inherit; font-size: 15px; width: 100%;
 }
+.join-bar, .confidential-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 10px 16px; font-size: 14px; }
+.join-bar { background: var(--blue-soft); color: var(--blue-ink); border-bottom: 1px solid var(--blue-line); }
+.confidential-bar { background: #f3eefb; color: #3f2a72; border-bottom: 1px solid #d6c8f0; }
