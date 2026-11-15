@@ -50,9 +50,9 @@ const adminP = client('praise'); // the admin working on the Praise side (same s
 ok(await admin('POST', '/api/auth/setup', { name: 'Hub M.', email: 'admin@example.com', password: 'adminpass1', orgName: 'Test Church' }), 201);
 await adminP('POST', '/api/auth/login', { email: 'admin@example.com', password: 'adminpass1' });
 let boot = ok(await admin('GET', '/api/bootstrap'));
-assert.deepEqual(boot.allTeams.map((t) => [t.key, t.kind]), [['av', 'av'], ['praise', 'music']]);
+assert.deepEqual(boot.allTeams.map((t) => [t.key, t.kind]), [['av', 'av'], ['praise', 'music'], ['office', 'office']]);
 assert.equal(boot.team.key, 'av');
-assert.equal(boot.teams.length, 2, 'the admin can switch to every team');
+assert.equal(boot.teams.length, 3, 'the admin can switch to every team');
 assert.ok(boot.positions.length > 0 && boot.positions.every((p) => p.team === 'av'));
 let bootP = ok(await adminP('GET', '/api/bootstrap'));
 assert.equal(bootP.team.key, 'praise');
@@ -346,7 +346,7 @@ ok(await piaC('POST', '/api/teams', { name: 'Choir', kind: 'music' }), 403);
 const choir = ok(await admin('POST', '/api/teams', { name: 'Choir', kind: 'music' }), 201);
 assert.equal(choir.key, 'choir');
 const list = ok(await tiaC('GET', '/api/teams'));
-assert.deepEqual(list.map((t) => t.key), ['av', 'praise', 'choir']);
+assert.deepEqual(list.map((t) => t.key), ['av', 'praise', 'office', 'choir']);
 assert.equal(list.find((t) => t.key === 'praise').heads[0].name, 'Sam');
 step('the admin can add more teams (choir, greeters…)');
 

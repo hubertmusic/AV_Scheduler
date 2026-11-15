@@ -6,6 +6,7 @@ import { AutoFillModal } from './AutoFill.jsx';
 import { buildFromTemplate } from '../template.js';
 import { AnnouncementsModal, canAnnounce, Notices, noticesFor } from '../notices.jsx';
 import { LineupButton } from '../lineup.jsx';
+import { ChurchEvents } from '../office.jsx';
 
 const SH = '+shadow';
 
@@ -280,6 +281,7 @@ export default function Schedule() {
       </div>
 
       <Notices items={noticesFor(app, fri)} onEdit={canAnnounce(app) ? () => setAnnouncing(true) : null} />
+      <ChurchEvents from={addDays(fri, -4)} to={addDays(fri, 9)} />
 
       {can.edit && skips.length > 0 && (
         <div className="skip-strip" role="group" aria-label="Services left out this weekend">

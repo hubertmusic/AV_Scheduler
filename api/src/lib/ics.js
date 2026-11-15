@@ -53,6 +53,10 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
   ];
   for (const it of items) {
     const e = it.event;
+    if (it.office) {
+      lines.push(...officeEvent(it, tz, now, link));
+      continue;
+    }
     if (!it.positionLabel) {
       lines.push(...infoEvent(it, tz, now, link));
       continue;
@@ -102,6 +106,46 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
   }
   lines.push('END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';
+}
+
+// A Church Admin item: a meeting, deadline or church event. Busy time with reminders when you're
+// invited; otherwise free time.
+const TYPE_WORD = { board: 'Board meeting', business: 'Business meeting', committee: 'Committee meeting', deadline: 'Deadline', event: 'Church event', other: '' };
+function officeEvent(it, tz, now, link) {
+  const e = it.event;
+  const day = (d) => d.replace(/-/g, '');
+  let when;
+  if (e.allDay || !e.start) {
+    const next = new Date(`${e.date}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    when = [`DTSTART;VALUE=DATE:${day(e.date)}`, `DTEND;VALUE=DATE:${day(next.toISOString().slice(0, 10))}`];
+  } else {
+    const start = localToDate(e.date, e.start, tz);
+    let end = localToDate(e.date, e.end || e.start, tz);
+    if (end <= start) end = new Date(start.getTime() + 3600 * 1000);
+    when = [`DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`];
+  }
+  const desc = [TYPE_WORD[e.type] ? `${TYPE_WORD[e.type]} · ${it.teamName}` : it.teamName, e.room ? `Where: ${e.room}` : '', e.notes || '', link ? `Details in Crew Call: ${link}` : ''].filter(Boolean).join('\n\n');
+  const alarms = [];
+  if (it.invited && !(e.allDay || !e.start)) {
+    if (it.remindDays > 0) alarms.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(`${e.title} on ${dayWord(e.date, tz)}`)}`, `TRIGGER:-P${it.remindDays}D`, 'END:VALARM');
+    if (it.remindMinutes > 0) alarms.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(`${e.title} starts soon`)}`, `TRIGGER:-PT${it.remindMinutes}M`, 'END:VALARM');
+  }
+  return [
+    'BEGIN:VEVENT',
+    `UID:${it.uid}`,
+    `DTSTAMP:${now}`,
+    `LAST-MODIFIED:${fmt(it.updatedAt || new Date())}`,
+    ...when,
+    `SUMMARY:${esc(e.title)}`,
+    ...(e.room ? [`LOCATION:${esc(e.room)}`] : []),
+    `DESCRIPTION:${esc(desc)}`,
+    ...(link ? [`URL:${link}`] : []),
+    'STATUS:CONFIRMED',
+    `TRANSP:${it.invited ? 'OPAQUE' : 'TRANSPARENT'}`,
+    ...alarms,
+    'END:VEVENT',
+  ];
 }
 
 // A service or rehearsal you're not on: shown as free time, no reminders

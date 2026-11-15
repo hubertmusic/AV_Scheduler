@@ -6,7 +6,9 @@ const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
 export const EVENT_KINDS = ['service', 'soundcheck', 'rehearsal'];
 // What a team does decides which parts of Crew Call it sees (gear, media, outside groups… are AV's)
-export const TEAM_KINDS = ['av', 'music', 'other'];
+export const TEAM_KINDS = ['av', 'music', 'other', 'office'];
+// Church Admin (office team): kinds of calendar items
+export const OFFICE_TYPES = ['board', 'business', 'committee', 'deadline', 'event', 'other'];
 export const REQUEST_TYPES = ['swap', 'transfer', 'pickup', 'drop'];
 // Kinds of reusable files in the media library
 export const LIBRARY_CATEGORIES = ['Backgrounds', 'Countdowns', 'Logos & bumpers', 'Announcement loops', 'Other'];
@@ -67,6 +69,13 @@ const userSchema = new Schema(
               plans: { type: Boolean, default: false },
             },
             maxPerMonth: { type: Number, default: 0 }, // 0 = no limit
+            // Office teams: the committees they sit on, and offices they hold (Secretary of the
+            // Finance Committee; committee '' = the whole team), with when the term ends
+            committees: { type: [String], default: [] },
+            offices: {
+              type: [new Schema({ committee: { type: String, default: '' }, role: { type: String, required: true }, termEnds: { type: String, default: '' } }, { _id: false })],
+              default: [],
+            },
           },
           { _id: false }
         ),
@@ -83,6 +92,9 @@ const userSchema = new Schema(
     sessionVersion: { type: Number, default: 0 }, // raised to sign this person out on every device
     inviteToken: { type: String, index: true },
     inviteExpires: Date,
+    // "Forgot password?" and sign-in help: a one-time reset link (only a hash is kept)
+    resetHash: { type: String, index: true },
+    resetExpires: Date,
     active: { type: Boolean, default: true },
   },
   { timestamps: true }
@@ -104,6 +116,31 @@ const teamSchema = new Schema(
     kind: { type: String, enum: TEAM_KINDS, default: 'other' },
     groupLink: { type: String, default: '' }, // the team's WhatsApp group
     order: { type: Number, default: 0 },
+    // Office teams: rooms (services: the room services and rehearsals use), calendar reminders
+    // on meetings people are invited to, and the yearly rhythm to fill each year's calendar from
+    rooms: { type: [new Schema({ name: String, services: { type: Boolean, default: false } }, { _id: false })], default: [] },
+    remindMinutes: { type: Number, default: 60 },
+    remindDays: { type: Number, default: 1 },
+    yearPlan: {
+      type: [
+        new Schema(
+          {
+            title: { type: String, required: true },
+            type: { type: String, enum: OFFICE_TYPES, default: 'event' },
+            month: { type: Number, min: 1, max: 12, required: true },
+            day: { type: Number, default: 0 }, // a day of the month, or 0 to use nth + weekday
+            nth: { type: Number, default: 1 }, // 1–4, or -1 = last
+            weekday: { type: Number, default: 6 }, // 0 Sunday … 6 Sabbath
+            start: { type: String, default: '' },
+            end: { type: String, default: '' },
+            committees: { type: [String], default: [] },
+            visibility: { type: String, default: 'office' },
+          },
+          { _id: true }
+        ),
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );
@@ -126,6 +163,7 @@ const eventSchema = new Schema(
     archivedAt: { type: Date, default: null },
     archivedBy: ref('User'),
     planDeletedAt: { type: Date, default: null }, // its plan and files were deleted when archived
+    office: ref('OfficeEvent'), // a Church Admin event that asked for AV
   },
   { timestamps: true }
 );
@@ -581,4 +619,189 @@ const skipSchema = new Schema(
 );
 skipSchema.index({ date: 1, title: 1 }, { unique: true });
 export const Skip = model('Skip', skipSchema);
+// ---------- Church Admin (office teams) ----------
+// Who can see an office item: its committees (empty = the whole team) plus any committees it's
+// shared with (read-only). "everyone" calendar items also show to the other teams.
+const audience = {
+  team: { type: String, required: true, index: true },
+  committees: { type: [String], default: [] },
+  sharedWith: { type: [String], default: [] },
+};
+
+const committeeSchema = new Schema(
+  {
+    team: { type: String, required: true, index: true },
+    key: { type: String, required: true },
+    name: { type: String, required: true, trim: true },
+    color: { type: String, default: 'blue' },
+    quorum: { type: Number, default: 0 }, // people needed for a vote; 0 = not tracked
+    order: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+committeeSchema.index({ team: 1, key: 1 }, { unique: true });
+export const Committee = model('Committee', committeeSchema);
+
+// A repeating calendar item ("2nd Tuesday of every month"); its dates are real OfficeEvents
+const officeSeriesSchema = new Schema(
+  {
+    team: { type: String, required: true },
+    freq: { type: String, enum: ['weekly', 'monthly-nth', 'monthly-day', 'yearly'], required: true },
+    interval: { type: Number, default: 1 },
+    weekday: Number,
+    nth: Number,
+    monthDay: Number,
+    first: { type: String, required: true }, // the first date
+    until: { type: String, default: '' }, // last date, or '' = keeps going (filled a year ahead)
+    filledTo: { type: String, default: '' },
+    template: { type: Schema.Types.Mixed, default: {} }, // fields copied onto each new date
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const OfficeSeries = model('OfficeSeries', officeSeriesSchema);
+
+const agendaItemSchema = new Schema(
+  {
+    kind: { type: String, enum: ['item', 'heading'], default: 'item' },
+    title: { type: String, default: '' },
+    presenter: { type: String, default: '' },
+    minutes: { type: Number, default: 0 },
+    notes: { type: String, default: '' },
+  },
+  { _id: true }
+);
+const motionSchema = new Schema(
+  {
+    text: { type: String, required: true },
+    movedBy: { type: String, default: '' },
+    secondedBy: { type: String, default: '' },
+    result: { type: String, enum: ['passed', 'failed', 'tabled', 'withdrawn'], default: 'passed' },
+    votesFor: { type: Number, default: 0 },
+    votesAgainst: { type: Number, default: 0 },
+    abstain: { type: Number, default: 0 },
+  },
+  { _id: true, timestamps: true }
+);
+
+const officeEventSchema = new Schema(
+  {
+    ...audience,
+    type: { type: String, enum: OFFICE_TYPES, default: 'event' },
+    title: { type: String, required: true, trim: true },
+    date: { type: String, required: true, index: true },
+    start: { type: String, default: '' }, // '' with allDay
+    end: { type: String, default: '' },
+    allDay: { type: Boolean, default: false },
+    room: { type: String, default: '' },
+    notes: { type: String, default: '' },
+    visibility: { type: String, enum: ['office', 'everyone'], default: 'office' },
+    attendees: { type: [new Schema({ user: ref('User'), role: { type: String, default: '' } }, { _id: false })], default: [] },
+    rsvps: { type: [new Schema({ user: ref('User'), status: { type: String, enum: ['yes', 'no', 'maybe'] }, at: Date }, { _id: false })], default: [] },
+    series: ref('OfficeSeries'),
+    // Meetings
+    agenda: { type: [agendaItemSchema], default: [] },
+    agendaSentAt: Date,
+    minutes: { type: String, default: '' },
+    present: [ref('User')],
+    guests: { type: String, default: '' }, // others present, by name
+    minutesOpen: { type: Boolean, default: false }, // a leader let anyone in the meeting take minutes
+    minutesBy: ref('User'),
+    minutesApprovedAt: Date,
+    minutesApprovedBy: ref('User'),
+    motions: { type: [motionSchema], default: [] },
+    // Extras
+    needsAv: { type: Boolean, default: false },
+    avNote: { type: String, default: '' },
+    bulletin: {
+      service: ref('Event'),
+      text: { type: String, default: '' },
+      status: { type: String, enum: ['', 'pending', 'added', 'declined'], default: '' },
+      decidedBy: ref('User'),
+      decidedAt: Date,
+    },
+    fromRequest: ref('OfficeRequest'),
+    createdBy: ref('User'),
+    updatedBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const OfficeEvent = model('OfficeEvent', officeEventSchema);
+
+const goalSchema = new Schema(
+  {
+    ...audience,
+    title: { type: String, required: true, trim: true },
+    description: { type: String, default: '' },
+    owner: ref('User'),
+    start: { type: String, default: '' }, // YYYY-MM-DD
+    due: { type: String, default: '' },
+    status: { type: String, enum: ['not-started', 'on-track', 'behind', 'done'], default: 'not-started' },
+    milestones: {
+      type: [new Schema({ title: { type: String, required: true }, due: { type: String, default: '' }, owner: ref('User'), done: { type: Boolean, default: false }, doneAt: Date }, { _id: true })],
+      default: [],
+    },
+    events: [ref('OfficeEvent')],
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const Goal = model('Goal', goalSchema);
+
+const actionItemSchema = new Schema(
+  {
+    ...audience,
+    title: { type: String, required: true, trim: true },
+    notes: { type: String, default: '' },
+    owner: ref('User'),
+    due: { type: String, default: '' },
+    done: { type: Boolean, default: false },
+    doneAt: Date,
+    meeting: ref('OfficeEvent'),
+    goal: ref('Goal'),
+    remindedOn: { type: String, default: '' }, // the day its last reminder email went out
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const ActionItem = model('ActionItem', actionItemSchema);
+
+// Bylaws, policies, forms… a link or an uploaded file
+export const DOC_CATEGORIES = ['Bylaws', 'Policies', 'Forms', 'Minutes', 'Reports', 'Other'];
+const officeDocSchema = new Schema(
+  {
+    ...audience,
+    title: { type: String, required: true, trim: true },
+    category: { type: String, enum: DOC_CATEGORIES, default: 'Other' },
+    url: { type: String, default: '' },
+    file: { stored: String, originalName: String, mime: String, size: Number },
+    notes: { type: String, default: '' },
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const OfficeDoc = model('OfficeDoc', officeDocSchema);
+
+// Anyone signed in asks for a church event or a room; office leaders approve or decline
+const officeRequestSchema = new Schema(
+  {
+    team: { type: String, required: true, index: true }, // the office team it goes to
+    title: { type: String, required: true, trim: true },
+    date: { type: String, required: true },
+    start: { type: String, default: '' },
+    end: { type: String, default: '' },
+    room: { type: String, default: '' },
+    notes: { type: String, default: '' },
+    needsAv: { type: Boolean, default: false },
+    requestedBy: ref('User'),
+    status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
+    reply: { type: String, default: '' },
+    decidedBy: ref('User'),
+    decidedAt: Date,
+    event: ref('OfficeEvent'),
+  },
+  { timestamps: true }
+);
+export const OfficeRequest = model('OfficeRequest', officeRequestSchema);
+
 export { Types };

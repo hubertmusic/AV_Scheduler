@@ -47,7 +47,7 @@ export async function resolveTeam(req, user) {
   const teams = await teamsList();
   const keys = teams.map((t) => t.key);
   const mine = user.role === 'admin' ? keys : (user.teams || []).map((m) => m.team).filter((k) => keys.includes(k));
-  const wanted = req.get('x-team');
+  const wanted = req.get('x-team') || (req.method === 'GET' && typeof req.query?.team === 'string' ? req.query.team : ''); // ?team= for plain links (downloads)
   const key = wanted && mine.includes(wanted) ? wanted : mine[0] || AV;
   return teams.find((t) => t.key === key) || { key, name: 'AV Team', kind: 'av' };
 }

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
 import { config } from '../config.js';
-import { Assignment, Event, GuestLink, Media, OrderTemplate, Plan, Song, Submission, User } from '../models.js';
+import { Assignment, Event, GuestLink, Media, OfficeEvent, OrderTemplate, Plan, Song, Submission, User } from '../models.js';
 import { requirePerm } from '../auth.js';
 import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, roleIn, str, token, wrap } from '../lib/util.js';
 import { isAvTeam, requireMember } from '../lib/teams.js';
@@ -188,6 +188,8 @@ async function fullPlan(ev, req) {
     rights,
   };
   if (viewerCan.plans) {
+    // Announcements Church Admin asked to put in this service's bulletin
+    out.officeAnnouncements = (await OfficeEvent.find({ 'bulletin.service': ev._id, 'bulletin.status': 'pending' }, { title: 1, date: 1, start: 1, room: 1, bulletin: 1 }).lean()).map((o) => ({ id: String(o._id), title: o.title, date: o.date, start: o.start, room: o.room, text: o.bulletin.text }));
     const [guests, subs] = await Promise.all([
       GuestLink.find({ event: ev._id }).sort({ createdAt: -1 }).limit(20),
       Submission.find({ event: ev._id, status: { $ne: 'draft' } }).sort({ createdAt: -1 }).limit(200).populate('guest', 'name').populate('replaces', 'data').populate({ path: 'media', populate: { path: 'guest', select: 'name' } }),

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { onServiceTeam } from '../lib/office.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { User } from '../models.js';
@@ -52,6 +53,7 @@ academyRouter.get('/go', wrap(async (req, res) => {
   if (!config.academyOn) return res.redirect(302, '/#resources');
   const user = await signedInUser(req);
   if (!user) return res.redirect(302, `/?academy=${encodeURIComponent(to)}`);
+  if (!(await onServiceTeam(user))) return res.redirect(302, '/#resources'); // not for people only on Church Admin
   if (user.role !== 'admin') logActivity({ user, kind: 'view', page: 'academy', action: 'Opened Booth Crew Academy', req });
   const pass = academyPass(user, to);
   res.redirect(302, `${config.academyUrl}/sso/crew-call?pass=${encodeURIComponent(pass)}`);

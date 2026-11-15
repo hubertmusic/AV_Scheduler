@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { Router } from 'express';
 import { IANAZone } from 'luxon';
-import { Assignment, Blackout, Event, EVENT_KINDS, Group, Position, Request, Resource, Unavailable, User } from '../models.js';
+import { Assignment, Blackout, Committee, Event, EVENT_KINDS, Group, OfficeEvent, Position, Request, Resource, Team, Unavailable, User } from '../models.js';
 import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
 import { addDays, bad, conflict, DATE_RE, forbidden, getSettings, isHttpUrl, isId, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { eventView, groupView, meView, personView, requestView } from '../lib/views.js';
@@ -13,6 +13,7 @@ import { mailerReady, sendMail } from '../lib/mailer.js';
 import { FEATURES } from '../lib/features.js';
 import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
+import { isOfficeTeam, onServiceTeam, sees as seesOffice } from '../lib/office.js';
 import { forgetPositions, isAvTeam, positionsList, positionTeams, requireTeamHead, teamsList, teamsOf, teamView } from '../lib/teams.js';
 
 const settingsView = (s) => ({
@@ -52,6 +53,9 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     teamsList(),
   ]);
   const pos = (p) => ({ key: p.key, label: p.label, order: p.order, team: p.team || 'av' });
+  const office = isOfficeTeam(req.team);
+  const serviceSide = await onServiceTeam(req.user);
+  const officeSetup = office ? await Team.findOne({ key: team }, { rooms: 1, remindMinutes: 1, remindDays: 1 }).lean() : null;
   res.json({
     me: req.previewing ? { ...meView(req.user), calUrl: `${config.publicUrl}/cal/(their-private-link).ics`, previewing: true } : meView(req.user),
     settings: { ...settingsView(s), groupLink: req.team.groupLink || '' },
@@ -64,7 +68,11 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     everyone: everyone.map((u) => ({ id: String(u._id), name: u.name, teams: u.role === 'admin' && !(u.teams || []).length ? ['av'] : (u.teams || []).map((t) => t.team) })),
     groups: groups.map((g) => groupView(g, req.user)),
     announcements: await announcementsFor(addDays(todayIn(s.timezone), -7), addDays(todayIn(s.timezone), 120)),
-    academy: config.academyOn ? { url: config.academyUrl, host: new URL(config.academyUrl).host } : null,
+    // Booth Crew Academy is for the service teams, not people only on Church Admin
+    academy: config.academyOn && serviceSide ? { url: config.academyUrl, host: new URL(config.academyUrl).host } : null,
+    serviceSide, // on a team that serves on services (sees services, plans and line-ups)
+    committees: office ? (await Committee.find({ team }).sort({ order: 1, name: 1 }).lean()).map((c) => ({ key: c.key, name: c.name, color: c.color, quorum: c.quorum })) : [],
+    office: officeSetup ? { rooms: officeSetup.rooms || [], remindMinutes: officeSetup.remindMinutes ?? 60, remindDays: officeSetup.remindDays ?? 1 } : null,
   });
 }));
 
@@ -438,7 +446,10 @@ calRouter.get('/:file', wrap(async (req, res) => {
   };
   const notices = {};
   const items = [];
+  // People only on Church Admin don't get services and rehearsals, just their own calendar
+  const serviceSide = await onServiceTeam(user);
   for (const e of events) {
+    if (!serviceSide && !(asgBy[String(e._id)] || []).some((a) => String(a.user._id) === String(user._id))) continue;
     const mine = (asgBy[String(e._id)] || []).filter((a) => String(a.user._id) === String(user._id));
     const lineup = lineupOf(e);
     for (const a of mine) {
@@ -455,6 +466,22 @@ calRouter.get('/:file', wrap(async (req, res) => {
       });
     }
     if (!mine.length) items.push({ uid: `${e._id}-info-${user._id}@crew-call`, event: e, lineup, teamName: teamName[e.team] || '', updatedAt: e.updatedAt });
+  }
+  // Church Admin items: everything the person can see on the teams they're on, plus church events
+  // shared with every team. Meetings they're invited to get reminders.
+  const officeTeams = teams.filter(isOfficeTeam);
+  if (officeTeams.length) {
+    const evs = await OfficeEvent.find({ team: { $in: officeTeams.map((t) => t.key) }, date: { $gte: since, $lte: addDays(today, 180) } }).sort({ date: 1, start: 1 }).lean();
+    for (const ev of evs) {
+      if (!seesOffice(user, ev)) continue;
+      const t = officeTeams.find((x) => x.key === ev.team);
+      const member = !!(user.teams || []).find((m) => m.team === ev.team);
+      if (!member && ev.needsAv && serviceSide) continue; // already on the AV schedule as a service
+      const m = (user.teams || []).find((x) => x.team === ev.team);
+      const invited = member && (ev.attendees?.length ? ev.attendees.some((a) => String(a.user) === String(user._id)) : !(ev.committees || []).length || (m?.committees || []).some((k) => ev.committees.includes(k)));
+      const rsvp = (ev.rsvps || []).find((r) => String(r.user) === String(user._id))?.status;
+      items.push({ office: true, uid: `${ev._id}-office-${user._id}@crew-call`, event: ev, teamName: t?.name || 'Church Admin', invited: invited && rsvp !== 'no', remindMinutes: t?.remindMinutes ?? 60, remindDays: t?.remindDays ?? 1, updatedAt: ev.updatedAt });
+    }
   }
   const body = buildCalendar({ name: `${s.orgName} — ${user.name.split(' ')[0]}’s calendar`, tz: s.timezone, items, link: `${config.publicUrl}/#mine`, alertDays: s.calendarAlertDays ?? 5 });
   res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-cache, max-age=0', 'Content-Disposition': 'inline; filename="shifts.ics"' });

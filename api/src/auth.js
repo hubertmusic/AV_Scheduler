@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -7,7 +8,9 @@ import { User, Position, Settings } from './models.js';
 import { bad, can, isId, DEFAULT_POSITIONS, DEFAULT_TEMPLATE, forbidden, getSettings, HttpError, normalizePhone, str, token, wrap } from './lib/util.js';
 import { meView } from './lib/views.js';
 import { deviceFrom, logActivity, touchSeen } from './lib/activity.js';
+import { mailerReady, sendMail, sentForTests } from './lib/mailer.js';
 import { ensureTeams, resolveTeam, teamKeys } from './lib/teams.js';
+import { ensureOffice } from './lib/office.js';
 
 const COOKIE = 'cc_session';
 const MAX_AGE = 30 * 24 * 3600 * 1000;
@@ -147,6 +150,7 @@ authRouter.post('/setup', loginLimiter, wrap(async (req, res) => {
     calToken: token(),
   });
   await ensureTeams(); // creates the AV and Praise teams and puts the admin on AV
+  await ensureOffice(); // and the Church Admin team
   await setSession(res, user);
   await noteLogin(user, req, 'Set up Crew Call');
   res.status(201).json({ me: meView(user) });
@@ -190,6 +194,76 @@ authRouter.post('/invite/:token', loginLimiter, wrap(async (req, res) => {
   await noteLogin(user, req, 'Accepted their invite and set a password');
   res.json({ me: meView(user) });
 }));
+
+// ---------- password resets ----------
+// A reset link carries a random token; only its hash is stored. "Forgot password?" emails one that
+// works for an hour; a leader's "Help with sign-in" makes one that works for 24 hours.
+export const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+export function makeResetLink(user, hours) {
+  const t = token(24);
+  user.resetHash = hashToken(t);
+  user.resetExpires = new Date(Date.now() + hours * 3600 * 1000);
+  return `${config.publicUrl}/reset/${t}`;
+}
+const resetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.headers['cf-connecting-ip'] || req.ip),
+  validate: { xForwardedForHeader: false },
+  message: { error: 'Too many attempts. Try again in a few minutes.' },
+});
+
+// POST /api/auth/forgot { email } — always answers the same, so it never reveals who has an account
+authRouter.post('/forgot', resetLimiter, wrap(async (req, res) => {
+  if (!mailerReady()) throw bad('Email isn’t set up for Crew Call yet, so ask your team leader for a sign-in link.');
+  const email = str(req.body.email, 200).toLowerCase();
+  const user = email.includes('@') ? await User.findOne({ email, active: true }) : null;
+  if (user) {
+    const s = await getSettings();
+    const link = makeResetLink(user, 1);
+    await user.save();
+    const first = user.name.split(' ')[0];
+    const text = `Hi ${first},\n\nSomeone (hopefully you) asked to reset your Crew Call password for ${s.orgName}. Choose a new one here — the link works for one hour:\n\n${link}\n\nIf you didn’t ask, you can ignore this email; your password stays the same.\n\n— ${s.orgName}`;
+    try {
+      await sendMail({ to: user.email, subject: 'Reset your Crew Call password', text });
+      await logActivity({ user, kind: 'login', action: 'Asked for a password reset email', req });
+    } catch (e) {
+      await logActivity({ user, kind: 'system', action: `Password reset email failed: ${e.message}`, req });
+    }
+  }
+  res.json({ ok: true });
+}));
+
+async function userForReset(t) {
+  const user = t ? await User.findOne({ resetHash: hashToken(t), active: true }) : null;
+  if (!user || !user.resetExpires || user.resetExpires < new Date()) throw new HttpError(404, 'This reset link has expired or was already used. Ask for a new one.');
+  return user;
+}
+authRouter.get('/reset/:token', wrap(async (req, res) => {
+  const user = await userForReset(req.params.token);
+  const s = await getSettings();
+  res.json({ name: user.name, email: user.email, orgName: s.orgName });
+}));
+authRouter.post('/reset/:token', loginLimiter, wrap(async (req, res) => {
+  const user = await userForReset(req.params.token);
+  checkPassword(req.body.password);
+  user.passwordHash = await bcrypt.hash(req.body.password, 12);
+  user.resetHash = undefined;
+  user.resetExpires = undefined;
+  user.inviteToken = undefined;
+  user.inviteExpires = undefined;
+  if (!user.calToken) user.calToken = token();
+  user.sessionVersion = (user.sessionVersion || 0) + 1; // sign out anyone using the old password
+  await user.save();
+  await setSession(res, user);
+  await noteLogin(user, req, 'Reset their password');
+  res.json({ me: meView(user) });
+}));
+
+// Test runs only (SMTP_URL=json): the emails that would have been sent
+if (config.smtpUrl === 'json') authRouter.get('/test-mail', (req, res) => res.json(sentForTests.slice(-30)));
 
 export const accountRouter = Router();
 

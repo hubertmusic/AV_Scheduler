@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { Assignment, Event, PERMS, Position, Request, User } from '../models.js';
-import { requireAdmin, requirePerm, signOutUsers } from '../auth.js';
+import { Assignment, Committee, Event, PERMS, Position, Request, User } from '../models.js';
+import { makeResetLink, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
 import { logActivity } from '../lib/activity.js';
-import { addDays, bad, conflict, forbidden, getSettings, isId, normalizePhone, notFound, str, todayIn, token, wrap } from '../lib/util.js';
+import { addDays, bad, conflict, DATE_RE, forbidden, getSettings, isId, normalizePhone, notFound, str, todayIn, token, wrap } from '../lib/util.js';
 import { personView } from '../lib/views.js';
 import { cleanRegulars } from '../lib/regulars.js';
 import { applyRegularsFor } from '../lib/regularsAuto.js';
@@ -130,6 +130,19 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
     if (m) m.maxPerMonth = n; // per team
     else user.maxPerMonth = n;
   }
+  // Church Admin: the committees they sit on and the offices they hold (with term end dates)
+  if (b.committees !== undefined || b.offices !== undefined) {
+    if (!m) throw bad(`${user.name} isn’t on the ${req.team.name}.`);
+    if (!req.can.people) throw forbidden('Only a leader who manages people can change committees and offices.');
+    const known = new Set((await Committee.find({ team: req.team.key }, { key: 1 }).lean()).map((c) => c.key));
+    if (b.committees !== undefined) m.committees = [...new Set((Array.isArray(b.committees) ? b.committees : []).filter((k) => known.has(k)))];
+    if (b.offices !== undefined)
+      m.offices = (Array.isArray(b.offices) ? b.offices : [])
+        .slice(0, 12)
+        .map((o) => ({ committee: known.has(o?.committee) ? o.committee : '', role: str(o?.role, 40), termEnds: DATE_RE.test(o?.termEnds || '') ? o.termEnds : '' }))
+        .filter((o) => o.role);
+    user.markModified('teams');
+  }
 
   // Roles on this team: the admin or the team's head leader (who change as leaders are elected)
   if (b.role !== undefined || b.leaderTitle !== undefined || b.perms !== undefined) {
@@ -215,6 +228,25 @@ peopleRouter.get('/load', wrap(async (req, res) => {
   // Burnout watch: weekends in a row (AV only)
   if (isAvTeam(req.team)) for (const [uid, n] of Object.entries(await currentStreaks(today))) (out[uid] ||= { past90: 0, upcoming: 0, last: null, next: null }).streak = n;
   res.json(out);
+}));
+
+// Help with sign-in: a password reset link to send someone (works for 24 hours). Leaders who
+// manage people can make one for crew on their team; the head leader for the team's leaders too.
+// Nobody sees or sets anyone else's password, and nobody can reset the admin.
+peopleRouter.post('/:id/reset-link', requirePerm('people'), wrap(async (req, res) => {
+  const user = await loadEditable(req);
+  if (String(user._id) === String(req.user._id)) throw bad('Change your own password under your name at the top.');
+  if (user.role === 'admin') throw forbidden('Nobody can reset the admin’s password from here.');
+  if (!user.active) throw bad('Reactivate this person first.');
+  if (!user.passwordHash) {
+    freshInvite(user);
+    await user.save();
+    return res.json({ url: inviteUrl(user.inviteToken), invite: true });
+  }
+  const url = makeResetLink(user, 24);
+  await user.save();
+  await logActivity({ user: req.user, kind: 'change', action: `Made a sign-in reset link for ${user.name}`, req });
+  res.json({ url, invite: false, hours: 24 });
 }));
 
 // New invite link — for someone who hasn't signed up yet, or (admin only) a password reset.

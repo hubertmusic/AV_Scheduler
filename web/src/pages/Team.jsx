@@ -12,6 +12,16 @@ const PERMS = [
   { id: 'plans', label: 'Lead service plans', help: 'Set the sermon, speaker, pastor’s notes and order of service; send quick links and approve late changes. (Everyone on the team can add songs, Bible texts, chord notes and slides.)' },
   { id: 'groups', label: 'Manage outside groups', help: 'Add and edit outside groups like a visiting band or choir, with their contacts and WhatsApp group links.', av: true },
 ];
+// The same privileges, worded for Church Admin
+const OFFICE_PERMS = [
+  { id: 'edit', label: 'Schedule meetings and events', help: 'Add and change items on the Church Admin calendar for their committees.' },
+  { id: 'plans', label: 'Lead planning', help: 'Write and send agendas, set goals and the yearly calendar, open minutes to anyone, and approve minutes.' },
+  { id: 'approve', label: 'Approve event requests', help: 'Approve or decline church events and rooms people ask for.' },
+  { id: 'message', label: 'Message the team', help: 'Send messages on WhatsApp; see people’s phone numbers.' },
+  { id: 'resources', label: 'Manage documents', help: 'Add and remove documents, policies, forms and resources.' },
+  { id: 'people', label: 'Manage people & committees', help: 'Invite people, set committees and offices, and help with sign-in.' },
+];
+const permsFor = (app) => (app.isOffice ? OFFICE_PERMS : PERMS.filter((p) => !p.av || app.isAv));
 
 export default function Team() {
   const app = useApp();
@@ -27,8 +37,9 @@ export default function Team() {
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return people.filter((p) => !q || p.name.toLowerCase().includes(q) || p.positions.some((k) => posLabel(k).toLowerCase().includes(q)));
-  }, [people, filter, posLabel]);
+    const committee = (k) => (app.committees || []).find((c) => c.key === k)?.name || k;
+    return people.filter((p) => !q || p.name.toLowerCase().includes(q) || p.positions.some((k) => posLabel(k).toLowerCase().includes(q)) || (p.committees || []).some((k) => committee(k).toLowerCase().includes(q)));
+  }, [people, filter, posLabel, app.committees]);
 
   const counts = { all: people.filter((p) => p.active).length, leaders: people.filter((p) => p.active && p.role !== 'crew').length };
 
@@ -44,7 +55,7 @@ export default function Team() {
         <div className="row-wrap">
           <label className="field field-inline">
             <span className="sr-only">Search people</span>
-            <input type="search" placeholder="Search name or position" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <input type="search" placeholder={app.isOffice ? 'Search name or committee' : 'Search name or position'} value={filter} onChange={(e) => setFilter(e.target.value)} />
           </label>
           <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
             <Icon name="plus" /> Add person
@@ -58,8 +69,14 @@ export default function Team() {
               <Avatar name={p.name} size={36} />
               <span className="grow col">
                 <strong>{p.name}</strong>
-                <span className="muted small">{p.positions.map(posLabel).join(', ') || 'No positions yet'}</span>
-                {p.active && (
+                {app.isOffice ? (
+                  <span className="muted small">
+                    {[...(p.offices || []).map((o) => `${o.role}${o.committee ? ` (${(app.committees || []).find((c) => c.key === o.committee)?.name || o.committee})` : ''}`), ...(p.committees || []).map((k) => (app.committees || []).find((c) => c.key === k)?.name || k)].join(' · ') || 'No committees yet'}
+                  </span>
+                ) : (
+                  <span className="muted small">{p.positions.map(posLabel).join(', ') || 'No positions yet'}</span>
+                )}
+                {p.active && !app.isOffice && (
                   <span className="small load-line">
                     {load[p.id]?.past90 || 0} in last 90 days · {load[p.id]?.upcoming || 0} coming up
                     {load[p.id]?.last ? ` · last ${fmtDay(load[p.id].last).split(', ')[1]}` : ''}
@@ -106,6 +123,8 @@ function PersonPanel({ person, me, positions }) {
     role: person.role,
     leaderTitle: person.leaderTitle || '',
     perms: { ...(person.perms || {}) },
+    committees: person.committees || [],
+    offices: (person.offices || []).map((o) => ({ ...o })),
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -121,7 +140,11 @@ function PersonPanel({ person, me, positions }) {
     setBusy(true);
     setError('');
     try {
-      const body = { name: f.name, phone: f.phone, positions: f.positions, trainee: f.trainee, leads: f.leads.filter((k) => f.positions.includes(k)), maxPerMonth: Number(f.maxPerMonth) || 0 };
+      const body = app.isOffice ? { name: f.name, phone: f.phone } : { name: f.name, phone: f.phone, positions: f.positions, trainee: f.trainee, leads: f.leads.filter((k) => f.positions.includes(k)), maxPerMonth: Number(f.maxPerMonth) || 0 };
+      if (app.isOffice && app.can.people) {
+        body.committees = f.committees;
+        body.offices = f.offices.filter((o) => o.role.trim());
+      }
       if (f.email && f.email !== person.email) body.email = f.email;
       if (canRoles && person.role !== 'admin' && person.id !== me.id) {
         body.role = f.role;
@@ -176,7 +199,12 @@ function PersonPanel({ person, me, positions }) {
   const newLink = async () => {
     setBusy(true);
     try {
-      setInvite(await api(`/people/${person.id}/invite`, { method: 'POST' }));
+      // Not signed up yet: a fresh invite. Otherwise a 24-hour password reset link.
+      if (person.invited) setInvite(await api(`/people/${person.id}/invite`, { method: 'POST' }));
+      else {
+        const r = await api(`/people/${person.id}/reset-link`, { method: 'POST' });
+        setInvite({ inviteUrl: r.url, reset: !r.invite, hours: r.hours });
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -185,7 +213,8 @@ function PersonPanel({ person, me, positions }) {
   };
 
   const isSelfAdmin = person.role === 'admin';
-  const canInvite = person.active && (person.invited || isAdmin) && !(isSelfAdmin && person.id !== me.id);
+  // Help with sign-in: leaders who manage people, for crew on their team (the head for leaders too)
+  const canInvite = person.active && app.can.people && !isSelfAdmin && person.id !== me.id && (person.role === 'crew' || canRoles);
 
   return (
     <aside className="card side stack" aria-label={`${person.name} settings`}>
@@ -221,6 +250,8 @@ function PersonPanel({ person, me, positions }) {
               <input type="email" value={f.email} onChange={set('email')} />
             </label>
           )}
+          {app.isOffice && <CommitteesEditor f={f} setF={setF} canEdit={app.can.people} />}
+          {!app.isOffice && (
           <fieldset className="fieldset">
             <legend>Trained positions</legend>
             <div className="check-grid">
@@ -232,7 +263,8 @@ function PersonPanel({ person, me, positions }) {
               ))}
             </div>
           </fieldset>
-          {f.positions.length > 0 && (
+          )}
+          {!app.isOffice && f.positions.length > 0 && (
             <fieldset className="fieldset">
               <legend>Lead (most experienced)</legend>
               <div className="check-grid">
@@ -248,6 +280,7 @@ function PersonPanel({ person, me, positions }) {
               <p className="muted small">Skill levels: Learning (shadows), Capable (trained) and Lead. The month planner checks every service has a Lead.</p>
             </fieldset>
           )}
+          {!app.isOffice && (
           <fieldset className="fieldset">
             <legend>Learning (can shadow)</legend>
             <div className="check-grid">
@@ -262,7 +295,9 @@ function PersonPanel({ person, me, positions }) {
             </div>
             <p className="muted small">Trainees can be added as a shadow next to the person on that position.</p>
           </fieldset>
-          {featureOn(app, 'signoffs') && <SignOffHistory person={person} />}
+          )}
+          {!app.isOffice && featureOn(app, 'signoffs') && <SignOffHistory person={person} />}
+          {!app.isOffice && (
           <label className="field field-row">
             <span className="small">Most shifts a month</span>
             <input className="key-input" type="number" min="0" max="31" value={f.maxPerMonth} onChange={set('maxPerMonth')} placeholder="Any" />
@@ -270,6 +305,7 @@ function PersonPanel({ person, me, positions }) {
               {person.availabilityUpdatedAt ? `Availability updated ${new Date(person.availabilityUpdatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : 'Availability never updated'}
             </span>
           </label>
+          )}
         </>
       )}
 
@@ -294,7 +330,7 @@ function PersonPanel({ person, me, positions }) {
       {person.role === 'leader' && f.role === 'leader' && (
         <fieldset className="fieldset fieldset-strong">
           <legend>Leader privileges</legend>
-          {PERMS.filter((p) => !p.av || app.isAv).map((p) => (
+          {permsFor(app).map((p) => (
             <label key={p.id} className="check check-top">
               <input type="checkbox" checked={!!f.perms[p.id]} disabled={!canRoles || person.id === me.id} onChange={() => togglePerm(p.id)} />
               <span className="col">
@@ -317,7 +353,7 @@ function PersonPanel({ person, me, positions }) {
           </button>
           {canInvite && (
             <button type="button" className="btn btn-outline" onClick={newLink} disabled={busy}>
-              {person.invited ? 'New invite link' : 'Password reset link'}
+              {person.invited ? 'New invite link' : 'Help with sign-in'}
             </button>
           )}
           {me.role === 'admin' && person.id !== me.id && person.active && !person.invited && (
@@ -337,17 +373,75 @@ function PersonPanel({ person, me, positions }) {
           )}
         </div>
       )}
-      {invite && <InviteLink person={{ ...person, name: f.name, phone: f.phone }} url={invite.inviteUrl} reset={invite.reset} />}
-      {editable && person.active && person.regulars && <Regulars person={person} />}
+      {invite && <InviteLink person={{ ...person, name: f.name, phone: f.phone }} url={invite.inviteUrl} reset={invite.reset} hours={invite.hours} />}
+      {editable && person.active && person.regulars && !app.isOffice && <Regulars person={person} />}
     </aside>
   );
 }
 
-function InviteLink({ person, url, reset }) {
+// Committees they sit on, and offices they hold (with when the term ends)
+function CommitteesEditor({ f, setF, canEdit }) {
+  const app = useApp();
+  const list = app.committees || [];
+  const toggle = (k) => setF({ ...f, committees: f.committees.includes(k) ? f.committees.filter((x) => x !== k) : [...f.committees, k] });
+  const setOffice = (i, k, v) => setF({ ...f, offices: f.offices.map((o, j) => (j === i ? { ...o, [k]: v } : o)) });
+  return (
+    <>
+      <fieldset className="fieldset">
+        <legend>Committees</legend>
+        {list.length === 0 && <p className="muted small">No committees yet. The head leader adds them on Team setup.</p>}
+        <div className="check-grid">
+          {list.map((c) => (
+            <label key={c.key} className="check">
+              <input type="checkbox" checked={f.committees.includes(c.key)} disabled={!canEdit} onChange={() => toggle(c.key)} />
+              <span>{c.name}</span>
+            </label>
+          ))}
+        </div>
+        <p className="muted small">They see their committees’ meetings, minutes, goals and documents, and anything passed down to them.</p>
+      </fieldset>
+      <fieldset className="fieldset">
+        <legend>Offices</legend>
+        {f.offices.map((o, i) => (
+          <div key={i} className="office-row">
+            <input aria-label="Office" list="office-roles" placeholder="e.g. Secretary" value={o.role} maxLength={40} disabled={!canEdit} onChange={(e) => setOffice(i, 'role', e.target.value)} />
+            <select aria-label="Of" value={o.committee} disabled={!canEdit} onChange={(e) => setOffice(i, 'committee', e.target.value)}>
+              <option value="">Whole team</option>
+              {list.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <input aria-label="Term ends" type="date" value={o.termEnds} disabled={!canEdit} onChange={(e) => setOffice(i, 'termEnds', e.target.value)} />
+            {canEdit && (
+              <button type="button" className="icon-btn icon-btn-sm" aria-label="Remove office" onClick={() => setF({ ...f, offices: f.offices.filter((_, j) => j !== i) })}>
+                <Icon name="close" size={16} />
+              </button>
+            )}
+          </div>
+        ))}
+        <datalist id="office-roles">
+          {['Chair', 'Vice chair', 'Secretary', 'Clerk', 'Treasurer', 'Head elder'].map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
+        {canEdit && (
+          <button type="button" className="btn btn-ghost btn-sm self-start" onClick={() => setF({ ...f, offices: [...f.offices, { role: '', committee: f.committees[0] || '', termEnds: '' }] })}>
+            <Icon name="plus" size={16} /> Add an office
+          </button>
+        )}
+        <p className="muted small">A Secretary (or Clerk) takes the minutes for that committee. Term end dates show on the agenda overview 60 days ahead.</p>
+      </fieldset>
+    </>
+  );
+}
+
+function InviteLink({ person, url, reset, hours }) {
   const app = useApp();
   const text = reset
-    ? `Hi ${firstName(person.name)}, here’s a link to set a new Crew Call password (works for 14 days): ${url}`
-    : `Hi ${firstName(person.name)}, you’ve been added to the ${app.team.name} at ${app.settings.orgName} on Crew Call — that’s where you’ll see your shifts, who you’re serving with, swap shifts and find training links. Set your password here (works for 14 days): ${url}`;
+    ? `Hi ${firstName(person.name)}, here’s a link to choose a new Crew Call password (works for ${hours ? `${hours} hours` : '14 days'}): ${url}`
+    : `Hi ${firstName(person.name)}, you’ve been added to the ${app.team.name} at ${app.settings.orgName} on Crew Call — ${app.isOffice ? 'that’s where you’ll see your meetings, agendas, minutes and action items.' : 'that’s where you’ll see your shifts, who you’re serving with, swap shifts and find training links.'} Set your password here (works for 14 days): ${url}`;
   return (
     <div className="current-box stack-sm">
       <div className="label-sm">{reset ? 'Password reset link' : 'Invite link'}</div>
@@ -433,6 +527,7 @@ function AddPerson({ onClose }) {
             <span>Mobile (for WhatsApp)</span>
             <input type="tel" value={f.phone} onChange={set('phone')} placeholder="(423) 555-0100" />
           </label>
+          {app.positions.length > 0 && (
           <fieldset className="fieldset">
             <legend>Trained positions</legend>
             <div className="check-grid">
@@ -444,6 +539,7 @@ function AddPerson({ onClose }) {
               ))}
             </div>
           </fieldset>
+          )}
           {error && <div className="error" role="alert">{error}</div>}
           <div className="row-wrap">
             <button className="btn btn-primary" disabled={busy}>
