@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { academyHref, api, firstName, prettyPhone, roleLabel } from '../lib.js';
-import { Avatar, Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { Avatar, DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { fmtDate, fmtSize, uploadFiles } from '../lib.js';
+import { CommitteeChips, CommitteePicker } from '../office.jsx';
 
 const KINDS = ['Link', 'Checklist', 'Guide', 'Video', 'Course module'];
 
@@ -29,7 +31,7 @@ export default function Resources() {
   const message = (p) =>
     app.openWa({
       title: `Message ${p.name}`,
-      text: `Hi ${firstName(p.name)}, it’s ${firstName(me.name)} from the AV crew. I have a question about `,
+      text: `Hi ${firstName(p.name)}, it’s ${firstName(me.name)}${app.isOffice ? '' : ' from the AV crew'}. I have a question about `,
       recipients: [p],
       groupLink: '',
     });
@@ -39,7 +41,7 @@ export default function Resources() {
       <div className="page-head">
         <div>
           <h1>Resources &amp; help</h1>
-          <div className="muted">Quick reviews before your shift, and a direct line to your leaders.</div>
+          <div className="muted">{app.isOffice ? 'Bylaws, policies, forms and approved minutes, plus a direct line to your leaders.' : 'Quick reviews before your shift, and a direct line to your leaders.'}</div>
         </div>
         {can.resources && (
           <button type="button" className="btn btn-primary" onClick={() => setEditing({ title: '', url: '', position: resFilter === 'all' ? '' : resFilter, kind: 'Link', minutes: 0 })}>
@@ -47,6 +49,7 @@ export default function Resources() {
           </button>
         )}
       </div>
+      {app.isOffice && <DocumentLibrary />}
       {academy && (
         <section className="card academy-card" aria-label="Booth Crew Academy">
           <div className="grow stack-xs">
@@ -220,6 +223,166 @@ function ResourceModal({ res, onClose, onSaved }) {
             </button>
           )}
         </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ---------- Church Admin: the document library ----------
+function DocumentLibrary() {
+  const app = useApp();
+  const [d, setD] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const load = useCallback(() => api('/office/docs').then(setD, () => setD({ docs: [], minutes: [], categories: [] })), []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!d) return <div className="loading-inline">Loading documents…</div>;
+  const cats = [...new Set(d.docs.map((x) => x.category))];
+  const remove = async (doc) => {
+    if (!window.confirm(`Remove “${doc.title}”?`)) return;
+    try {
+      await api(`/office/docs/${doc.id}`, { method: 'DELETE' });
+      load();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  return (
+    <section className="card stack" aria-label="Documents">
+      <div className="row-wrap spread">
+        <h2>Documents</h2>
+        {app.can.resources && (
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={16} /> Add a document
+          </button>
+        )}
+      </div>
+      {d.docs.length === 0 && d.minutes.length === 0 && <p className="muted">No documents yet.</p>}
+      {cats.map((c) => (
+        <div key={c} className="stack-sm">
+          <h3>{c}</h3>
+          {d.docs
+            .filter((x) => x.category === c)
+            .map((x) => (
+              <div key={x.id} className="row-wrap spread doc-row">
+                <span className="stack-xs">
+                  <a href={x.file ? `/api/office/docs/${x.id}/file?team=${encodeURIComponent(app.team.key)}` : x.url} target="_blank" rel="noopener noreferrer" className="strong">
+                    {x.title}
+                  </a>
+                  <span className="row-wrap tight">
+                    <CommitteeChips keys={x.committees} shared={x.sharedWith} />
+                    <span className="muted small">{x.file ? `${x.file.name} · ${fmtSize(x.file.size)}` : 'Link'}</span>
+                  </span>
+                  {x.notes && <span className="small">{x.notes}</span>}
+                </span>
+                {x.canEdit && (
+                  <button type="button" className="icon-btn icon-btn-sm" aria-label={`Remove ${x.title}`} onClick={() => remove(x)}>
+                    <Icon name="close" size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+        </div>
+      ))}
+      {d.minutes.length > 0 && (
+        <details>
+          <summary>
+            <strong>Approved minutes ({d.minutes.length})</strong>
+          </summary>
+          <ul className="plain-list">
+            {d.minutes.map((m) => (
+              <li key={m.id}>
+                <button type="button" className="link-btn" onClick={() => app.openMeeting(m.id)}>
+                  {m.title} · {fmtDate(m.date)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {adding && (
+        <DocModal
+          categories={d.categories}
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function DocModal({ categories, onClose, onSaved }) {
+  const app = useApp();
+  const [f, setF] = useState({ title: '', category: 'Policies', url: '', notes: '', committees: [], sharedWith: [] });
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const extra = { title: f.title, category: f.category, notes: f.notes, committees: f.committees.join(','), sharedWith: f.sharedWith.join(',') };
+      if (file) await uploadFiles('/office/docs', [file], { field: 'file', extra });
+      else await api('/office/docs', { method: 'POST', body: { ...f } });
+      app.toast('Document added');
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Add a document" onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Title</span>
+            <input value={f.title} maxLength={160} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={file ? file.name : 'e.g. Church bylaws'} required={!file} />
+          </label>
+          <label className="field">
+            <span>Kind</span>
+            <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {file ? (
+          <div className="row-wrap">
+            <span className="small">
+              {file.name} · {fmtSize(file.size)}
+            </span>
+            <button type="button" className="link-btn small" onClick={() => setFile(null)}>
+              Remove
+            </button>
+          </div>
+        ) : (
+          <>
+            <DropZone onFiles={(fs) => setFile(fs[0])} multiple={false} label="Drop a file here" hint="A PDF, Word file, spreadsheet…" />
+            <label className="field">
+              <span>Or a link</span>
+              <input type="text" inputMode="url" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="https://…" />
+            </label>
+          </>
+        )}
+        <label className="field">
+          <span>Notes (optional)</span>
+          <input value={f.notes} maxLength={1000} onChange={(e) => setF({ ...f, notes: e.target.value })} />
+        </label>
+        <CommitteePicker own value={f.committees} onChange={(v) => setF({ ...f, committees: v })} legend="Who can see it? (nothing ticked: the whole team)" hint="Tick the Church Board for board-only documents." />
+        {f.committees.length > 0 && <CommitteePicker value={f.sharedWith} onChange={(v) => setF({ ...f, sharedWith: v })} exclude={f.committees} legend="Also let these committees see it" />}
+        {error && <div className="error" role="alert">{error}</div>}
+        <button className="btn btn-primary self-start" disabled={busy}>
+          Add
+        </button>
       </form>
     </Modal>
   );

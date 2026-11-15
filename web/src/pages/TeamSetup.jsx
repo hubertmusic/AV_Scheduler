@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react';
 import { api, unsaved } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
+import { COMMITTEE_COLORS } from '../office.jsx';
 import { Positions, useSaver } from './Settings.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
-const KIND_LABEL = { av: 'AV', music: 'Music / praise', other: 'Other' };
+const KIND_LABEL = { av: 'AV', music: 'Music / praise', other: 'Other', office: 'Church office' };
 
 export default function TeamSetup() {
-  const { team } = useApp();
+  const { team, isOffice } = useApp();
+  if (isOffice) return <OfficeSetup />;
   return (
     <div className="stack-lg">
       <div className="page-head">
@@ -159,6 +161,7 @@ export function TeamsAdmin() {
           <span>Kind</span>
           <select value={adding.kind} onChange={(e) => setAdding({ ...adding, kind: e.target.value })}>
             <option value="music">Music / praise</option>
+            <option value="office">Church office (committees, meetings)</option>
             <option value="other">Other</option>
           </select>
         </label>
@@ -229,5 +232,170 @@ function TeamRow({ t, onSaved }) {
       </div>
       {error && <div className="error" role="alert">{error}</div>}
     </div>
+  );
+}
+
+// ---------- Church Admin: committees, rooms and reminders ----------
+function OfficeSetup() {
+  const { team } = useApp();
+  return (
+    <div className="stack-lg">
+      <div className="page-head">
+        <div>
+          <h1>Team setup</h1>
+          <div className="muted">Set up how the {team.name} runs: its committees, rooms and meeting reminders. Pick leaders, committee members and offices on Team &amp; roles.</div>
+        </div>
+      </div>
+      <div className="split">
+        <div className="main-col stack-lg">
+          <Committees />
+        </div>
+        <div className="side-col stack-lg">
+          <TeamInfo />
+          <RoomsCard />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Committees() {
+  const app = useApp();
+  const [list, setList] = useState(null);
+  const [adding, setAdding] = useState({ name: '', color: 'blue' });
+  const { busy, error, run } = useSaver();
+  const load = () => api('/office/committees').then(setList, () => setList([]));
+  useEffect(() => {
+    load();
+  }, []);
+  const people = app.people.filter((p) => p.active);
+  return (
+    <section className="card stack" aria-label="Committees">
+      <div>
+        <h2>Committees</h2>
+        <p className="muted small">Each committee keeps its own meetings, minutes, goals and documents. Tick more than one committee on a meeting for a joint meeting, or pass an item down so another committee can read it. As head leader you see everything.</p>
+      </div>
+      {!list && <p className="muted">Loading…</p>}
+      {list?.map((c) => (
+        <CommitteeRow key={c.key + c.members.length + c.quorum + c.name + c.color} c={c} people={people} onSaved={load} />
+      ))}
+      <form
+        className="row-wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run(() => api('/office/committees', { method: 'POST', body: adding }), `Added the ${adding.name}`).then((ok) => ok && (setAdding({ name: '', color: 'blue' }), load()));
+        }}
+      >
+        <label className="field grow">
+          <span>New committee</span>
+          <input required maxLength={60} value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} placeholder="e.g. Building Committee" />
+        </label>
+        <button className="btn btn-outline self-end" disabled={busy}>
+          <Icon name="plus" /> Add
+        </button>
+      </form>
+      {error && <div className="error" role="alert">{error}</div>}
+    </section>
+  );
+}
+
+function CommitteeRow({ c, people, onSaved }) {
+  const [f, setF] = useState({ name: c.name, color: c.color, quorum: c.quorum, members: c.members.map((m) => m.id) });
+  const { busy, error, run } = useSaver();
+  const dirty = f.name !== c.name || f.color !== c.color || Number(f.quorum) !== c.quorum || f.members.slice().sort().join() !== c.members.map((m) => m.id).sort().join();
+  const toggle = (id) => setF({ ...f, members: f.members.includes(id) ? f.members.filter((x) => x !== id) : [...f.members, id] });
+  return (
+    <div className={`tmpl-row stack-sm oc-edge-${f.color}`}>
+      <div className="row-wrap fields-3">
+        <label className="field">
+          <span>Name</span>
+          <input value={f.name} maxLength={60} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Color</span>
+          <select value={f.color} onChange={(e) => setF({ ...f, color: e.target.value })}>
+            {COMMITTEE_COLORS.map((x) => (
+              <option key={x} value={x}>
+                {x[0].toUpperCase() + x.slice(1)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Quorum (0 = not tracked)</span>
+          <input type="number" min={0} max={200} value={f.quorum} onChange={(e) => setF({ ...f, quorum: e.target.value })} />
+        </label>
+      </div>
+      <fieldset className="field">
+        <legend>Members ({f.members.length})</legend>
+        <div className="check-grid">
+          {people.map((p) => (
+            <label key={p.id} className="check">
+              <input type="checkbox" checked={f.members.includes(p.id)} onChange={() => toggle(p.id)} />
+              <span>{p.name}</span>
+            </label>
+          ))}
+        </div>
+        {people.length === 0 && <p className="muted small">Add people on Team &amp; roles first.</p>}
+      </fieldset>
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="row-wrap spread">
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy || !dirty} onClick={() => run(() => api(`/office/committees/${c.key}`, { method: 'PATCH', body: { ...f, quorum: Number(f.quorum) || 0 } }), 'Committee saved').then((ok) => ok && onSaved())}>
+          {dirty ? 'Save' : 'Saved'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={busy}
+          onClick={() => window.confirm(`Remove the ${c.name}? Its meetings, goals and documents stay, and belong to the whole team.`) && run(() => api(`/office/committees/${c.key}`, { method: 'DELETE' }), 'Committee removed').then((ok) => ok && onSaved())}
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RoomsCard() {
+  const app = useApp();
+  const [f, setF] = useState(() => ({ rooms: (app.office?.rooms || []).map((r) => ({ ...r })), remindMinutes: app.office?.remindMinutes ?? 60, remindDays: app.office?.remindDays ?? 1 }));
+  const { busy, error, run } = useSaver();
+  const setRoom = (i, k, v) => setF({ ...f, rooms: f.rooms.map((r, j) => (j === i ? { ...r, [k]: v } : r)) });
+  return (
+    <section className="card stack" aria-label="Rooms and reminders">
+      <h2>Rooms</h2>
+      <p className="muted small">Rooms people can pick for meetings. Tick the room services and rehearsals use, so bookings there warn about them.</p>
+      {f.rooms.map((r, i) => (
+        <div key={i} className="row-wrap tight">
+          <input aria-label="Room" className="grow" value={r.name} maxLength={60} onChange={(e) => setRoom(i, 'name', e.target.value)} />
+          <label className="check small">
+            <input type="checkbox" checked={!!r.services} onChange={(e) => setRoom(i, 'services', e.target.checked)} />
+            <span>Services use it</span>
+          </label>
+          <button type="button" className="icon-btn icon-btn-sm" aria-label={`Remove ${r.name}`} onClick={() => setF({ ...f, rooms: f.rooms.filter((_, j) => j !== i) })}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+      ))}
+      <button type="button" className="btn btn-ghost btn-sm self-start" onClick={() => setF({ ...f, rooms: [...f.rooms, { name: '', services: false }] })}>
+        <Icon name="plus" size={16} /> Room
+      </button>
+      <h2>Meeting reminders</h2>
+      <p className="muted small">Alerts in people’s calendars for meetings they’re invited to.</p>
+      <div className="row-wrap fields-2">
+        <label className="field">
+          <span>Days before (0 = none)</span>
+          <input type="number" min={0} max={14} value={f.remindDays} onChange={(e) => setF({ ...f, remindDays: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Minutes before (0 = none)</span>
+          <input type="number" min={0} max={1440} value={f.remindMinutes} onChange={(e) => setF({ ...f, remindMinutes: e.target.value })} />
+        </label>
+      </div>
+      {error && <div className="error" role="alert">{error}</div>}
+      <button type="button" className="btn btn-primary self-start" disabled={busy} onClick={() => run(() => api('/office/setup', { method: 'PATCH', body: { rooms: f.rooms.filter((r) => r.name.trim()), remindDays: Number(f.remindDays) || 0, remindMinutes: Number(f.remindMinutes) || 0 } }), 'Saved')}>
+        Save
+      </button>
+    </section>
   );
 }

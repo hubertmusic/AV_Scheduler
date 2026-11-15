@@ -403,6 +403,7 @@ function PlanEditor({ eventId, onChanged }) {
         </div>
         <Details plan={plan} canEdit={canEdit} onSave={patch} />
       </section>
+      {canEdit && plan.officeAnnouncements?.length > 0 && <OfficeAnnouncements plan={plan} onDone={load} />}
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
       <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} onLive={featureOn(app, 'liveShow') && plan.order.length > 0 ? () => setLive(true) : null} />
       <Scriptures plan={plan} canEdit={canDetails} onSave={patch} />
@@ -1144,6 +1145,39 @@ function ScheduleModal({ link, onClose, onSave }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+// Church Admin asked to put a church event in this service's announcements
+function OfficeAnnouncements({ plan, onDone }) {
+  const app = useApp();
+  const act = async (o, action) => {
+    try {
+      await api(`/office/bulletin/${o.id}/${action}`, { method: 'POST' });
+      app.toast(action === 'add' ? 'Added to the announcements' : 'Declined');
+      onDone();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  return (
+    <section className="card card-strong stack" aria-label="Announcements from Church Admin">
+      <h2>Announcements from Church Admin ({plan.officeAnnouncements.length})</h2>
+      {plan.officeAnnouncements.map((o) => (
+        <div key={o.id} className="sub-item stack-sm">
+          <strong>{o.title}</strong>
+          <p className="small">{o.text || `${o.title} — ${fmtDay(o.date)}${o.start ? `, ${fmtTime(o.start)}` : ''}${o.room ? `, ${o.room}` : ''}`}</p>
+          <div className="row-wrap">
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => act(o, 'add')}>
+              Add to announcements
+            </button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => act(o, 'decline')}>
+              Don’t add
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }
 

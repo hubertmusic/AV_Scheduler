@@ -3,7 +3,7 @@ import { api, currentTeam, fridayOf, roleLabel, setTeam, setViewAs, signalSigned
 import { AppCtx, Avatar, WaSheet } from './ui.jsx';
 import { PreviewBanner, PreviewPicker } from './pages/Preview.jsx';
 import SyncDialog from './pages/SyncDialog.jsx';
-import { Invite, Login, Setup } from './pages/Auth.jsx';
+import { Invite, Login, ResetPassword, Setup } from './pages/Auth.jsx';
 import Schedule from './pages/Schedule.jsx';
 import MyShifts from './pages/MyShifts.jsx';
 import Requests from './pages/Requests.jsx';
@@ -21,6 +21,10 @@ import Gear from './pages/Gear.jsx';
 import TeamSetup from './pages/TeamSetup.jsx';
 // The flow-chart library is big, so the Planning tab loads only when opened
 const Planning = lazy(() => import('./pages/Planning.jsx'));
+const OfficePlanning = lazy(() => import('./pages/OfficePlanning.jsx'));
+import OfficeSchedule from './pages/OfficeSchedule.jsx';
+import OfficeOverview from './pages/OfficeOverview.jsx';
+import OfficeMine from './pages/OfficeMine.jsx';
 import { BulletinPage, RundownPage } from './pages/Share.jsx';
 import { WeeklyRedirect } from './pages/WeeklyLinks.jsx';
 import { StagePage } from './pages/Live.jsx';
@@ -56,11 +60,12 @@ function useIdleSignOut(minutes) {
 
 export default function App() {
   const inviteToken = useMemo(() => window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const resetToken = useMemo(() => window.location.pathname.match(/^\/reset\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const guestToken = useMemo(() => window.location.pathname.match(/^\/(?:add|guest)\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
   // Public rundown / bulletin links (no sign-in)
   const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage)\/([A-Za-z0-9_-]+)/), []);
-  const [phase, setPhase] = useState(inviteToken ? 'invite' : 'loading');
+  const [phase, setPhase] = useState(inviteToken ? 'invite' : resetToken ? 'reset' : 'loading');
   const [boot, setBoot] = useState(null);
   const [orgName, setOrgName] = useState('');
   const [notice, setNotice] = useState(''); // why they were signed out
@@ -105,8 +110,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!inviteToken && !guestToken && !shared) load();
-  }, [inviteToken, guestToken, shared, load]);
+    if (!inviteToken && !resetToken && !guestToken && !shared) load();
+  }, [inviteToken, resetToken, guestToken, shared, load]);
 
   // The server ended this session (idle timeout, signed out everywhere, …): back to sign-in.
   useEffect(() => {
@@ -160,6 +165,7 @@ export default function App() {
     return <BulletinPage token={t} />;
   }
   if (phase === 'invite') return <Invite token={inviteToken} onDone={finishInvite} />;
+  if (phase === 'reset') return <ResetPassword token={resetToken} onDone={finishInvite} />;
   if (phase === 'setup') return <Setup onDone={load} />;
   if (phase === 'login')
     return (
@@ -195,18 +201,23 @@ export default function App() {
   );
 }
 
-// av: this tab belongs to the AV team's side (gear, outside groups), hidden on other teams
+// av: this tab belongs to the AV team's side (gear, outside groups), hidden on other teams.
+// side: 'service' tabs are for AV, Praise and other service teams; 'office' tabs for Church Admin.
 const TABS = [
-  { id: 'schedule', label: 'Schedule', show: () => true },
-  { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message },
-  { id: 'mine', label: 'My shifts', show: () => true },
-  { id: 'plans', label: 'Service plans', show: () => true },
-  { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader' },
-  { id: 'gear', label: 'Gear', show: () => true, av: true },
-  { id: 'requests', label: 'Requests', show: (c) => c.approve },
-  { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message, av: true },
+  { id: 'schedule', label: 'Schedule', show: () => true, side: 'service' },
+  { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message, side: 'service' },
+  { id: 'mine', label: 'My shifts', show: () => true, side: 'service' },
+  { id: 'plans', label: 'Service plans', show: () => true, side: 'service' },
+  { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader', side: 'service' },
+  { id: 'gear', label: 'Gear', show: () => true, av: true, side: 'service' },
+  { id: 'requests', label: 'Requests', show: (c) => c.approve, side: 'service' },
+  { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message, av: true, side: 'service' },
+  { id: 'office-schedule', label: 'Schedule', show: () => true, side: 'office' },
+  { id: 'office-overview', label: 'Agenda overview', show: () => true, side: 'office' },
+  { id: 'office-mine', label: 'My calendar', show: () => true, side: 'office' },
+  { id: 'office-plan', label: 'Planning', show: () => true, side: 'office' },
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
-  { id: 'setup', label: 'Team setup', show: (c, me) => me.head && me.role !== 'admin' },
+  { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
   { id: 'resources', label: 'Resources & help', show: () => true },
   { id: 'settings', label: 'Settings', show: (c, me) => me.role === 'admin' },
   { id: 'activity', label: 'Activity', show: (c, me) => me.role === 'admin' },
@@ -221,11 +232,12 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   const { me, settings, positions, people, groups, announcements, academy } = boot;
   const team = boot.team || { key: 'av', name: 'AV Team', kind: 'av' };
   const isAv = team.kind === 'av';
+  const isOffice = team.kind === 'office';
   const can = me.can;
-  const tabs = TABS.filter((t) => t.show(can, me) && (!t.av || isAv));
+  const tabs = TABS.filter((t) => t.show(can, me, team) && (!t.av || isAv) && (!t.side || t.side === (isOffice ? 'office' : 'service')));
   const fromHash = () => {
     const h = window.location.hash.replace('#', '');
-    return tabs.some((t) => t.id === h) ? h : 'schedule';
+    return tabs.some((t) => t.id === h) ? h : tabs[0].id;
   };
   const [tab, setTabState] = useState(fromHash);
   const [toastMsg, setToastMsg] = useState('');
@@ -238,6 +250,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   const [pendingPlans, setPendingPlans] = useState(0);
   const [resFilter, setResFilter] = useState('all');
   const [weekend, setWeekend] = useState(() => fridayOf(todayISO()));
+  const [officeMeeting, setOfficeMeeting] = useState(null); // a meeting to open on Planning
   const timer = useRef(null);
   const isAdmin = me.role === 'admin';
 
@@ -272,6 +285,10 @@ function Shell({ boot, reload, onSignedOut, preview }) {
 
   const refreshPending = useCallback(async () => {
     try {
+      if (isOffice) {
+        if (can.approve) setPending((await api('/office/requests', { background: true })).filter((r) => r.status === 'pending').length);
+        return;
+      }
       if (can.approve) {
         const list = await api('/requests', { background: true });
         setPending(list.filter((r) => r.status === 'pending').length);
@@ -280,7 +297,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
     } catch {
       /* badges are best-effort */
     }
-  }, [can.approve, can.plans]);
+  }, [can.approve, can.plans, isOffice]);
 
   useEffect(() => {
     refreshPending();
@@ -304,6 +321,16 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       everyone: boot.everyone || people,
       team,
       isAv,
+      isOffice,
+      serviceSide: boot.serviceSide !== false,
+      committees: boot.committees || [],
+      office: boot.office || null,
+      officeMeeting,
+      openMeeting: (id) => {
+        setOfficeMeeting(id);
+        setTab('office-plan');
+      },
+      clearMeeting: () => setOfficeMeeting(null),
       teams: boot.teams || [],
       allTeams: boot.allTeams || [],
       teamName: (k) => teamByKey[k]?.name || 'AV Team',
@@ -327,7 +354,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       noteView,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boot, toast, resFilter, refreshPending, weekend]);
+  }, [boot, toast, resFilter, refreshPending, weekend, officeMeeting]);
 
   const switchTeam = (key) => {
     if (key === team.key) return;
@@ -394,6 +421,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
           <button key={t.id} type="button" className={`tab ${tab === t.id ? 'tab-on' : ''}`} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
             {t.label}
             {t.id === 'requests' && pending > 0 && <span className="badge">{pending}</span>}
+            {t.id === 'office-plan' && pending > 0 && <span className="badge" title="Event requests waiting">{pending}</span>}
             {t.id === 'plans' && pendingPlans > 0 && <span className="badge" title="Guest uploads waiting for approval">{pendingPlans}</span>}
           </button>
         ))}
@@ -417,6 +445,14 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'setup' && <TeamSetup />}
         {tab === 'check' && <WeekendCheck />}
         {tab === 'activity' && <Activity />}
+        {tab === 'office-schedule' && <OfficeSchedule />}
+        {tab === 'office-overview' && <OfficeOverview />}
+        {tab === 'office-mine' && <OfficeMine />}
+        {tab === 'office-plan' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <OfficePlanning />
+          </Suspense>
+        )}
       </main>
       {wa && <WaSheet {...wa} groupLink={wa.groupLink ?? settings.groupLink} onClose={() => setWa(null)} />}
       {account && <Account onClose={() => setAccount(false)} />}

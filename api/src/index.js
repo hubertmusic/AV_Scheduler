@@ -21,6 +21,9 @@ import { templatesRouter } from './routes/templates.js';
 import { gearRouter } from './routes/gear.js';
 import { checklistsRouter, debriefRouter, issuesRouter, signoffsRouter } from './routes/extras.js';
 import { plannerRouter } from './routes/planner.js';
+import { officeRouter } from './routes/office.js';
+import { ensureOffice, onServiceTeam, startOfficeJob } from './lib/office.js';
+import { wrap } from './lib/util.js';
 import { libraryRouter } from './routes/library.js';
 import { academyRouter } from './routes/academy.js';
 import { weekendRouter } from './routes/weekend.js';
@@ -48,6 +51,13 @@ app.use('/api/academy', academyRouter); // checks the session itself and redirec
 
 app.use('/api', requireAuth);
 app.use('/api', changeLogger);
+// Services, plans, songs and line-ups are for people on a team that serves on them (AV, Praise…).
+// People only on Church Admin don't see them.
+const serviceSide = wrap(async (req, res, next) => {
+  if (await onServiceTeam(req.user)) return next();
+  res.status(403).json({ error: 'That’s part of the AV and Praise side.' });
+});
+for (const p of ['/api/events', '/api/requests', '/api/plans', '/api/songs', '/api/media', '/api/guest-links', '/api/submissions', '/api/weekend', '/api/standing-links', '/api/order-templates', '/api/checklists', '/api/issues', '/api/debrief', '/api/signoffs', '/api/planner']) app.use(p, serviceSide);
 app.use('/api/bootstrap', bootstrapRouter);
 app.use('/api/account', accountRouter);
 app.use('/api/me', meRouter);
@@ -77,6 +87,7 @@ app.use('/api/issues', issuesRouter);
 app.use('/api/debrief', debriefRouter);
 app.use('/api/signoffs', signoffsRouter);
 app.use('/api/planner', plannerRouter);
+app.use('/api/office', officeRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
@@ -95,6 +106,7 @@ async function runMigrations() {
   const s = await Settings.findOne({ key: 'main' });
   if (!s) return; // first run: setup creates settings with today's defaults
   await ensureTeams(); // AV and Praise teams; everyone so far joins AV
+  await ensureOffice(); // the Church Admin team and its first committees
   if (!s.migrations.includes('leaders-edit-plans')) {
     // Team leaders can edit service plans unless the admin turns it off for someone.
     const r = await User.updateMany({ role: 'leader' }, { $set: { 'perms.plans': true } });
@@ -120,6 +132,7 @@ async function start() {
   app.listen(config.port, () => console.log(`Crew Call API listening on :${config.port}`));
   startReminderJob();
   startArchiveJob();
+  startOfficeJob();
 }
 
 start().catch((e) => {
