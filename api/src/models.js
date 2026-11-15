@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 
-export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
+export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans', 'vault'];
 export const EVENT_KINDS = ['service', 'soundcheck', 'rehearsal'];
 // What a team does decides which parts of Crew Call it sees (gear, media, outside groups… are AV's)
 export const TEAM_KINDS = ['av', 'music', 'other', 'office'];
@@ -29,6 +29,7 @@ const userSchema = new Schema(
       people: { type: Boolean, default: false },
       groups: { type: Boolean, default: false },
       plans: { type: Boolean, default: false },
+      vault: { type: Boolean, default: false },
     },
     positions: { type: [String], default: [] },
     trainee: { type: [String], default: [] }, // positions they're learning (can shadow)
@@ -67,6 +68,7 @@ const userSchema = new Schema(
               people: { type: Boolean, default: false },
               groups: { type: Boolean, default: false },
               plans: { type: Boolean, default: false },
+              vault: { type: Boolean, default: false }, // open and keep the team's vault (head leaders always can)
             },
             maxPerMonth: { type: Number, default: 0 }, // 0 = no limit
             // Office teams: the committees they sit on, and offices they hold (Secretary of the
@@ -858,13 +860,16 @@ const vaultLogSchema = new Schema(
 );
 export const VaultLog = model('VaultLog', vaultLogSchema);
 
-// Personal notes: only the person who wrote them can read them (the body is encrypted)
+// Personal notes: private to the person who wrote them unless they share one with a whole team
+// they're on, or with chosen people (who can read it, not change it). The body is encrypted.
 const noteSchema = new Schema(
   {
     user: { ...ref('User'), required: true, index: true },
     title: { type: String, default: '', trim: true },
     body: { type: String, default: '' }, // encrypted
     pinned: { type: Boolean, default: false },
+    shareTeams: { type: [String], default: [], index: true }, // Team.key: everyone on that team can read it
+    shareUsers: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [], index: true },
   },
   { timestamps: true }
 );

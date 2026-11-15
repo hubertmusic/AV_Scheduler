@@ -15,6 +15,7 @@ import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js'
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
 import { isOfficeTeam, officePerms, onServiceTeam, rosterFor, sees as seesOffice, seesRoster } from '../lib/office.js';
 import { teamsShownTo } from '../lib/teams.js';
+import { vaultFor } from './vault.js';
 import { forgetPositions, isAvTeam, positionsList, positionTeams, requireTeamHead, teamsList, teamsOf, teamView } from '../lib/teams.js';
 
 const settingsView = (s) => ({
@@ -79,6 +80,8 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     // On Church Admin, what someone can do with its items comes from their own place on the team
     officeAccess: office ? { member: !!(req.user.teams || []).find((m) => m.team === team), can: officePerms(req.user, team) } : null,
     committees: office ? (await Committee.find({ team }).sort({ order: 1, name: 1 }).lean()).map((c) => ({ key: c.key, name: c.name, color: c.color, quorum: c.quorum })) : [],
+    // Whether they see this team's vault: they keep it ({ keeper }), or a keeper gave them time ({ until })
+    vault: req.previewing ? null : await vaultFor(req.user, team),
     office: officeSetup ? { rooms: officeSetup.rooms || [], remindMinutes: officeSetup.remindMinutes ?? 60, remindDays: officeSetup.remindDays ?? 1 } : null,
   });
 }));

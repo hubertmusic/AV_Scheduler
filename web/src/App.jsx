@@ -217,7 +217,7 @@ const TABS = [
   { id: 'office-overview', label: 'Agenda overview', show: () => true, side: 'office' },
   { id: 'office-mine', label: 'My calendar', show: () => true, side: 'office' },
   { id: 'office-plan', label: 'Planning', show: () => true, side: 'office' },
-  { id: 'vault', label: 'Notes & vault', show: (c, me) => !me.previewing },
+  { id: 'vault', label: 'Notes', show: (c, me) => !me.previewing }, // “Notes & vault” for people who see the vault
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
   { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
   { id: 'resources', label: 'Resources & help', show: () => true },
@@ -356,6 +356,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       serviceSide: boot.serviceSide !== false,
       committees: boot.committees || [],
       office: boot.office || null,
+      vault: boot.vault || null, // { keeper } or { until } when they see this team's vault
       officeCan: boot.officeAccess?.can || can,
       officeMember: boot.officeAccess ? boot.officeAccess.member : true,
       seesRoster: boot.seesRoster !== false,
@@ -459,7 +460,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       <nav className="tabs" aria-label="Sections">
         {tabs.map((t) => (
           <button key={t.id} type="button" className={`tab ${tab === t.id ? 'tab-on' : ''}`} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
-            {t.label}
+            {t.id === 'vault' && boot.vault ? 'Notes & vault' : t.label}
             {t.id === 'requests' && pending > 0 && <span className="badge">{pending}</span>}
             {t.id === 'office-plan' && pending > 0 && <span className="badge" title="Event requests waiting">{pending}</span>}
             {t.id === 'plans' && pendingPlans > 0 && <span className="badge" title="Guest uploads waiting for approval">{pendingPlans}</span>}

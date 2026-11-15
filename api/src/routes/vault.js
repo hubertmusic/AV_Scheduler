@@ -1,26 +1,41 @@
-// Each team's vault: stream keys, ProPresenter licenses, accounts, Wi-Fi… Its leaders see and
-// manage it, and can give crew access to all of it or chosen entries, for 30 minutes up to
-// "until taken back". Secrets are encrypted in the database, only shown when someone taps
-// Show, and every look is in the vault's log for the leaders. Also: everyone's private notes.
+// Each team's vault: stream keys, ProPresenter licenses, accounts, Wi-Fi… The head leader keeps it,
+// with the leaders the admin or head leader give the Vault privilege. They can give anyone else on
+// the team access to all of it or chosen entries, for 30 minutes up to "until taken back". Others
+// don't see it at all. Secrets are encrypted in the database, only shown when someone taps Show,
+// and every look is in the vault's log. Also: everyone's notes, private unless they share one.
 import { Router } from 'express';
 import { Note, User, VAULT_CATEGORIES, VaultEntry, VaultGrant, VaultLog } from '../models.js';
 import { bad, forbidden, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, wrap } from '../lib/util.js';
+import { teamsList } from '../lib/teams.js';
 import { open, seal, vaultBroken, vaultKeyFromEnv } from '../lib/secrets.js';
 
 export const vaultRouter = Router();
 export const notesRouter = Router();
 
-// The team's own leaders (head or leader on this team). Being the Crew Call admin isn't enough:
-// the admin needs a leader's place on the team, like everyone else.
-const isLeader = (user, team) => {
+// Who keeps a team's vault: its head leader, and leaders with the Vault privilege (given by the
+// admin or the head leader on Team & roles). Being the Crew Call admin isn't enough on its own:
+// the admin needs that place on the team too, so the Church Admin vault stays theirs.
+export const keepsVault = (user, team) => {
   const m = membershipOf(user, team);
-  return !!m && (m.head || m.role === 'leader');
+  return !!m && (m.head || (m.role === 'leader' && !!m.perms?.vault));
 };
+const isLeader = keepsVault;
+// For the tab: whether this person sees a vault on this team at all
+export async function vaultFor(user, team) {
+  if (keepsVault(user, team)) return { keeper: true };
+  if (!membershipOf(user, team)) return null;
+  const now = new Date();
+  const g = await VaultGrant.findOne({ team, user: user._id, $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }] }, { expiresAt: 1 }).lean();
+  return g ? { keeper: false, until: g.expiresAt } : null;
+}
 const MAX_GRANT_DAYS = 365;
 
 vaultRouter.use((req, res, next) => {
   if (req.previewing) return next(forbidden('The vault isn’t shown in a preview.'));
-  if (!membershipOf(req.user, req.team.key)) return next(forbidden(`You aren’t on the ${req.team.name}, so its vault isn’t yours to open.`));
+  if (!membershipOf(req.user, req.team.key)) {
+    if (req.method === 'GET' && req.path === '/') return res.json({ team: req.team.name, leader: false, access: null, entries: [] });
+    return next(forbidden(`You aren’t on the ${req.team.name}, so its vault isn’t yours to open.`));
+  }
   if (req.method !== 'GET') res.locals.activity = `Worked in the ${req.team.name} vault`;
   next();
 });
@@ -44,12 +59,9 @@ const entryView = (e) => ({ id: String(e._id), title: e.title, category: e.categ
 // GET /api/vault — what this person can see of the team's vault
 vaultRouter.get('/', wrap(async (req, res) => {
   const a = await access(req);
+  // Nothing at all for people who don't keep it and weren't given time
+  if (!a.leader && !a.grant) return res.json({ team: req.team.name, leader: false, access: null, entries: [] });
   const base = { team: req.team.name, leader: a.leader, broken: vaultBroken(), keyFromEnv: vaultKeyFromEnv(), categories: VAULT_CATEGORIES };
-  if (!a.leader && !a.grant) {
-    const leaders = (await User.find({ active: true, 'teams.team': req.team.key }, { name: 1, phone: 1, teams: 1 }).lean()).filter((u) => isLeader(u, req.team.key));
-    const asked = await VaultLog.exists({ team: req.team.key, user: req.user._id, action: 'asked', createdAt: { $gt: new Date(Date.now() - 3 * 24 * 3600 * 1000) } });
-    return res.json({ ...base, access: null, entries: [], leaders: leaders.map((u) => ({ id: String(u._id), name: u.name, phone: u.phone })), asked: !!asked });
-  }
   const entries = (await VaultEntry.find({ team: req.team.key }).sort({ category: 1, title: 1 }).lean()).filter(a.allows);
   const out = { ...base, access: a.leader ? { leader: true } : { all: a.grant.all, until: a.grant.expiresAt }, entries: entries.map(entryView) };
   if (a.leader) {
@@ -61,11 +73,10 @@ vaultRouter.get('/', wrap(async (req, res) => {
     const titles = Object.fromEntries(entries.map((e) => [String(e._id), e.title]));
     out.grants = grants.filter((g) => g.user).map((g) => ({ id: String(g._id), user: { id: String(g.user._id), name: g.user.name }, all: g.all, entries: (g.entries || []).map((x) => ({ id: String(x), title: titles[String(x)] || '(removed)' })), until: g.expiresAt, by: g.grantedBy?.name || '', at: g.createdAt }));
     out.log = logs.map((l) => ({ id: String(l._id), who: l.user?.name || '', action: l.action, entry: l.entryTitle, detail: l.detail, at: l.createdAt }));
-    const granted = new Set(out.grants.map((g) => g.user.id));
-    // Who can be given access: everyone on the team who isn't already a leader
+    // Who can be given time: everyone on the team who doesn't already keep the vault
     const team = await User.find({ active: true, 'teams.team': req.team.key }, { name: 1, teams: 1 }).sort({ name: 1 }).lean();
     out.members = team.filter((u) => membershipOf(u, req.team.key) && !isLeader(u, req.team.key)).map((u) => ({ id: String(u._id), name: u.name }));
-    out.asks = logs.filter((l) => l.action === 'asked' && l.user && !granted.has(String(l.user._id)) && Date.now() - new Date(l.createdAt) < 3 * 24 * 3600 * 1000).map((l) => ({ user: { id: String(l.user._id), name: l.user.name }, note: l.detail, at: l.createdAt }));
+    out.keepers = team.filter((u) => isLeader(u, req.team.key)).map((u) => ({ id: String(u._id), name: u.name, head: !!membershipOf(u, req.team.key)?.head }));
   }
   res.json(out);
 }));
@@ -76,13 +87,13 @@ async function loadEntry(req) {
   if (!e) throw notFound('That entry was removed.');
   return e;
 }
-const requireLeader = (req, res, next) => (isLeader(req.user, req.team.key) ? next() : next(forbidden('Only this team’s leaders can do that.')));
+const requireLeader = (req, res, next) => (isLeader(req.user, req.team.key) ? next() : next(forbidden('Only the head leader and leaders with the Vault privilege can do that.')));
 
 // POST /api/vault/:id/reveal — the secret itself (logged)
 vaultRouter.post('/:id/reveal', wrap(async (req, res) => {
   const e = await loadEntry(req);
   const a = await access(req);
-  if (!a.allows(e)) throw forbidden(a.grant || a.leader ? 'That entry is for leaders only.' : 'Your access to the vault has ended. Ask a leader for more time.');
+  if (!a.allows(e)) throw forbidden(a.grant || a.leader ? 'That entry is for leaders only.' : 'Your time in the vault has ended. Ask a leader for more.');
   const out = { username: open(e.username), secret: open(e.secret), notes: open(e.notes) };
   await log(req, 'viewed', e);
   res.json(out);
@@ -135,7 +146,7 @@ vaultRouter.post('/grants', requireLeader, wrap(async (req, res) => {
   if (!isId(b.userId)) throw bad('Pick a person.');
   const user = await User.findById(b.userId);
   if (!user || !user.active || !membershipOf(user, req.team.key)) throw bad(`They aren’t on the ${req.team.name}.`);
-  if (isLeader(user, req.team.key)) throw bad('Leaders already have the whole vault.');
+  if (isLeader(user, req.team.key)) throw bad(`${user.name} already keeps the vault.`);
   let expiresAt = null;
   if (!b.unlimited) {
     if (b.until) expiresAt = new Date(b.until);
@@ -160,34 +171,67 @@ vaultRouter.delete('/grants/:id', requireLeader, wrap(async (req, res) => {
   res.status(204).end();
 }));
 
-// POST /api/vault/ask { note } — crew ask the leaders for access
-vaultRouter.post('/ask', wrap(async (req, res) => {
-  if (!membershipOf(req.user, req.team.key)) throw forbidden();
-  if (isLeader(req.user, req.team.key)) throw bad('You already have the whole vault.');
-  await VaultLog.create({ team: req.team.key, user: req.user._id, action: 'asked', detail: str(req.body?.note, 200) });
-  res.json({ ok: true });
-}));
-
-// ---------- personal notes (only the person who wrote them) ----------
+// ---------- notes (private unless the writer shares one) ----------
 notesRouter.use((req, res, next) => {
   if (req.previewing) return next(forbidden('Notes are private, so they aren’t shown in a preview.'));
   if (req.method !== 'GET') res.locals.activity = 'Updated their notes';
   next();
 });
-const noteView = (n, body) => ({ id: String(n._id), title: n.title, body, pinned: n.pinned, updatedAt: n.updatedAt });
+const myTeamKeys = (user) => (user.teams || []).map((m) => m.team);
+const MAX_SHARE_PEOPLE = 100;
+const noteView = (n) => ({ id: String(n._id), title: n.title, body: open(n.body), pinned: n.pinned, updatedAt: n.updatedAt });
+const myNoteView = (n) => ({ ...noteView(n), shareTeams: n.shareTeams || [], shareUsers: (n.shareUsers || []).filter((u) => u?.name).map((u) => ({ id: String(u._id), name: u.name })) });
+
+// GET /api/notes — { mine, shared, teams }: their own notes, notes others shared with them, and
+// the teams they can share with
 notesRouter.get('/', wrap(async (req, res) => {
-  const list = await Note.find({ user: req.user._id }).sort({ pinned: -1, updatedAt: -1 }).limit(500).lean();
-  res.json(list.map((n) => noteView(n, open(n.body))));
+  const me = req.user._id;
+  const keys = myTeamKeys(req.user);
+  const [mine, shared, teams] = await Promise.all([
+    Note.find({ user: me }).sort({ pinned: -1, updatedAt: -1 }).limit(500).populate('shareUsers', 'name').lean(),
+    Note.find({ user: { $ne: me }, $or: [{ shareUsers: me }, ...(keys.length ? [{ shareTeams: { $in: keys } }] : [])] }).sort({ updatedAt: -1 }).limit(300).populate('user', 'name active').lean(),
+    teamsList(),
+  ]);
+  const teamName = (k) => teams.find((t) => t.key === k)?.name || k;
+  res.json({
+    mine: mine.map(myNoteView),
+    shared: shared
+      .filter((n) => n.user && n.user.active !== false)
+      .map((n) => {
+        const viaTeams = (n.shareTeams || []).filter((k) => keys.includes(k)).map(teamName);
+        const direct = (n.shareUsers || []).some((u) => String(u) === String(me));
+        return { ...noteView(n), from: n.user.name, via: [...(direct ? ['you'] : []), ...viaTeams] };
+      }),
+    teams: keys.filter((k) => teams.some((t) => t.key === k)).map((k) => ({ key: k, name: teamName(k) })),
+  });
 }));
+
+// Sharing: only with teams the writer is on, and with real people (not themselves)
+async function readShare(req, b) {
+  const out = {};
+  if (b.shareTeams !== undefined) {
+    const keys = myTeamKeys(req.user);
+    out.shareTeams = [...new Set((Array.isArray(b.shareTeams) ? b.shareTeams : []).map(String))].filter((k) => keys.includes(k));
+  }
+  if (b.shareUsers !== undefined) {
+    const ids = [...new Set((Array.isArray(b.shareUsers) ? b.shareUsers : []).map(String))].filter((id) => isId(id) && id !== String(req.user._id));
+    if (ids.length > MAX_SHARE_PEOPLE) throw bad(`Share with up to ${MAX_SHARE_PEOPLE} people, or with a whole team.`);
+    out.shareUsers = (await User.find({ _id: { $in: ids }, active: true }, { _id: 1 }).lean()).map((u) => u._id);
+  }
+  return out;
+}
+const fresh = async (n) => myNoteView(await Note.findById(n._id).populate('shareUsers', 'name').lean());
+
 notesRouter.post('/', wrap(async (req, res) => {
   if ((await Note.countDocuments({ user: req.user._id })) >= 500) throw bad('You have 500 notes. Remove some first.');
-  const n = await Note.create({ user: req.user._id, title: str(req.body?.title, 160), body: seal(String(req.body?.body ?? '').slice(0, 50000)), pinned: !!req.body?.pinned });
-  res.status(201).json(noteView(n, open(n.body)));
+  const b = req.body || {};
+  const n = await Note.create({ user: req.user._id, title: str(b.title, 160), body: seal(String(b.body ?? '').slice(0, 50000)), pinned: !!b.pinned, ...(await readShare(req, b)) });
+  res.status(201).json(await fresh(n));
 }));
 async function myNote(req) {
   if (!isId(req.params.id)) throw notFound();
   const n = await Note.findOne({ _id: req.params.id, user: req.user._id });
-  if (!n) throw notFound();
+  if (!n) throw notFound('Only the person who wrote a note can change it.');
   return n;
 }
 notesRouter.patch('/:id', wrap(async (req, res) => {
@@ -196,8 +240,9 @@ notesRouter.patch('/:id', wrap(async (req, res) => {
   if (b.title !== undefined) n.title = str(b.title, 160);
   if (b.body !== undefined) n.body = seal(String(b.body ?? '').slice(0, 50000));
   if (b.pinned !== undefined) n.pinned = !!b.pinned;
+  Object.assign(n, await readShare(req, b));
   await n.save();
-  res.json(noteView(n, open(n.body)));
+  res.json(await fresh(n));
 }));
 notesRouter.delete('/:id', wrap(async (req, res) => {
   const n = await myNote(req);

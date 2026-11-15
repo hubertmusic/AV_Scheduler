@@ -39,7 +39,7 @@ export function sees(user, item) {
 }
 // Privileges on an office team from the person's own membership (head: all; leader: theirs; crew:
 // none). The admin gets no extra powers over the team's items this way.
-const PERM_KEYS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans'];
+const PERM_KEYS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans', 'vault'];
 export function officePerms(user, team) {
   const m = membershipOf(user, team);
   const on = (f) => Object.fromEntries(PERM_KEYS.map((p) => [p, f(p)]));

@@ -998,3 +998,9 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 @media (max-width: 560px) { .nv-log > li { grid-template-columns: 1fr; gap: 0; } }
 .nv-locked { max-width: 560px; }
 .nv-lock { font-size: 28px; }
+.nv-list-h { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 10px; }
+.nv-share-line { margin: -4px 0 0; }
+.nv-shared { color: var(--blue-ink); }
+.nv-read-title { font-size: 20px; }
+.nv-read-body { font-size: 15px; line-height: 1.5; }
+.fieldset .nv-search { flex: none; max-width: none; width: 100%; margin-bottom: 4px; }
