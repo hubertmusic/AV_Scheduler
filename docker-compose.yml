@@ -22,6 +22,7 @@ services:
     environment:
       MONGO_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/crewcall?authSource=admin
       JWT_SECRET: ${JWT_SECRET}
+      VAULT_KEY: ${VAULT_KEY:-}
       PUBLIC_URL: ${PUBLIC_URL}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       UPLOAD_DIR: /data/uploads

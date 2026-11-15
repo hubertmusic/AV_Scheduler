@@ -22,6 +22,7 @@ import TeamSetup from './pages/TeamSetup.jsx';
 // The flow-chart library is big, so the Planning tab loads only when opened
 const Planning = lazy(() => import('./pages/Planning.jsx'));
 const OfficePlanning = lazy(() => import('./pages/OfficePlanning.jsx'));
+const Vault = lazy(() => import('./pages/Vault.jsx'));
 import OfficeSchedule from './pages/OfficeSchedule.jsx';
 import OfficeOverview from './pages/OfficeOverview.jsx';
 import OfficeMine from './pages/OfficeMine.jsx';
@@ -216,6 +217,7 @@ const TABS = [
   { id: 'office-overview', label: 'Agenda overview', show: () => true, side: 'office' },
   { id: 'office-mine', label: 'My calendar', show: () => true, side: 'office' },
   { id: 'office-plan', label: 'Planning', show: () => true, side: 'office' },
+  { id: 'vault', label: 'Notes & vault', show: (c, me) => !me.previewing },
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
   { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
   { id: 'resources', label: 'Resources & help', show: () => true },
@@ -483,6 +485,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'setup' && <TeamSetup />}
         {tab === 'check' && <WeekendCheck />}
         {tab === 'activity' && <Activity />}
+        {tab === 'vault' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Vault />
+          </Suspense>
+        )}
         {tab === 'office-schedule' && <OfficeSchedule />}
         {tab === 'office-overview' && <OfficeOverview />}
         {tab === 'office-mine' && <OfficeMine />}

@@ -10,6 +10,11 @@ What it does:
   - **AV-only parts:** gear, outside groups, the media library, sound checks, the input list, ProPresenter `.pro` files, livestream details, archiving a weekend, and burnout watch. A shared service's name, day and times are set by the AV side; other teams choose which of their positions it needs.
   - **Rehearsals** belong to a team and show to every team on the schedule and in calendars.
   - **Who's serving.** Every service has a line-up of every team, with call and WhatsApp buttons for each person and each team's head leader, and the team's WhatsApp group. It's on the Schedule (👥), My shifts and the service plan. The rundown and run sheet list every team's crew, by team.
+- **Notes & vault.** A tab on every team, AV, Praise and Church Admin alike.
+  - **My notes** are private to each person and the same on every team's side. Nobody else, not even the admin, can read them. They save as you type, can be pinned to the top, and are searchable.
+  - **The team vault** keeps the team's passwords and keys: stream keys, ProPresenter licenses, logins, Wi-Fi. Each team has its own, so the Church Admin vault is theirs alone. The team's head leader and leaders see and change it; being the Crew Call admin isn't enough without a leader's place on that team.
+  - **Crew access is given, and runs out.** A leader gives a crew member access for 30 minutes, 1 hour, 4 hours, 1 day, 2 days or 1 week, to a date and time they pick, or with no end. Access covers the whole vault or only chosen entries, and leaders can take it back at any time. Entries marked **Leaders only** are never shared. Crew without access see an **Ask for access** button and the leaders' phone numbers.
+  - **Kept out of sight.** Passwords appear only when someone taps **Show** or **Copy**, and hide again after 45 seconds. Every look, change and grant is in the vault log, which leaders see. Vault entries and notes are stored scrambled (AES-256-GCM) with the `VAULT_KEY` from `.env`, and they never appear in "View as" or the Activity log.
 - **Church Admin.** A team for the church office, board and committees, with its own tabs: **Schedule** (a month, week or list calendar), **Agenda overview**, **My calendar**, **Planning**, **Team & roles**, **Team setup** and **Resources & help**. They don't see services, service plans, line-ups, gear, requests, groups or Booth Crew Academy unless they're also on the AV or Praise team.
   - **Confidential, even from the admin.** What anyone sees on Church Admin comes only from their own place on it. The Crew Call admin manages its people, roles, committees, rooms and event requests, but sees only items shared with every team — or a committee's items once its leaders ask the admin to join and put them on that committee. The admin can't add themselves to Church Admin or to a committee, Church Admin isn't shown in the admin's "View as" preview, and the Activity log never names a confidential item.
   - **Joining is by request.** After the admin picks the head leader, only Church Admin's own leaders add people. Someone who already has a login (for example the pastor on the AV team) gets a request — on a banner when they sign in, and by email — and Church Admin appears on their profile only once they accept. Leaders see who hasn't answered and can take a request back.
@@ -136,7 +141,7 @@ What it does:
 
 ```bash
 cp .env.example .env
-# edit .env: set MONGO_PASSWORD and JWT_SECRET (openssl rand -hex 32), and PUBLIC_URL
+# edit .env: set MONGO_PASSWORD, JWT_SECRET and VAULT_KEY (openssl rand -hex 32 for each), and PUBLIC_URL
 docker compose up -d --build
 ```
 
@@ -296,7 +301,7 @@ $C exec -T mongo sh -c 'mongorestore --drop --archive --gzip -u "$MONGO_INITDB_R
 $C exec -T api tar xzf - -C /data/uploads < /mnt/crewcall-backups/crewcall-uploads-YYYY-MM-DD-HHMM.tgz
 ```
 
-If `.env` is lost or changed, copy back the matching `crewcall-env-*.txt`: the database only accepts the password it was first set up with.
+If `.env` is lost or changed, copy back the matching `crewcall-env-*.txt`: the database only accepts the password it was first set up with, and the vault and notes can only be read with the `VAULT_KEY` they were saved with.
 
 ## 9. Updating
 
@@ -436,4 +441,5 @@ web/src/
 - **Uploads.** Files are stored under random names and served with `nosniff`. Only images, video, audio and PDFs open in the browser; everything else (HTML, SVG, scripts) downloads instead of running.
 - **Rundown and bulletin links** are long random tokens, rate-limited, kept out of search engines, and replaceable. The rundown shows names but never phone numbers or emails.
 - **Quick links.** Each link is a long random token tied to one service, plus a 6-digit code (8 wrong tries lock it; tries are also rate-limited). The code unlocks a cookie that only works for that one link, and a new code signs out anyone using the old one. Links stop working at the end of the service day (or an hour after a later deadline), are rate-limited, and are capped at 40 files and 60 notes or texts. Late uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
+- **Vault and notes.** Vault entries (username, password, notes) and personal notes are encrypted with AES-256-GCM before they reach the database, using `VAULT_KEY` from `.env` (or, if it isn't set, a key made from `JWT_SECRET`). Someone with only the database or a database backup can't read them; someone with the server's `.env` as well can. Adding `VAULT_KEY` later moves everything to the new key on the next start. If the key changes after that, the vault and notes stay locked (nothing is lost) until the old key is back. Passwords are sent to the browser only when someone taps Show or Copy, and each time is logged.
 - **Sessions.** Each sign-in carries a per-person session version, so "sign out everywhere" and admin sign-outs take effect on the next request from every device.
