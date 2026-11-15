@@ -82,6 +82,11 @@ const userSchema = new Schema(
       ],
       default: [],
     },
+    // Asked to join a team by its leaders (Church Admin): it isn't on their profile until they accept
+    teamInvites: {
+      type: [new Schema({ team: { type: String, required: true }, from: { type: Schema.Types.ObjectId, ref: 'User' }, at: { type: Date, default: Date.now } }, { _id: false })],
+      default: [],
+    },
     availabilityUpdatedAt: Date,
     lastLoginAt: Date,
     lastSeenAt: Date,

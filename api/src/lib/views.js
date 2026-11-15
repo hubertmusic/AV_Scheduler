@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { can, membershipOf, roleIn } from './util.js';
+import { teamsShownTo } from './teams.js';
 
 // What everyone may see about a person, through the team the viewer is working in: their role,
 // title, positions and monthly limit on that team. Phones of leaders and the admin are visible to
@@ -21,7 +22,7 @@ export function personView(u, viewer) {
     onTeam: !!role,
     head: u.role === 'admin' || !!m?.head,
     leaderTitle: m?.title || (u.role === 'admin' ? u.leaderTitle : ''),
-    teams: (u.teams || []).map((t) => t.team),
+    teams: teamsShownTo(viewer, u),
     committees: m?.committees || [],
     offices: (m?.offices || []).map((o) => ({ committee: o.committee, role: o.role, termEnds: o.termEnds })),
     positions: lens(u.positions),

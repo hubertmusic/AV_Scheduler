@@ -19,7 +19,7 @@ const STATUS = { 'not-started': 'Not started', 'on-track': 'On track', behind: '
 
 export default function OfficePlanning() {
   const app = useApp();
-  const views = VIEWS.filter((v) => (!v.perm || app.can[v.perm]) && (!v.leader || ['admin', 'leader'].includes(app.me.role)));
+  const views = VIEWS.filter((v) => (!v.perm || app.officeCan[v.perm] || (v.perm === 'approve' && app.me.role === 'admin')) && (!v.leader || (app.officeMember && ['admin', 'leader'].includes(app.me.role))));
   const [view, setView] = useState(app.officeMeeting ? 'meetings' : 'meetings');
   const v = views.find((x) => x.id === view) || views[0];
   return (
@@ -583,7 +583,7 @@ function Actions() {
     load();
   }, [load]);
   const shown = (list || []).filter((a) => (show === 'open' ? !a.done : show === 'mine' ? a.owner?.id === app.me.id && !a.done : a.done));
-  const canAdd = app.can.edit || app.can.plans;
+  const canAdd = app.officeCan.edit || app.officeCan.plans;
   return (
     <div className="stack-lg">
       <div className="seg" role="group" aria-label="Show">
@@ -669,13 +669,13 @@ function Goals() {
   };
   return (
     <div className="stack-lg">
-      {app.can.plans && (
+      {app.officeCan.plans && (
         <button type="button" className="btn btn-primary self-start" onClick={() => setEditing({})}>
           <Icon name="plus" /> New goal
         </button>
       )}
       {!list && <div className="loading-inline">Loading…</div>}
-      {list && list.length === 0 && <Empty>No goals yet{app.can.plans ? '. Add one, like “Replace the sanctuary roof by 2028”.' : '.'}</Empty>}
+      {list && list.length === 0 && <Empty>No goals yet{app.officeCan.plans ? '. Add one, like “Replace the sanctuary roof by 2028”.' : '.'}</Empty>}
       {list?.map((g) => (
         <section key={g.id} className="card stack-sm" aria-label={g.title}>
           <div className="row-wrap spread">

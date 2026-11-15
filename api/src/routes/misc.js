@@ -13,7 +13,8 @@ import { mailerReady, sendMail } from '../lib/mailer.js';
 import { FEATURES } from '../lib/features.js';
 import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
-import { isOfficeTeam, onServiceTeam, sees as seesOffice } from '../lib/office.js';
+import { isOfficeTeam, officePerms, onServiceTeam, rosterFor, sees as seesOffice, seesRoster } from '../lib/office.js';
+import { teamsShownTo } from '../lib/teams.js';
 import { forgetPositions, isAvTeam, positionsList, positionTeams, requireTeamHead, teamsList, teamsOf, teamView } from '../lib/teams.js';
 
 const settingsView = (s) => ({
@@ -64,17 +65,32 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     allTeams: allTeams.map(teamView),
     positions: positions.filter((p) => (p.team || 'av') === team).map(pos), // this team's positions
     allPositions: positions.map(pos),
-    people: people.map((p) => personView(p, req.user)),
-    everyone: everyone.map((u) => ({ id: String(u._id), name: u.name, teams: u.role === 'admin' && !(u.teams || []).length ? ['av'] : (u.teams || []).map((t) => t.team) })),
+    people: rosterFor(req, people).map((p) => personView(p, req.user)),
+    everyone: everyone.map((u) => ({ id: String(u._id), name: u.name, teams: u.role === 'admin' && !(u.teams || []).length ? ['av'] : teamsShownTo(req.user, u) })),
     groups: groups.map((g) => groupView(g, req.user)),
     announcements: await announcementsFor(addDays(todayIn(s.timezone), -7), addDays(todayIn(s.timezone), 120)),
     // Booth Crew Academy is for the service teams, not people only on Church Admin
     academy: config.academyOn && serviceSide ? { url: config.academyUrl, host: new URL(config.academyUrl).host } : null,
     serviceSide, // on a team that serves on services (sees services, plans and line-ups)
+    // Teams whose leaders asked this person to join (Church Admin); accepted from a banner
+    invites: await invitesFor(req.user),
+    // Church Admin leaders (and the admin) see who's on the team and who's been asked
+    seesRoster: office ? seesRoster(req.user, team) : true,
+    // On Church Admin, what someone can do with its items comes from their own place on the team
+    officeAccess: office ? { member: !!(req.user.teams || []).find((m) => m.team === team), can: officePerms(req.user, team) } : null,
     committees: office ? (await Committee.find({ team }).sort({ order: 1, name: 1 }).lean()).map((c) => ({ key: c.key, name: c.name, color: c.color, quorum: c.quorum })) : [],
     office: officeSetup ? { rooms: officeSetup.rooms || [], remindMinutes: officeSetup.remindMinutes ?? 60, remindDays: officeSetup.remindDays ?? 1 } : null,
   });
 }));
+
+async function invitesFor(user) {
+  const list = user.teamInvites || [];
+  if (!list.length) return [];
+  const [teams, from] = await Promise.all([teamsList(), User.find({ _id: { $in: list.map((i) => i.from) } }, { name: 1 }).lean()]);
+  return list
+    .map((i) => ({ team: i.team, teamName: teams.find((t) => t.key === i.team)?.name || i.team, from: from.find((u) => String(u._id) === String(i.from))?.name || 'A leader', at: i.at }))
+    .filter((i) => teams.some((t) => t.key === i.team));
+}
 
 // ---------- my shifts overview ----------
 export const meRouter = Router();

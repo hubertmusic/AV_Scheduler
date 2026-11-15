@@ -57,11 +57,15 @@ export default function Team() {
             <span className="sr-only">Search people</span>
             <input type="search" placeholder={app.isOffice ? 'Search name or committee' : 'Search name or position'} value={filter} onChange={(e) => setFilter(e.target.value)} />
           </label>
-          <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-            <Icon name="plus" /> Add person
-          </button>
+          {(!app.isOffice || app.officeCan.people || me.role === 'admin') && (
+            <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+              <Icon name="plus" /> {app.isOffice ? 'Ask someone to join' : 'Add person'}
+            </button>
+          )}
         </div>
       </div>
+      {app.isOffice && app.seesRoster && <AskedList />}
+      {app.isOffice && !app.seesRoster && <p className="muted small">You see the people on your committees and the team’s leaders. Who else is on Church Admin is kept private.</p>}
       <div className="split">
         <section className="card people-list main-col" aria-label="People">
           {shown.map((p) => (
@@ -493,9 +497,10 @@ function AddPerson({ onClose }) {
   };
 
   return (
-    <Modal title={done ? `${done.person.name} was added` : `Add a person to the ${app.team.name}`} onClose={onClose}>
+    <Modal title={done ? (done.asked ? `${done.person.name} was asked to join` : `${done.person.name} was added`) : app.isOffice ? `Ask someone to join ${app.team.name}` : `Add a person to the ${app.team.name}`} onClose={onClose}>
       {done ? (
         <div className="stack">
+          {done.asked && <p>They already have a Crew Call login, so they’ll see your request when they sign in (and by email). {app.team.name} shows on their profile only once they accept.</p>}
           {done.joined && <p className="muted">They already had a Crew Call login from another team, so they keep it. They can switch between their teams at the top of the app.</p>}
           {done.inviteUrl ? (
             <>
@@ -522,7 +527,7 @@ function AddPerson({ onClose }) {
             <span>Email (they sign in with this)</span>
             <input type="email" required value={f.email} onChange={set('email')} autoComplete="off" />
           </label>
-          <p className="muted small">Already on another team? Use the same email: they keep one login and one calendar.</p>
+          <p className="muted small">{app.isOffice ? 'Already on Crew Call (for example the pastor on the AV team)? Use the email they sign in with: they get a request to join and accept it themselves.' : 'Already on another team? Use the same email: they keep one login and one calendar.'}</p>
           <label className="field">
             <span>Mobile (for WhatsApp)</span>
             <input type="tel" value={f.phone} onChange={set('phone')} placeholder="(423) 555-0100" />
@@ -655,5 +660,33 @@ function Regulars({ person }) {
         {!person.positions.length && <p className="small danger">Give them a trained position first.</p>}
       </div>
     </fieldset>
+  );
+}
+
+// Church Admin: people asked to join who haven't answered yet (leaders and the admin see this)
+function AskedList() {
+  const app = useApp();
+  const [list, setList] = useState([]);
+  const load = () => api('/people/asked').then(setList, () => setList([]));
+  useEffect(() => {
+    load();
+  }, [app.people]);
+  if (!list.length) return null;
+  return (
+    <section className="card stack-sm" aria-label="Asked to join">
+      <h2>Asked to join ({list.length})</h2>
+      {list.map((p) => (
+        <div key={p.id} className="row-wrap spread">
+          <span>
+            {p.name} <span className="muted small">· waiting since {new Date(p.at).toLocaleDateString()}</span>
+          </span>
+          {app.officeCan.people && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => api(`/people/asked/${p.id}`, { method: 'DELETE' }).then(load, (e) => app.toast(e.message))}>
+              Take back
+            </button>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }

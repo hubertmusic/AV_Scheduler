@@ -17,7 +17,7 @@ const weekStart = (d) => addDays(d, -parseDay(d).getUTCDay());
 
 export default function OfficeSchedule() {
   const app = useApp();
-  const { can } = app;
+  const can = app.officeCan; // their own Church Admin privileges
   const [view, setView] = useState(() => (window.matchMedia?.('(max-width: 700px)').matches ? 'list' : 'month'));
   const [at, setAt] = useState(todayISO());
   const [events, setEvents] = useState(null);

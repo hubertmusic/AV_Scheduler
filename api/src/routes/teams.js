@@ -5,6 +5,7 @@ import { Position, Team, TEAM_KINDS, User } from '../models.js';
 import { requireAdmin } from '../auth.js';
 import { bad, conflict, forbidden, getSettings, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, wrap } from '../lib/util.js';
 import { forgetTeams, isTeamHead, mergeTeam, requireTeamHead, teamKeys, teamView } from '../lib/teams.js';
+import { seesRoster } from '../lib/office.js';
 
 export const teamsRouter = Router();
 
@@ -28,7 +29,8 @@ teamsRouter.get('/', wrap(async (req, res) => {
       ...teamView(t),
       people: people.filter((u) => membershipOf(u, t.key)).length,
       positions: positions.filter((p) => (p.team || 'av') === t.key).length,
-      heads: people.filter((u) => membershipOf(u, t.key)?.head).map((u) => ({ id: String(u._id), name: u.name })),
+      // Who leads Church Admin shows only to the admin and that team's own leaders
+      heads: t.kind === 'office' && !seesRoster(req.user, t.key) ? [] : people.filter((u) => membershipOf(u, t.key)?.head).map((u) => ({ id: String(u._id), name: u.name })),
     }))
   );
 }));
