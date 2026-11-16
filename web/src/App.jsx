@@ -13,6 +13,7 @@ import Settings from './pages/Settings.jsx';
 import Groups from './pages/Groups.jsx';
 import Plans from './pages/Plans.jsx';
 import Guest from './pages/Guest.jsx';
+import Reserve from './pages/Reserve.jsx';
 import Account from './pages/Account.jsx';
 import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
@@ -63,6 +64,7 @@ export default function App() {
   const inviteToken = useMemo(() => window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const resetToken = useMemo(() => window.location.pathname.match(/^\/reset\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const guestToken = useMemo(() => window.location.pathname.match(/^\/(?:add|guest)\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const reserveToken = useMemo(() => window.location.pathname.match(/^\/reserve\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
   // Public rundown / bulletin links (no sign-in)
   const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage)\/([A-Za-z0-9_-]+)/), []);
@@ -111,8 +113,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!inviteToken && !resetToken && !guestToken && !shared) load();
-  }, [inviteToken, resetToken, guestToken, shared, load]);
+    if (!inviteToken && !resetToken && !guestToken && !reserveToken && !shared) load();
+  }, [inviteToken, resetToken, guestToken, reserveToken, shared, load]);
 
   // The server ended this session (idle timeout, signed out everywhere, …): back to sign-in.
   useEffect(() => {
@@ -158,6 +160,7 @@ export default function App() {
   };
 
   if (guestToken) return <Guest token={guestToken} />;
+  if (reserveToken) return <Reserve token={reserveToken} />;
   if (shared) {
     const [, kind, t] = shared;
     if (kind === 'rundown') return <RundownPage token={t} />;

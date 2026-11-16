@@ -4,7 +4,7 @@
 // privilege, who can give others time in it. Nobody else sees it. Secrets only come back from the
 // server when someone taps Show or Copy, and every look is in the vault log.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, fmtDateTime, unsaved } from '../lib.js';
+import { api, copyText, fmtDateTime, unsaved } from '../lib.js';
 import { Empty, Icon, Modal, useApp } from '../ui.jsx';
 
 const store = {
@@ -380,32 +380,6 @@ function useNow(every = 20000) {
     return () => clearInterval(t);
   }, [every]);
   return now;
-}
-// Works on the plain-http LAN address too, where navigator.clipboard isn't offered
-async function copyText(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    /* fall through */
-  }
-  const t = document.createElement('textarea');
-  t.value = text;
-  t.setAttribute('readonly', '');
-  t.style.position = 'fixed';
-  t.style.opacity = '0';
-  document.body.appendChild(t);
-  t.select();
-  let ok = false;
-  try {
-    ok = document.execCommand('copy');
-  } catch {
-    ok = false;
-  }
-  t.remove();
-  return ok;
 }
 
 function TeamVault() {

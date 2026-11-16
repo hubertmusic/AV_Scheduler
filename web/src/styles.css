@@ -1004,3 +1004,26 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 .nv-read-title { font-size: 20px; }
 .nv-read-body { font-size: 15px; line-height: 1.5; }
 .fieldset .nv-search { flex: none; max-width: none; width: 100%; margin-bottom: 4px; }
+
+/* ---------- pick someone already on Crew Call ---------- */
+.picker-search { min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--field); background: var(--surface); font-size: 15px; width: 100%; }
+.picker-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
+.picker-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); min-height: 44px; }
+.picker-row:hover { border-color: var(--field); }
+.picker-on { border: 2px solid var(--ink); padding: 9px 11px; }
+
+/* ---------- room request link (public form) ---------- */
+.rs-wrap { max-width: 640px; }
+.rs-wrap h1 { font-size: 24px; }
+.rs-hint { margin-top: -6px; }
+.rs-hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.rs-done { text-align: left; }
+.rs-check { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--green-soft, #e6f4ea); color: var(--green, #1e7b3a); font-size: 22px; font-weight: 700; }
+.rq-title { font-size: 17px; }
+.rq-notes { margin: 0; }
+.rq-clashes { margin: 4px 0 0; padding-left: 18px; }
+.rq-agenda { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.rq-agenda .link-btn { padding: 0; min-height: 0; }
+.rq-late { color: var(--amber-ink, #8a5a00); }
+.rq-url { display: flex; gap: 8px; flex-wrap: wrap; }
+.rq-url input { flex: 1 1 260px; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--field); background: var(--ground); font-family: var(--mono); font-size: 13px; }

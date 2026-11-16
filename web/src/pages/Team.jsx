@@ -470,6 +470,10 @@ function InviteLink({ person, url, reset, hours }) {
 
 function AddPerson({ onClose }) {
   const app = useApp();
+  // Church Admin mostly asks people who are already on Crew Call (the pastor on the AV team…)
+  const [mode, setMode] = useState(app.isOffice ? 'existing' : 'new');
+  const [q, setQ] = useState('');
+  const [pick, setPick] = useState(null);
   const [f, setF] = useState({ name: '', email: '', phone: '', positions: [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -490,7 +494,7 @@ function AddPerson({ onClose }) {
     setBusy(true);
     setError('');
     try {
-      setDone(await api('/people', { method: 'POST', body: f }));
+      setDone(await api('/people', { method: 'POST', body: mode === 'existing' ? { userId: pick?.id, positions: f.positions } : f }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -511,7 +515,7 @@ function AddPerson({ onClose }) {
             </>
           ) : null}
           <div className="row-wrap">
-            <button type="button" className="btn btn-primary" onClick={() => { setDone(null); setF({ name: '', email: '', phone: '', positions: [] }); }}>
+            <button type="button" className="btn btn-primary" onClick={() => { setDone(null); setPick(null); setQ(''); setF({ name: '', email: '', phone: '', positions: [] }); }}>
               Add another
             </button>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -521,6 +525,18 @@ function AddPerson({ onClose }) {
         </div>
       ) : (
         <form className="stack" onSubmit={submit}>
+          <div className="seg" role="group" aria-label="Who">
+            <button type="button" aria-pressed={mode === 'existing'} onClick={() => setMode('existing')}>
+              Already on Crew Call
+            </button>
+            <button type="button" aria-pressed={mode === 'new'} onClick={() => setMode('new')}>
+              New to Crew Call
+            </button>
+          </div>
+          {mode === 'existing' ? (
+            <ExistingPicker q={q} setQ={setQ} pick={pick} setPick={setPick} />
+          ) : (
+          <>
           <label className="field">
             <span>Name</span>
             <input required value={f.name} onChange={set('name')} autoComplete="off" />
@@ -529,11 +545,12 @@ function AddPerson({ onClose }) {
             <span>Email (they sign in with this)</span>
             <input type="email" required value={f.email} onChange={set('email')} autoComplete="off" />
           </label>
-          <p className="muted small">{app.isOffice ? 'Already on Crew Call (for example the pastor on the AV team)? Use the email they sign in with: they get a request to join and accept it themselves.' : 'Already on another team? Use the same email: they keep one login and one calendar.'}</p>
           <label className="field">
             <span>Mobile (for WhatsApp)</span>
             <input type="tel" value={f.phone} onChange={set('phone')} placeholder="(423) 555-0100" />
           </label>
+          </>
+          )}
           {app.positions.length > 0 && (
           <fieldset className="fieldset">
             <legend>Trained positions</legend>
@@ -549,8 +566,8 @@ function AddPerson({ onClose }) {
           )}
           {error && <div className="error" role="alert">{error}</div>}
           <div className="row-wrap">
-            <button className="btn btn-primary" disabled={busy}>
-              Add and get invite link
+            <button className="btn btn-primary" disabled={busy || (mode === 'existing' && !pick)}>
+              {mode === 'existing' ? (app.isOffice ? 'Ask them to join' : `Add to the ${app.team.name}`) : 'Add and get invite link'}
             </button>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
@@ -666,6 +683,36 @@ function Regulars({ person }) {
 }
 
 // Church Admin: people asked to join who haven't answered yet (leaders and the admin see this)
+// Find someone already on Crew Call by name. Only names and teams show; emails stay private.
+function ExistingPicker({ q, setQ, pick, setPick }) {
+  const app = useApp();
+  const here = app.team.key;
+  const s = q.trim().toLowerCase();
+  const list = (app.everyone || [])
+    .filter((p) => p.id !== app.me.id && !(p.teams || []).includes(here))
+    .filter((p) => !s || p.name.toLowerCase().includes(s))
+    .slice(0, 40);
+  return (
+    <div className="stack-sm">
+      <p className="muted small">
+        {app.isOffice
+          ? `Pick someone from another team, like the pastor on the AV team. They get a request by email and when they sign in, and ${app.team.name} shows on their profile only once they accept.`
+          : `Pick someone from another team. They keep one login and one calendar, and switch teams at the top of the app.`}
+      </p>
+      <input type="search" className="picker-search" placeholder="Type a name" aria-label="Type a name" value={q} onChange={(e) => (setQ(e.target.value), setPick(null))} autoFocus />
+      <div className="picker-list" role="listbox" aria-label="People on Crew Call">
+        {list.length === 0 && <p className="muted small">{s ? 'Nobody by that name who isn’t already here. Try New to Crew Call.' : 'Everyone on Crew Call is already on this team.'}</p>}
+        {list.map((p) => (
+          <button key={p.id} type="button" role="option" aria-selected={pick?.id === p.id} className={`picker-row ${pick?.id === p.id ? 'picker-on' : ''}`} onClick={() => setPick(p)}>
+            <span className="strong">{p.name}</span>
+            <span className="muted small">{(p.teams || []).map(app.teamName).join(', ') || 'No team yet'}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AskedList() {
   const app = useApp();
   const [list, setList] = useState([]);

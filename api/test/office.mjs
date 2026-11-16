@@ -404,7 +404,12 @@ assert.ok(!ok(await adminO('GET', '/api/office/committees')).find((c) => c.key =
 step('the admin is on Church Admin only when its leaders ask and they accept; committee places come from the head leader');
 
 // ---------- tiers: the pastor on the AV team is asked to join ----------
-ok(await oliviaC('POST', '/api/people', { name: 'Ben', email: 'ben@example.com' }), 201);
+// Picked by name from everyone on Crew Call (no email needed)
+assert.ok(ok(await oliviaC('GET', '/api/bootstrap')).everyone.some((p) => p.id === ben.id), 'the picker lists people on other teams');
+ok(await oliviaC('POST', '/api/people', { userId: 'nope' }), 400);
+ok(await oliviaC('POST', '/api/people', { userId: '0123456789abcdef01234567' }), 404);
+ok(await samC('POST', '/api/people', { userId: ben.id }), 403);
+assert.equal(ok(await oliviaC('POST', '/api/people', { userId: ben.id }), 201).asked, true);
 let benBoot = ok(await benC('GET', '/api/bootstrap'));
 assert.deepEqual(benBoot.teams.map((t) => t.key), ['av'], 'not on their profile until they accept');
 assert.equal(benBoot.invites[0].from, 'Olivia');
@@ -412,6 +417,7 @@ assert.ok(ok(await oliviaC('GET', '/api/people/asked')).some((p) => p.name === '
 ok(await samC('GET', '/api/people/asked'), 200);
 assert.equal(ok(await samC('GET', '/api/people/asked')).length, 0, 'only leaders see who has been asked');
 ok(await oliviaC('POST', '/api/people', { name: 'Ben', email: 'ben@example.com' }), 409);
+ok(await oliviaC('POST', '/api/people', { userId: ben.id }), 409);
 ok(await benC('POST', `/api/account/invites/${O}/accept`));
 benBoot = ok(await benC('GET', '/api/bootstrap'));
 assert.deepEqual(benBoot.teams.map((t) => t.key).sort(), ['av', O].sort());
@@ -422,7 +428,12 @@ ok(await leeC('POST', '/api/people', { name: 'Tia', email: 'tia@example.com' }),
 ok(await oliviaC('POST', '/api/people', { name: 'Tia', email: 'tia@example.com' }), 201);
 ok(await tiaC('POST', `/api/account/invites/${O}/decline`));
 assert.deepEqual(ok(await tiaC('GET', '/api/bootstrap')).teams.map((t) => t.key), ['av']);
-step('tiers: someone on AV (the pastor) is asked to join, and Church Admin shows on their profile only once they accept');
+// On the service side, picking someone from another team adds them straight away
+const adminPraise = client('praise');
+ok(await adminPraise('POST', '/api/auth/login', { email: 'admin@example.com', password: 'adminpass1' }));
+assert.equal(ok(await adminPraise('POST', '/api/people', { userId: tia.id }), 201).joined, true);
+assert.deepEqual(ok(await tiaC('GET', '/api/bootstrap')).teams.map((t) => t.key).sort(), ['av', 'praise']);
+step('tiers: someone on AV (the pastor) is asked to join, picked by name or by email, and Church Admin shows on their profile only once they accept');
 
 // ---------- who's on Church Admin shows only to the admin and its leaders ----------
 const tiaBoot = ok(await tiaC('GET', '/api/bootstrap'));

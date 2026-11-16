@@ -126,6 +126,8 @@ const teamSchema = new Schema(
     // Office teams: rooms (services: the room services and rehearsals use), calendar reminders
     // on meetings people are invited to, and the yearly rhythm to fill each year's calendar from
     rooms: { type: [new Schema({ name: String, services: { type: Boolean, default: false } }, { _id: false })], default: [] },
+    // The room request link anyone can use without an account (/reserve/<token>)
+    requestLink: { token: { type: String, default: '' }, on: { type: Boolean, default: false }, madeAt: Date },
     remindMinutes: { type: Number, default: 60 },
     remindDays: { type: Number, default: 1 },
     yearPlan: {
@@ -790,10 +792,16 @@ const officeDocSchema = new Schema(
 );
 export const OfficeDoc = model('OfficeDoc', officeDocSchema);
 
-// Anyone signed in asks for a church event or a room; office leaders approve or decline
+// Someone asks for a church event or a room, signed in or through the room request link. It goes
+// on the next board meeting's agenda; office leaders approve or decline.
 const officeRequestSchema = new Schema(
   {
     team: { type: String, required: true, index: true }, // the office team it goes to
+    source: { type: String, enum: ['member', 'link'], default: 'member' },
+    from: { name: { type: String, default: '' }, email: { type: String, default: '' }, phone: { type: String, default: '' } }, // link requests
+    people: { type: Number, default: 0 }, // about how many are coming
+    meeting: ref('OfficeEvent'), // the board meeting whose agenda it's on (null: waiting for one)
+    agendaItem: Schema.Types.ObjectId,
     title: { type: String, required: true, trim: true },
     date: { type: String, required: true },
     start: { type: String, default: '' },
