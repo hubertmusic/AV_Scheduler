@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { IANAZone } from 'luxon';
 import { Assignment, Blackout, Committee, Event, EVENT_KINDS, Group, OfficeEvent, Position, Request, Resource, Team, Unavailable, User } from '../models.js';
 import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
-import { addDays, bad, conflict, DATE_RE, forbidden, getSettings, isHttpUrl, isId, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
+import { addDays, bad, can, conflict, DATE_RE, forbidden, getSettings, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { eventView, groupView, meView, personView, requestView } from '../lib/views.js';
 import { cleanGroupIds } from './events.js';
 import { announcementsFor, noticeLinesFor } from './announcements.js';
@@ -64,6 +64,8 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     team: teamView(req.team),
     teams: myTeams, // the teams this person can switch between
     allTeams: allTeams.map(teamView),
+    // Teams this person can bring someone onto from Team & roles (Church Admin sends a request to join)
+    addTo: req.previewing ? [] : await addableTeams(req.user, allTeams),
     positions: positions.filter((p) => (p.team || 'av') === team).map(pos), // this team's positions
     allPositions: positions.map(pos),
     people: rosterFor(req, people).map((p) => personView(p, req.user)),
@@ -85,6 +87,19 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     office: officeSetup ? { rooms: officeSetup.rooms || [], remindMinutes: officeSetup.remindMinutes ?? 60, remindDays: officeSetup.remindDays ?? 1 } : null,
   });
 }));
+
+async function addableTeams(user, allTeams) {
+  const out = [];
+  for (const t of allTeams) {
+    if (t.kind === 'office') {
+      let ok = officePerms(user, t.key).people;
+      // The admin can bring in the first person (to make them head leader) while there's no head yet
+      if (!ok && user.role === 'admin') ok = !(await User.find({ 'teams.team': t.key }, { teams: 1 }).lean()).some((u) => membershipOf(u, t.key)?.head);
+      if (ok) out.push({ key: t.key, name: t.name, ask: true });
+    } else if (can(user, t.key).people) out.push({ key: t.key, name: t.name, ask: false });
+  }
+  return out;
+}
 
 async function invitesFor(user) {
   const list = user.teamInvites || [];

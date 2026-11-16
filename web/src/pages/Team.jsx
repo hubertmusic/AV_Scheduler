@@ -59,9 +59,9 @@ export default function Team() {
             <span className="sr-only">Search people</span>
             <input type="search" placeholder={app.isOffice ? 'Search name or committee' : 'Search name or position'} value={filter} onChange={(e) => setFilter(e.target.value)} />
           </label>
-          {(!app.isOffice || app.officeCan.people || me.role === 'admin') && (
+          {(app.addTo?.length > 0 || (!app.isOffice && app.can?.people)) && (
             <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-              <Icon name="plus" /> {app.isOffice ? 'Ask someone to join' : 'Add person'}
+              <Icon name="plus" /> {app.isOffice ? 'Ask someone to join' : 'Add or ask someone'}
             </button>
           )}
         </div>
@@ -470,6 +470,12 @@ function InviteLink({ person, url, reset, hours }) {
 
 function AddPerson({ onClose }) {
   const app = useApp();
+  // Teams they can bring someone onto; this team first. Church Admin sends a request to join.
+  const addTo = useMemo(() => {
+    const list = app.addTo?.length ? app.addTo : [{ key: app.team.key, name: app.team.name, ask: app.isOffice }];
+    return [...list].sort((a, b) => (b.key === app.team.key) - (a.key === app.team.key));
+  }, [app.addTo, app.team, app.isOffice]);
+  const [teams, setTeams] = useState(() => (addTo.some((t) => t.key === app.team.key) ? [app.team.key] : addTo.slice(0, 1).map((t) => t.key)));
   // Church Admin mostly asks people who are already on Crew Call (the pastor on the AV team…)
   const [mode, setMode] = useState(app.isOffice ? 'existing' : 'new');
   const [q, setQ] = useState('');
@@ -480,42 +486,77 @@ function AddPerson({ onClose }) {
   const [done, setDone] = useState(null);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const togglePos = (k) => setF({ ...f, positions: f.positions.includes(k) ? f.positions.filter((x) => x !== k) : [...f.positions, k] });
+  const toggleTeam = (k) => setTeams(teams.includes(k) ? teams.filter((x) => x !== k) : [...teams, k]);
+  const alreadyOn = (k) => mode === 'existing' && !!pick && (pick.teams || []).includes(k);
+  const chosen = addTo.filter((t) => teams.includes(t.key) && !alreadyOn(t.key));
 
   // Refresh the team list once the dialog closes, if anyone was added.
   const added = useRef(false);
   const reload = useRef(app.reload);
   useEffect(() => () => added.current && reload.current(), []);
   useEffect(() => {
-    if (done) added.current = true;
+    if (done?.results.some((r) => r.ok)) added.current = true;
   }, [done]);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!chosen.length) return setError('Pick at least one team.');
     setBusy(true);
     setError('');
-    try {
-      setDone(await api('/people', { method: 'POST', body: mode === 'existing' ? { userId: pick?.id, positions: f.positions } : f }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
+    // Teams they join straight away first, then the ones that send a request (Church Admin)
+    const order = [...chosen].sort((a, b) => a.ask - b.ask);
+    const results = [];
+    for (const t of order) {
+      const body = mode === 'existing' ? { userId: pick.id } : { name: f.name, email: f.email, phone: f.phone };
+      if (t.key === app.team.key) body.positions = f.positions; // trained positions belong to this team
+      try {
+        const r = await api('/people', { method: 'POST', body, team: t.key });
+        results.push({ team: t, ok: true, ...r });
+      } catch (err) {
+        results.push({ team: t, ok: false, error: err.message });
+      }
     }
+    setBusy(false);
+    if (results.every((r) => !r.ok) && results.length === 1) return setError(results[0].error);
+    const first = results.find((r) => r.ok);
+    setDone({ name: first?.person?.name || pick?.name || f.name, person: first?.person, results, inviteUrl: results.find((r) => r.inviteUrl)?.inviteUrl || null });
   };
+  const reset = () => {
+    setDone(null);
+    setPick(null);
+    setQ('');
+    setF({ name: '', email: '', phone: '', positions: [] });
+    setTeams([app.team.key].filter((k) => addTo.some((t) => t.key === k)));
+  };
+  const many = addTo.length > 1;
+  const allAsk = chosen.length > 0 && chosen.every((t) => t.ask);
 
   return (
-    <Modal title={done ? (done.asked ? `${done.person.name} was asked to join` : `${done.person.name} was added`) : app.isOffice ? `Ask someone to join ${app.team.name}` : `Add a person to the ${app.team.name}`} onClose={onClose}>
+    <Modal title={done ? done.name : many ? 'Add or ask someone' : app.isOffice ? `Ask someone to join ${app.team.name}` : `Add a person to the ${app.team.name}`} onClose={onClose}>
       {done ? (
         <div className="stack">
-          {done.asked && <p>They already have a Crew Call login, so they’ll see your request when they sign in (and by email). {app.team.name} shows on their profile only once they accept.</p>}
-          {done.joined && <p className="muted">They already had a Crew Call login from another team, so they keep it. They can switch between their teams at the top of the app.</p>}
+          <ul className="ap-results">
+            {done.results.map((r) => (
+              <li key={r.team.key} className={r.ok ? '' : 'ap-fail'}>
+                <strong>{r.team.name}:</strong>{' '}
+                {!r.ok
+                  ? r.error
+                  : r.asked
+                    ? 'asked to join. They’ll see the request by email and when they sign in, and it shows on their profile once they accept.'
+                    : r.joined
+                      ? 'added. They keep the same login and switch teams at the top of the app.'
+                      : 'added.'}
+              </li>
+            ))}
+          </ul>
           {done.inviteUrl ? (
             <>
-              <p className="muted">Send them this link to set their password. They’ll show up on the schedule right away; the invite works for 14 days.</p>
+              <p className="muted">They’re new to Crew Call. Send them this link to set their password; it works for 14 days.</p>
               <InviteLink person={done.person} url={done.inviteUrl} />
             </>
           ) : null}
           <div className="row-wrap">
-            <button type="button" className="btn btn-primary" onClick={() => { setDone(null); setPick(null); setQ(''); setF({ name: '', email: '', phone: '', positions: [] }); }}>
+            <button type="button" className="btn btn-primary" onClick={reset}>
               Add another
             </button>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -534,40 +575,54 @@ function AddPerson({ onClose }) {
             </button>
           </div>
           {mode === 'existing' ? (
-            <ExistingPicker q={q} setQ={setQ} pick={pick} setPick={setPick} />
+            <ExistingPicker q={q} setQ={setQ} pick={pick} setPick={setPick} teams={teams} />
           ) : (
-          <>
-          <label className="field">
-            <span>Name</span>
-            <input required value={f.name} onChange={set('name')} autoComplete="off" />
-          </label>
-          <label className="field">
-            <span>Email (they sign in with this)</span>
-            <input type="email" required value={f.email} onChange={set('email')} autoComplete="off" />
-          </label>
-          <label className="field">
-            <span>Mobile (for WhatsApp)</span>
-            <input type="tel" value={f.phone} onChange={set('phone')} placeholder="(423) 555-0100" />
-          </label>
-          </>
+            <>
+              <label className="field">
+                <span>Name</span>
+                <input required value={f.name} onChange={set('name')} autoComplete="off" />
+              </label>
+              <label className="field">
+                <span>Email (they sign in with this)</span>
+                <input type="email" required value={f.email} onChange={set('email')} autoComplete="off" />
+              </label>
+              <label className="field">
+                <span>Mobile (for WhatsApp)</span>
+                <input type="tel" value={f.phone} onChange={set('phone')} placeholder="(423) 555-0100" />
+              </label>
+            </>
           )}
-          {app.positions.length > 0 && (
-          <fieldset className="fieldset">
-            <legend>Trained positions</legend>
-            <div className="check-grid">
-              {app.positions.map((p) => (
-                <label key={p.key} className="check">
-                  <input type="checkbox" checked={f.positions.includes(p.key)} onChange={() => togglePos(p.key)} />
-                  <span>{p.label}</span>
+          {many && (
+            <fieldset className="fieldset">
+              <legend>Which teams</legend>
+              {addTo.map((t) => (
+                <label key={t.key} className="check check-top">
+                  <input type="checkbox" checked={teams.includes(t.key) && !alreadyOn(t.key)} disabled={alreadyOn(t.key)} onChange={() => toggleTeam(t.key)} />
+                  <span>
+                    {t.name}
+                    {alreadyOn(t.key) ? <span className="muted small"> · already on it</span> : t.ask ? <span className="muted small"> · they get a request to join and accept it</span> : null}
+                  </span>
                 </label>
               ))}
-            </div>
-          </fieldset>
+            </fieldset>
+          )}
+          {teams.includes(app.team.key) && app.positions.length > 0 && !app.isOffice && (
+            <fieldset className="fieldset">
+              <legend>Trained positions on the {app.team.name}</legend>
+              <div className="check-grid">
+                {app.positions.map((p) => (
+                  <label key={p.key} className="check">
+                    <input type="checkbox" checked={f.positions.includes(p.key)} onChange={() => togglePos(p.key)} />
+                    <span>{p.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
           )}
           {error && <div className="error" role="alert">{error}</div>}
           <div className="row-wrap">
-            <button className="btn btn-primary" disabled={busy || (mode === 'existing' && !pick)}>
-              {mode === 'existing' ? (app.isOffice ? 'Ask them to join' : `Add to the ${app.team.name}`) : 'Add and get invite link'}
+            <button className="btn btn-primary" disabled={busy || !chosen.length || (mode === 'existing' && !pick)}>
+              {busy ? 'Working…' : mode === 'new' ? 'Add and get invite link' : allAsk ? 'Ask them to join' : chosen.some((t) => t.ask) ? 'Add and ask' : 'Add them'}
             </button>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
@@ -684,12 +739,12 @@ function Regulars({ person }) {
 
 // Church Admin: people asked to join who haven't answered yet (leaders and the admin see this)
 // Find someone already on Crew Call by name. Only names and teams show; emails stay private.
-function ExistingPicker({ q, setQ, pick, setPick }) {
+function ExistingPicker({ q, setQ, pick, setPick, teams }) {
   const app = useApp();
-  const here = app.team.key;
+  const wanted = teams?.length ? teams : [app.team.key];
   const s = q.trim().toLowerCase();
   const list = (app.everyone || [])
-    .filter((p) => p.id !== app.me.id && !(p.teams || []).includes(here))
+    .filter((p) => p.id !== app.me.id && !wanted.every((k) => (p.teams || []).includes(k)))
     .filter((p) => !s || p.name.toLowerCase().includes(s))
     .slice(0, 40);
   return (

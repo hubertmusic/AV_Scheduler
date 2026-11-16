@@ -1020,15 +1020,16 @@ function EventRequests() {
     if (reply === null) return;
     try {
       await api(`/office/requests/${r.id}/${action}`, { method: 'POST', body: { reply } });
-      app.toast(action === 'approve' ? 'Approved, added to the calendar, and they’ve been emailed' : 'Declined, and they’ve been emailed');
+      app.toast(action === 'approve' ? 'Approved, added to the calendar, and they’ve been emailed. It’s kept in the archive.' : 'Declined, and they’ve been emailed. It’s kept in the archive.');
       load();
+      setArchived((n) => n + 1);
       app.refreshPending?.();
     } catch (e) {
       app.toast(e.message);
     }
   };
-  const pending = (list || []).filter((r) => r.status === 'pending');
-  const done = (list || []).filter((r) => r.status !== 'pending');
+  const pending = list || [];
+  const [archived, setArchived] = useState(0); // bumps the archive after a decision
   return (
     <div className="stack-lg">
       <RequestLink />
@@ -1100,20 +1101,222 @@ function EventRequests() {
           </div>
         </section>
       ))}
-      {done.length > 0 && (
-        <details>
-          <summary>Answered ({done.length})</summary>
-          <ul className="plain-list small">
-            {done.map((r) => (
-              <li key={r.id}>
-                {r.title} · {fmtDate(r.date)} · {r.requestedBy || 'someone'} — {r.status} by {r.decidedBy || '—'}
-                {r.reply ? `: “${r.reply}”` : ''}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      <RequestArchive bump={archived} />
     </div>
+  );
+}
+
+// Every decision, kept until the head leader or the admin purges it
+const STATUS_WORD = { approved: 'Approved', declined: 'Declined' };
+// The day a moment fell on here (not in UTC, which is already tomorrow on an evening in Tennessee)
+const localDay = (d) => new Date(d).toLocaleDateString('en-CA');
+function RequestArchive({ bump }) {
+  const app = useApp();
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const [year, setYear] = useState('');
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState(null);
+  const [purging, setPurging] = useState(false);
+  const params = useMemo(() => new URLSearchParams({ ...(q.trim() ? { q: q.trim() } : {}), ...(status ? { status } : {}), ...(year ? { year } : {}) }).toString(), [q, status, year]);
+  const load = useCallback(() => {
+    api(`/office/requests/archive?${params}&page=${page}`).then(setData, () => setData(null));
+  }, [params, page]);
+  useEffect(() => {
+    const t = setTimeout(load, 250);
+    return () => clearTimeout(t);
+  }, [load, bump]);
+  useEffect(() => setPage(1), [params]);
+  if (!data) return null;
+  const filtered = !!(q.trim() || status || year);
+  return (
+    <section className="card stack-sm" aria-label="Archive">
+      <div className="row-wrap spread">
+        <div className="stack-xs">
+          <h2>Archive</h2>
+          <span className="muted small">
+            Every decision is kept here, with who asked, how to reach them and the note back, until {data.canPurge ? 'you purge it' : 'the head leader or the admin purges it'}. {data.all} in all.
+          </span>
+        </div>
+        <div className="row-wrap">
+          <a className="btn btn-ghost btn-sm" href={`/api/office/requests/archive.csv?team=${encodeURIComponent(app.team.key)}${params ? `&${params}` : ''}`} download>
+            Download{filtered ? ' these' : ''} (CSV)
+          </a>
+          {data.canPurge && data.all > 0 && (
+            <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => setPurging(true)}>
+              Purge…
+            </button>
+          )}
+        </div>
+      </div>
+      {data.all > 0 && (
+        <div className="row-wrap ra-filters">
+          <input type="search" className="grow" placeholder="Search name, email, request, room or note" aria-label="Search the archive" value={q} onChange={(e) => setQ(e.target.value)} />
+          <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Decision">
+            <option value="">Approved and declined</option>
+            <option value="approved">Approved</option>
+            <option value="declined">Declined</option>
+          </select>
+          <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year decided">
+            <option value="">Any year</option>
+            {data.years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {data.all === 0 && <p className="muted small">Nothing decided yet.</p>}
+      {data.all > 0 && data.total === 0 && <p className="muted small">Nothing matches.</p>}
+      <ul className="ra-list">
+        {data.items.map((r) => (
+          <li key={r.id}>
+            <details className="ra-item">
+              <summary>
+                <span className={`chip ${r.status === 'approved' ? 'chip-approved' : 'chip-draft'}`}>{STATUS_WORD[r.status]}</span>
+                <span className="strong">{r.title}</span>
+                <span className="muted small">
+                  {fmtDate(r.date)} · {r.requestedBy || 'someone'}
+                </span>
+              </summary>
+              <div className="small stack-xs ra-body">
+                <div>
+                  {whenLine(r)}
+                  {r.room ? ` · ${r.room}` : ''}
+                  {r.people ? ` · about ${r.people} people` : ''}
+                  {r.needsAv ? ' · needs AV' : ''}
+                </div>
+                {r.notes && <div className="pre-wrap">“{r.notes}”</div>}
+                <div>
+                  Asked by {r.requestedBy || 'someone'}
+                  {r.source === 'link' ? ' (request link)' : ''}
+                  {r.contact.email && (
+                    <>
+                      {' · '}
+                      <a href={`mailto:${r.contact.email}`}>{r.contact.email}</a>
+                    </>
+                  )}
+                  {r.contact.phone && ` · ${r.contact.phone}`} · {fmtDate(localDay(r.createdAt))}
+                </div>
+                <div>
+                  <strong>{STATUS_WORD[r.status]}</strong> by {r.decidedBy || '—'}
+                  {r.decidedAt ? ` on ${fmtDate(localDay(r.decidedAt))}` : ''}
+                  {r.reply ? `: “${r.reply}”` : ''}
+                </div>
+                {r.meeting && (
+                  <div>
+                    On the agenda for{' '}
+                    <button type="button" className="link-btn" onClick={() => app.openMeeting?.(r.meeting.id)}>
+                      {r.meeting.title}, {fmtDate(r.meeting.date)}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </details>
+          </li>
+        ))}
+      </ul>
+      {data.pages > 1 && (
+        <div className="row-wrap">
+          <button type="button" className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            Newer
+          </button>
+          <span className="muted small">
+            Page {data.page} of {data.pages}
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={page >= data.pages} onClick={() => setPage(page + 1)}>
+            Older
+          </button>
+        </div>
+      )}
+      {purging && (
+        <PurgeModal
+          oldest={data.oldest}
+          onClose={() => setPurging(false)}
+          onDone={() => {
+            setPurging(false);
+            load();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function PurgeModal({ oldest, onClose, onDone }) {
+  const app = useApp();
+  const yearAgo = addDays(todayISO(), -365);
+  const [before, setBefore] = useState(yearAgo);
+  const [status, setStatus] = useState('');
+  const [count, setCount] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setCount(null);
+    if (!before) return;
+    const t = setTimeout(() => api('/office/requests/purge', { method: 'POST', body: { before, status } }).then((r) => setCount(r.count), () => setCount(null)), 250);
+    return () => clearTimeout(t);
+  }, [before, status]);
+  const go = async () => {
+    if (!window.confirm(`Permanently delete ${count} decision${count === 1 ? '' : 's'}? This can’t be undone.`)) return;
+    setBusy(true);
+    try {
+      const r = await api('/office/requests/purge', { method: 'POST', body: { before, status, confirm: true, count } });
+      app.toast(`Purged ${r.purged} decision${r.purged === 1 ? '' : 's'}`);
+      onDone();
+    } catch (e) {
+      app.toast(e.message);
+      setBusy(false);
+    }
+  };
+  const dl = `/api/office/requests/archive.csv?team=${encodeURIComponent(app.team.key)}`;
+  return (
+    <Modal title="Purge old decisions" onClose={onClose}>
+      <div className="stack">
+        <p className="muted small">This permanently deletes archived decisions, with the names and contact details in them. Requests still waiting are never touched, and the meeting agendas keep their record. Download a copy first if you might need it.</p>
+        <a className="btn btn-outline self-start" href={dl} download>
+          Download everything first (CSV)
+        </a>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Decided before</span>
+            <input type="date" value={before} max={addDays(todayISO(), 1)} onChange={(e) => setBefore(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Which</span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">Approved and declined</option>
+              <option value="approved">Only approved</option>
+              <option value="declined">Only declined</option>
+            </select>
+          </label>
+        </div>
+        <div className="row-wrap tight">
+          {[
+            ['Older than 2 years', addDays(todayISO(), -730)],
+            ['Older than 1 year', yearAgo],
+            ['Older than 6 months', addDays(todayISO(), -183)],
+            ['Everything', addDays(todayISO(), 1)],
+          ].map(([l, d]) => (
+            <button key={l} type="button" className={`pill ${before === d ? 'pill-on' : ''}`} onClick={() => setBefore(d)}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <p role="status" className="strong">
+          {count === null ? 'Counting…' : count === 0 ? `Nothing was decided before ${fmtDate(before)}.` : `${count} decision${count === 1 ? '' : 's'} will be deleted.`}
+          {oldest && count === 0 ? <span className="muted small"> The oldest is from {fmtDate(localDay(oldest))}.</span> : null}
+        </p>
+        <div className="row-wrap">
+          <button type="button" className="btn btn-danger" disabled={busy || !count} onClick={go}>
+            {busy ? 'Purging…' : `Purge ${count || ''}`.trim()}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
