@@ -15,6 +15,8 @@ import { deleteStored, filesOf, originalName, removeUploads, uploader } from '..
 import { mailerReady, sendMail } from '../lib/mailer.js';
 import { forgetTeams, isTeamHead, requireTeamHead, teamsList } from '../lib/teams.js';
 import { officePerms, seesRoster } from '../lib/office.js';
+import { attachRequest, attachWaiting, clashesFor, markOnAgenda, mailDecision } from '../lib/roomRequests.js';
+import crypto from 'node:crypto';
 import { assertSees, audienceOf, describeSeries, edits, fillSeries, isOfficeTeam, isSecretary, officeTeamKeys, requireOfficeTeam, sees, visibleFilter, yearPlanDate } from '../lib/office.js';
 
 export const officeRouter = Router();
@@ -71,9 +73,12 @@ officeRouter.post('/requests', wrap(async (req, res) => {
   if (!DATE_RE.test(b.date || '')) throw bad('Pick a date.');
   if (b.date < (await today())) throw bad('That date has passed.');
   for (const k of ['start', 'end']) if (b[k] && !TIME_RE.test(b[k])) throw bad('Times look like 18:30.');
-  const r = await OfficeRequest.create({ team: teams.includes(b.team) ? b.team : teams[0], title, date: b.date, start: b.start || '', end: b.end || '', room: str(b.room, 80), notes: str(b.notes, 1000), needsAv: !!b.needsAv, requestedBy: req.user._id });
+  if (b.start && b.end && b.end <= b.start) throw bad('The end time has to be after the start time.');
+  const r = await OfficeRequest.create({ team: teams.includes(b.team) ? b.team : teams[0], title, date: b.date, start: b.start || '', end: b.start ? b.end || '' : '', room: str(b.room, 80), people: Math.max(0, Math.min(5000, Math.round(Number(b.people) || 0))), notes: str(b.notes, 1000), needsAv: !!b.needsAv, requestedBy: req.user._id });
+  // Straight onto the next board meeting's agenda (or waiting for one)
+  const meeting = await attachRequest(r);
   res.locals.activity = `Asked Church Admin for “${title}” on ${b.date}`;
-  res.status(201).json(requestView(r));
+  res.status(201).json({ ...requestView(r), meetingDate: meeting?.date || null });
 }));
 const requestView = (r, names = {}) => ({
   id: String(r._id),
@@ -86,9 +91,12 @@ const requestView = (r, names = {}) => ({
   needsAv: r.needsAv,
   status: r.status,
   reply: r.reply,
-  requestedBy: names[String(r.requestedBy)] || null,
+  people: r.people || 0,
+  source: r.source || 'member',
+  requestedBy: (r.source === 'link' ? r.from?.name : names[String(r.requestedBy)]) || null,
   decidedBy: names[String(r.decidedBy)] || null,
   event: r.event ? String(r.event) : null,
+  waiting: r.status === 'pending' && !r.meeting, // no board meeting on the calendar yet
   createdAt: r.createdAt,
 });
 
@@ -124,7 +132,7 @@ office.use((req, res, next) => {
   const member = !!membershipOf(req.user, req.team.key);
   // The admin (or anyone not on the team) can manage committees, rooms and event requests, but
   // can't add or change the team's confidential items
-  const managing = /^\/(committees|setup|requests)(\/|$)/.test(req.path);
+  const managing = /^\/(committees|setup|requests|request-link)(\/|$)/.test(req.path);
   if (req.method !== 'GET' && !member && !managing) return next(forbidden('Only people on Church Admin can do that. Its head leader can add you.'));
   if (req.method !== 'GET') res.locals.activity = 'Worked on the Church Admin side';
   next();
@@ -383,11 +391,13 @@ office.post('/events', need('edit'), wrap(async (req, res) => {
     const first = await OfficeEvent.findOne({ series: series._id }).sort({ date: 1 });
     if (!first) throw bad('That repeat has no dates. Check when it ends.');
     for (const ev of await OfficeEvent.find({ series: series._id })) await syncAv(ev, req);
+    await attachWaiting(req.team.key);
     res.locals.activity = `Added ${named(fields, 'a Church Admin calendar item')} (${describeSeries(series)})`;
     return res.status(201).json(await fullEvent(first, req));
   }
   const ev = await OfficeEvent.create(base);
   await syncAv(ev, req);
+  await attachWaiting(req.team.key); // a new board meeting picks up requests waiting for one
   res.locals.activity = `Added ${named(ev, 'a Church Admin calendar item')}`;
   res.status(201).json(await fullEvent(ev, req));
 }));
@@ -884,9 +894,47 @@ office.get('/docs/:id/file', wrap(async (req, res) => {
 
 // ---------- event requests (from anyone) ----------
 office.get('/requests', needOrAdmin('approve'), wrap(async (req, res) => {
+  await attachWaiting(req.team.key);
   const list = await OfficeRequest.find({ team: req.team.key }).sort({ status: -1, date: 1 }).limit(200).lean();
-  const names = await nameOf(list.flatMap((r) => [r.requestedBy, r.decidedBy]));
-  res.json(list.map((r) => requestView(r, names)));
+  const users = await User.find({ _id: { $in: list.flatMap((r) => [r.requestedBy, r.decidedBy]).filter(Boolean) } }, { name: 1, email: 1, phone: 1 }).lean();
+  const names = Object.fromEntries(users.map((u) => [String(u._id), u.name]));
+  const meetings = Object.fromEntries((await OfficeEvent.find({ _id: { $in: list.map((r) => r.meeting).filter(Boolean) } }, { title: 1, date: 1, start: 1 }).lean()).map((m) => [String(m._id), m]));
+  res.json(
+    await Promise.all(
+      list.map(async (r) => {
+        const asker = users.find((u) => String(u._id) === String(r.requestedBy));
+        const m = meetings[String(r.meeting)];
+        return {
+          ...requestView(r, names),
+          // How to reach them: what they typed on the link, or their Crew Call profile
+          contact: r.source === 'link' ? { email: r.from?.email || '', phone: r.from?.phone || '' } : { email: asker?.email || '', phone: asker?.phone || '' },
+          meeting: m ? { id: String(m._id), title: m.title, date: m.date, start: m.start } : null,
+          meetsAfter: !!m && m.date > r.date, // the board meets after the date they asked for
+          clashes: r.status === 'pending' ? await clashesFor(r) : [],
+        };
+      }),
+    ),
+  );
+}));
+
+// The room request link (/reserve/<token>): anyone with it can ask without an account
+const linkView = (t) => ({ on: !!t.requestLink?.on && !!t.requestLink?.token, token: t.requestLink?.token || '', url: t.requestLink?.token ? `${config.publicUrl}/reserve/${t.requestLink.token}` : '', madeAt: t.requestLink?.madeAt || null });
+office.get('/request-link', needOrAdmin('approve'), wrap(async (req, res) => {
+  res.json(linkView(await Team.findOne({ key: req.team.key }).lean()));
+}));
+// POST /api/office/request-link { on?, renew? } — renew makes a new link; the old one stops working
+office.post('/request-link', needOrAdmin('approve'), wrap(async (req, res) => {
+  const t = await Team.findOne({ key: req.team.key });
+  const b = req.body || {};
+  const link = t.requestLink || {};
+  if (b.renew || !link.token) Object.assign(link, { token: crypto.randomBytes(18).toString('base64url'), madeAt: new Date() });
+  if (b.on !== undefined) link.on = !!b.on;
+  else if (b.renew) link.on = true;
+  t.requestLink = link;
+  t.markModified('requestLink');
+  await t.save();
+  res.locals.activity = b.renew ? 'Made a new room request link' : link.on ? 'Turned on the room request link' : 'Turned off the room request link';
+  res.json(linkView(t));
 }));
 office.post('/requests/:id/:action(approve|decline)', needOrAdmin('approve'), wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
@@ -917,6 +965,8 @@ office.post('/requests/:id/:action(approve|decline)', needOrAdmin('approve'), wr
     r.status = 'approved';
   } else r.status = 'declined';
   await r.save();
+  await markOnAgenda(r, req.user.name);
+  await mailDecision(r);
   res.locals.activity = `${r.status === 'approved' ? 'Approved' : 'Declined'} the request for “${r.title}”`;
   res.json(requestView(r, await nameOf([r.requestedBy, r.decidedBy])));
 }));

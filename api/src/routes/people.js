@@ -58,13 +58,17 @@ peopleRouter.post('/', wrap(async (req, res) => {
   const starting = office && req.user.role === 'admin' && !(await User.find({ 'teams.team': req.team.key }, { teams: 1 }).lean()).some((u) => membershipOf(u, req.team.key)?.head);
   if (office ? !officePerms(req.user, req.team.key).people && !starting : !req.can.people) throw forbidden(office ? 'Only Church Admin leaders can ask people to join.' : 'You don’t have permission to do that.');
   const s = await getSettings();
-  const name = str(req.body.name, 80);
-  const email = str(req.body.email, 200).toLowerCase();
-  if (!name) throw bad('Enter a name.');
-  if (!email.includes('@')) throw bad('Enter an email address; it’s what they sign in with.');
   const keys = await teamKeys(req);
   const positions = (await cleanPositions(req.body.positions)).filter((k) => keys.has(k));
-  const existing = await User.findOne({ email });
+  // Someone already on Crew Call, picked by name (their email stays private)
+  const picked = req.body.userId !== undefined;
+  if (picked && !isId(req.body.userId)) throw bad('Pick someone from the list.');
+  const name = picked ? '' : str(req.body.name, 80);
+  const email = picked ? '' : str(req.body.email, 200).toLowerCase();
+  if (!picked && !name) throw bad('Enter a name.');
+  if (!picked && !email.includes('@')) throw bad('Enter an email address; it’s what they sign in with.');
+  const existing = picked ? await User.findById(req.body.userId) : await User.findOne({ email });
+  if (picked && !existing) throw notFound('That person isn’t on Crew Call anymore.');
   if (existing && office) {
     // Someone with a login already (the pastor on the AV team, the admin…): ask them to join.
     // Church Admin only shows on their profile once they accept.

@@ -7,6 +7,7 @@ import { addDays, forbidden, getSettings, membershipOf, todayIn } from './util.j
 import { forgetTeams, teamsList } from './teams.js';
 import { mailerReady, sendMail } from './mailer.js';
 import { logActivity } from './activity.js';
+import { attachWaiting } from './roomRequests.js';
 
 export const isOfficeTeam = (team) => team?.kind === 'office';
 export const officeTeamKeys = async () => (await teamsList()).filter(isOfficeTeam).map((t) => t.key);
@@ -241,6 +242,8 @@ export async function runOfficeJob() {
   let added = 0;
   for (const series of await OfficeSeries.find({ $or: [{ until: '' }, { until: { $gte: today } }] })) added += await fillSeries(series, today);
   const mail = await remindActionItems(today);
+  // Room requests waiting for a board meeting to be scheduled
+  for (const t of await Team.find({ kind: 'office' }, { key: 1 }).lean()) await attachWaiting(t.key);
   // Tidy the vaults: ended access, and look-ups older than about a year
   await VaultGrant.deleteMany({ expiresAt: { $ne: null, $lt: new Date() } });
   await VaultLog.deleteMany({ createdAt: { $lt: new Date(Date.now() - 400 * 24 * 3600 * 1000) } });

@@ -1,7 +1,7 @@
 // Church Admin: Planning — meetings (agenda, minutes, motions, action items), goals and
 // milestones, action items, votes on record, the yearly calendar, event requests and flow charts.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { addDays, api, fmtDate, fmtDay, fmtTime, todayISO } from '../lib.js';
+import { addDays, api, copyText, fmtDate, fmtDay, fmtTime, todayISO } from '../lib.js';
 import { Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { CommitteeChips, CommitteePicker, committeeName, MEETING_TYPES, TYPES, TypeChip, whenText } from '../office.jsx';
 import Boards from './Boards.jsx';
@@ -12,7 +12,7 @@ const VIEWS = [
   { id: 'actions', tab: 'Action items', blurb: 'Who’s doing what, by when. Owners get an email when something is due.' },
   { id: 'votes', tab: 'Votes on record', blurb: 'Every motion from the meetings you can see, newest first.' },
   { id: 'year', tab: 'Yearly calendar', blurb: 'The church year’s rhythm — Week of Prayer, budget season, nominating. Set it once and fill in each year.', perm: 'plans' },
-  { id: 'requests', tab: 'Event requests', blurb: 'Anyone in Crew Call can ask for a church event or a room. Approve it into the calendar or decline it with a note.', perm: 'approve' },
+  { id: 'requests', tab: 'Requests', blurb: 'Rooms and church events people ask for, in Crew Call or with the room request link. Each one goes on the next board meeting’s agenda. Approve it into the calendar or decline it; they get an email either way.', perm: 'approve' },
   { id: 'boards', tab: 'Flow charts', blurb: 'Sketch processes with boxes and lines, like the budget approval steps. Shared with Church Admin leaders.', leader: true },
 ];
 const STATUS = { 'not-started': 'Not started', 'on-track': 'On track', behind: 'Behind', done: 'Done' };
@@ -1007,6 +1007,7 @@ function YearPlan() {
 }
 
 // ======================= event requests =======================
+const whenLine = (r) => `${fmtDay(r.date)}${r.start ? ` · ${fmtTime(r.start)}${r.end ? `–${fmtTime(r.end)}` : ''}` : ' · all day'}`;
 function EventRequests() {
   const app = useApp();
   const [list, setList] = useState(null);
@@ -1015,11 +1016,11 @@ function EventRequests() {
     load();
   }, [load]);
   const decide = async (r, action) => {
-    const reply = window.prompt(action === 'approve' ? 'A note back to them (optional):' : 'Why not? (they’ll see this)', '');
+    const reply = window.prompt(action === 'approve' ? 'A note back to them (optional). They’ll get it by email:' : 'Why not? They’ll get this by email:', '');
     if (reply === null) return;
     try {
       await api(`/office/requests/${r.id}/${action}`, { method: 'POST', body: { reply } });
-      app.toast(action === 'approve' ? 'Approved and added to the calendar' : 'Declined');
+      app.toast(action === 'approve' ? 'Approved, added to the calendar, and they’ve been emailed' : 'Declined, and they’ve been emailed');
       load();
       app.refreshPending?.();
     } catch (e) {
@@ -1030,22 +1031,65 @@ function EventRequests() {
   const done = (list || []).filter((r) => r.status !== 'pending');
   return (
     <div className="stack-lg">
+      <RequestLink />
       {!list && <div className="loading-inline">Loading…</div>}
       {list && pending.length === 0 && <Empty>No requests waiting.</Empty>}
       {pending.map((r) => (
-        <section key={r.id} className="card stack-sm">
+        <section key={r.id} className="card stack-sm rq-card" aria-label={r.title}>
           <div className="row-wrap spread">
-            <strong>{r.title}</strong>
-            <span className="chip chip-pending">Waiting</span>
+            <strong className="rq-title">{r.title}</strong>
+            <span className="row-wrap tight">
+              {r.source === 'link' && <span className="chip chip-cold">From the request link</span>}
+              <span className="chip chip-pending">Waiting</span>
+            </span>
           </div>
           <div className="small">
-            {fmtDay(r.date)}
-            {r.start ? ` · ${fmtTime(r.start)}${r.end ? `–${fmtTime(r.end)}` : ''}` : ''}
-            {r.room ? ` · ${r.room}` : ''}
+            {whenLine(r)}
+            {r.room ? ` · ${r.room}` : ' · no room picked'}
+            {r.people ? ` · about ${r.people} people` : ''}
             {r.needsAv ? ' · needs AV' : ''}
           </div>
-          {r.notes && <p className="small pre-wrap">{r.notes}</p>}
-          <div className="muted small">Asked by {r.requestedBy || 'someone'}</div>
+          {r.notes && <p className="small pre-wrap rq-notes">“{r.notes}”</p>}
+          <div className="small">
+            Asked by <strong>{r.requestedBy || 'someone'}</strong>
+            {r.contact?.email && (
+              <>
+                {' · '}
+                <a href={`mailto:${r.contact.email}`}>{r.contact.email}</a>
+              </>
+            )}
+            {r.contact?.phone && (
+              <>
+                {' · '}
+                <a href={`tel:${r.contact.phone}`}>{r.contact.phone}</a>
+              </>
+            )}
+          </div>
+          {r.clashes?.length > 0 && (
+            <div className="warn-box small" role="note">
+              <strong>{r.room} is already in use then:</strong>
+              <ul className="rq-clashes">
+                {r.clashes.map((c, i) => (
+                  <li key={i}>
+                    {c.title} {c.start ? `(${fmtTime(c.start)}${c.end ? `–${fmtTime(c.end)}` : ''})` : '(all day)'} {c.kind === 'asked' ? '· another request, waiting' : '· on the calendar'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="small muted rq-agenda">
+            {r.meeting ? (
+              <>
+                <Icon name="cal" size={15} /> On the agenda for{' '}
+                <button type="button" className="link-btn" onClick={() => app.openMeeting?.(r.meeting.id)}>
+                  {r.meeting.title}, {fmtDay(r.meeting.date)}
+                </button>
+                {r.meetsAfter && <span className="rq-late"> · that’s after the date they asked for, so decide here if it can’t wait</span>}
+              </>
+            ) : (
+              'No board meeting is on the calendar yet. It goes on the agenda as soon as one is added.'
+            )}
+          </div>
           <div className="row-wrap">
             <button type="button" className="btn btn-primary" onClick={() => decide(r, 'approve')}>
               Approve
@@ -1062,7 +1106,7 @@ function EventRequests() {
           <ul className="plain-list small">
             {done.map((r) => (
               <li key={r.id}>
-                {r.title} · {fmtDate(r.date)} — {r.status} by {r.decidedBy || '—'}
+                {r.title} · {fmtDate(r.date)} · {r.requestedBy || 'someone'} — {r.status} by {r.decidedBy || '—'}
                 {r.reply ? `: “${r.reply}”` : ''}
               </li>
             ))}
@@ -1070,5 +1114,70 @@ function EventRequests() {
         </details>
       )}
     </div>
+  );
+}
+
+// The link anyone can use to ask for a room, without an account
+function RequestLink() {
+  const app = useApp();
+  const [link, setLink] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api('/office/request-link').then(setLink, () => setLink(null));
+  }, []);
+  const change = async (body, msg) => {
+    setBusy(true);
+    try {
+      setLink(await api('/office/request-link', { method: 'POST', body }));
+      app.toast(msg);
+    } catch (e) {
+      app.toast(e.message);
+    }
+    setBusy(false);
+  };
+  const copy = async () => app.toast((await copyText(link.url)) ? 'Link copied. Paste it in an email, text or the bulletin.' : link.url);
+  if (!link) return null;
+  return (
+    <section className="card stack-sm rq-link" aria-label="Room request link">
+      <div className="row-wrap spread">
+        <div className="stack-xs">
+          <h2>Room request link</h2>
+          <span className="muted small">Share it with any church member. No account needed: they fill in a form, it goes on the next board meeting’s agenda, and they get an email when it’s decided.</span>
+        </div>
+        {link.on ? <span className="chip chip-approved">On</span> : <span className="chip chip-draft">Off</span>}
+      </div>
+      {link.on ? (
+        <>
+          <div className="rq-url">
+            <input readOnly value={link.url} aria-label="Room request link" onFocus={(e) => e.target.select()} />
+            <button type="button" className="btn btn-primary" onClick={copy}>
+              Copy link
+            </button>
+          </div>
+          <div className="row-wrap">
+            <a className="btn btn-ghost btn-sm" href={link.url} target="_blank" rel="noreferrer">
+              Open the form
+            </a>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => change({ on: false }, 'The link is off. Anyone who opens it is asked to call the church office.')}>
+              Turn off
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={busy}
+              onClick={() => window.confirm('Make a new link? The old one stops working, so anyone who has it will need the new one.') && change({ renew: true }, 'New link made. The old one no longer works.')}
+            >
+              Make a new link
+            </button>
+          </div>
+        </>
+      ) : (
+        <div>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => change(link.token ? { on: true } : { renew: true }, 'The room request link is on')}>
+            {link.token ? 'Turn the link back on' : 'Make the link'}
+          </button>
+        </div>
+      )}
+    </section>
   );
 }

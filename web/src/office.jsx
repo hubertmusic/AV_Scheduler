@@ -596,14 +596,14 @@ export function ChurchEvents({ from, to }) {
 
 export function RequestEventModal({ mine = [], onClose, onSent }) {
   const app = useApp();
-  const [f, setF] = useState({ title: '', date: addDays(todayISO(), 7), start: '', end: '', room: '', notes: '', needsAv: false });
+  const [f, setF] = useState({ title: '', date: addDays(todayISO(), 7), start: '', end: '', room: '', people: '', notes: '', needsAv: false });
   const [error, setError] = useState('');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const send = async (e) => {
     e.preventDefault();
     try {
-      const r = await api('/office/requests', { method: 'POST', body: f });
-      app.toast('Sent to Church Admin');
+      const r = await api('/office/requests', { method: 'POST', body: { ...f, people: Number(f.people) || 0 } });
+      app.toast(r.meetingDate ? `Sent. The church board will look at it on ${fmtDate(r.meetingDate)}.` : 'Sent. The church board will look at it at its next meeting.');
       onSent(r);
     } catch (err) {
       setError(err.message);
@@ -612,6 +612,7 @@ export function RequestEventModal({ mine = [], onClose, onSent }) {
   return (
     <Modal title="Ask for a church event or room" onClose={onClose}>
       <form className="stack" onSubmit={send}>
+        <p className="muted small">It goes on the agenda for the next church board meeting. You’ll see the answer here and get an email.</p>
         <label className="field">
           <span>What is it?</span>
           <input required maxLength={120} value={f.title} onChange={set('title')} placeholder="e.g. Youth movie night" />
@@ -630,10 +631,16 @@ export function RequestEventModal({ mine = [], onClose, onSent }) {
             <input type="time" value={f.end} onChange={set('end')} />
           </label>
         </div>
-        <label className="field">
-          <span>Room (optional)</span>
-          <input value={f.room} maxLength={80} onChange={set('room')} placeholder="e.g. Fellowship hall" />
-        </label>
+        <div className="row-wrap fields-2">
+          <label className="field">
+            <span>Room (optional)</span>
+            <input value={f.room} maxLength={80} onChange={set('room')} placeholder="e.g. Fellowship hall" />
+          </label>
+          <label className="field">
+            <span>About how many people?</span>
+            <input type="number" inputMode="numeric" min="0" max="5000" value={f.people} onChange={set('people')} />
+          </label>
+        </div>
         <label className="field">
           <span>Anything else</span>
           <textarea rows={3} maxLength={1000} value={f.notes} onChange={set('notes')} />
