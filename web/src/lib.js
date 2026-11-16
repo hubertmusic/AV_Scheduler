@@ -35,7 +35,7 @@ export function signalSignedOut(message) {
 
 // background: a check the app makes on its own (badges, live feed). It doesn't count as
 // activity, so it won't keep an idle session from timing out.
-export async function api(path, { method = 'GET', body, background = false } = {}) {
+export async function api(path, { method = 'GET', body, background = false, team = null } = {}) {
   if (viewAsId && method !== 'GET' && path !== '/activity/view') {
     const err = new Error('This is a preview, so nothing is saved. Exit the preview to make changes.');
     err.status = 403;
@@ -45,7 +45,7 @@ export async function api(path, { method = 'GET', body, background = false } = {
   if (viewAsId && path === '/activity/view') return null;
   const headers = body !== undefined ? { 'Content-Type': 'application/json' } : {};
   if (viewAsId) headers['X-View-As'] = viewAsId;
-  if (teamKey) headers['X-Team'] = teamKey;
+  if (team || teamKey) headers['X-Team'] = team || teamKey; // `team`: act on another of your teams for this one call
   if (background) headers['X-Background'] = '1';
   const res = await fetch('/api' + path, {
     method,

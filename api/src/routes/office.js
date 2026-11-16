@@ -895,7 +895,8 @@ office.get('/docs/:id/file', wrap(async (req, res) => {
 // ---------- event requests (from anyone) ----------
 office.get('/requests', needOrAdmin('approve'), wrap(async (req, res) => {
   await attachWaiting(req.team.key);
-  const list = await OfficeRequest.find({ team: req.team.key }).sort({ status: -1, date: 1 }).limit(200).lean();
+  // Only what's waiting; every decision is kept in the archive below
+  const list = await OfficeRequest.find({ team: req.team.key, status: 'pending' }).sort({ date: 1 }).limit(500).lean();
   const users = await User.find({ _id: { $in: list.flatMap((r) => [r.requestedBy, r.decidedBy]).filter(Boolean) } }, { name: 1, email: 1, phone: 1 }).lean();
   const names = Object.fromEntries(users.map((u) => [String(u._id), u.name]));
   const meetings = Object.fromEntries((await OfficeEvent.find({ _id: { $in: list.map((r) => r.meeting).filter(Boolean) } }, { title: 1, date: 1, start: 1 }).lean()).map((m) => [String(m._id), m]));
@@ -915,6 +916,85 @@ office.get('/requests', needOrAdmin('approve'), wrap(async (req, res) => {
       }),
     ),
   );
+}));
+
+// ---------- the archive: every decision, kept until the head leader or admin purges it ----------
+const ARCHIVE_PAGE = 50;
+const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+async function archiveFilter(req) {
+  const q = req.query;
+  const f = { team: req.team.key, status: ['approved', 'declined'].includes(q.status) ? q.status : { $in: ['approved', 'declined'] } };
+  const year = Number(q.year);
+  if (year >= 2000 && year <= 2100) {
+    const zone = (await getSettings()).timezone || 'America/New_York';
+    const y = DateTime.fromObject({ year, month: 1, day: 1 }, { zone });
+    f.decidedAt = { $gte: y.toJSDate(), $lt: y.plus({ years: 1 }).toJSDate() };
+  }
+  const text = String(q.q || '').trim().slice(0, 80);
+  if (text) {
+    const re = { $regex: escRe(text), $options: 'i' };
+    const askers = (await User.find({ name: re }, { _id: 1 }).lean()).map((u) => u._id);
+    f.$or = [{ title: re }, { room: re }, { reply: re }, { notes: re }, { 'from.name': re }, { 'from.email': re }, ...(askers.length ? [{ requestedBy: { $in: askers } }] : [])];
+  }
+  return f;
+}
+async function archiveRows(list) {
+  const users = await User.find({ _id: { $in: list.flatMap((r) => [r.requestedBy, r.decidedBy]).filter(Boolean) } }, { name: 1, email: 1, phone: 1 }).lean();
+  const names = Object.fromEntries(users.map((u) => [String(u._id), u.name]));
+  const meetings = Object.fromEntries((await OfficeEvent.find({ _id: { $in: list.map((r) => r.meeting).filter(Boolean) } }, { title: 1, date: 1 }).lean()).map((m) => [String(m._id), m]));
+  return list.map((r) => {
+    const asker = users.find((u) => String(u._id) === String(r.requestedBy));
+    const m = meetings[String(r.meeting)];
+    return {
+      ...requestView(r, names),
+      contact: r.source === 'link' ? { email: r.from?.email || '', phone: r.from?.phone || '' } : { email: asker?.email || '', phone: asker?.phone || '' },
+      meeting: m ? { id: String(m._id), title: m.title, date: m.date } : null,
+      decidedAt: r.decidedAt || null,
+    };
+  });
+}
+// GET /api/office/requests/archive?q=&status=&year=&page=
+office.get('/requests/archive', needOrAdmin('approve'), wrap(async (req, res) => {
+  const f = await archiveFilter(req);
+  const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+  const [total, list, all, oldest] = await Promise.all([
+    OfficeRequest.countDocuments(f),
+    OfficeRequest.find(f).sort({ decidedAt: -1, _id: -1 }).skip((page - 1) * ARCHIVE_PAGE).limit(ARCHIVE_PAGE).lean(),
+    OfficeRequest.countDocuments({ team: req.team.key, status: { $in: ['approved', 'declined'] } }),
+    OfficeRequest.findOne({ team: req.team.key, status: { $in: ['approved', 'declined'] } }, { decidedAt: 1 }).sort({ decidedAt: 1 }).lean(),
+  ]);
+  const first = oldest?.decidedAt ? new Date(oldest.decidedAt).getUTCFullYear() : new Date().getUTCFullYear();
+  const years = [];
+  for (let y = new Date().getUTCFullYear(); y >= first; y--) years.push(y);
+  res.json({ items: await archiveRows(list), total, all, page, pages: Math.max(1, Math.ceil(total / ARCHIVE_PAGE)), years, oldest: oldest?.decidedAt || null, canPurge: isTeamHead(req) });
+}));
+// GET /api/office/requests/archive.csv?q=&status=&year= — the archive as a spreadsheet
+office.get('/requests/archive.csv', needOrAdmin('approve'), wrap(async (req, res) => {
+  const s = await getSettings();
+  const rows = await archiveRows(await OfficeRequest.find(await archiveFilter(req)).sort({ decidedAt: -1 }).limit(50000).lean());
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const day = (d) => (d ? DateTime.fromJSDate(new Date(d)).setZone(s.timezone || 'America/New_York').toFormat('yyyy-LL-dd HH:mm') : '');
+  const lines = [['Decided', 'Decision', 'Decided by', 'Note to them', 'Request', 'Date', 'From', 'To', 'Room', 'People', 'Needs AV', 'Their notes', 'Asked by', 'Email', 'Phone', 'Came in', 'Asked on', 'Board meeting'].map(cell).join(',')];
+  for (const r of rows)
+    lines.push([day(r.decidedAt), r.status, r.decidedBy, r.reply, r.title, r.date, r.start, r.end, r.room, r.people || '', r.needsAv ? 'yes' : '', r.notes, r.requestedBy, r.contact.email, r.contact.phone, r.source === 'link' ? 'request link' : 'Crew Call', day(r.createdAt), r.meeting ? `${r.meeting.title} ${r.meeting.date}` : ''].map(cell).join(','));
+  res.locals.activity = 'Downloaded the room request archive';
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="room-request-decisions-${todayIn(s.timezone)}.csv"` });
+  res.send('\ufeff' + lines.join('\r\n') + '\r\n');
+}));
+// POST /api/office/requests/purge { before: 'YYYY-MM-DD', status?, confirm? } — decisions made before
+// that day. Without confirm it only counts. Only the head leader or the admin; never waiting ones.
+office.post('/requests/purge', requireTeamHead, wrap(async (req, res) => {
+  const b = req.body || {};
+  if (!DATE_RE.test(b.before || '')) throw bad('Pick a date: decisions made before it are purged.');
+  const s = await getSettings();
+  const cutoff = DateTime.fromISO(b.before, { zone: s.timezone || 'America/New_York' }).startOf('day').toJSDate();
+  const f = { team: req.team.key, status: ['approved', 'declined'].includes(b.status) ? b.status : { $in: ['approved', 'declined'] }, decidedAt: { $lt: cutoff } };
+  const count = await OfficeRequest.countDocuments(f);
+  if (!b.confirm) return res.json({ count });
+  if (Number(b.count) !== count) throw bad('The number to purge changed. Check it again.');
+  const { deletedCount } = await OfficeRequest.deleteMany(f);
+  res.locals.activity = `Purged ${deletedCount} room request decision${deletedCount === 1 ? '' : 's'} made before ${b.before}`;
+  res.json({ purged: deletedCount });
 }));
 
 // The room request link (/reserve/<token>): anyone with it can ask without an account

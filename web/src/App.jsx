@@ -362,6 +362,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       vault: boot.vault || null, // { keeper } or { until } when they see this team's vault
       officeCan: boot.officeAccess?.can || can,
       officeMember: boot.officeAccess ? boot.officeAccess.member : true,
+      addTo: boot.addTo || [], // teams they can bring someone onto (Team & roles)
       seesRoster: boot.seesRoster !== false,
       officeMeeting,
       openMeeting: (id) => {

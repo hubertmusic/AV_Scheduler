@@ -173,4 +173,56 @@ for (let i = 0; i < 5; i++) ok(await pub2('POST', `/api/reserve/${link.token}`, 
 ok(await pub2('POST', `/api/reserve/${link.token}`, { ...bake, title: 'One too many' }), 429);
 step('eight sent requests an hour from one place; fixing a mistake doesn’t count');
 
+// ---------- the archive: every decision kept until the head leader or admin purges it ----------
+const waitingNow = ok(await lee.c('GET', '/api/office/requests'));
+assert.ok(waitingNow.length === 5 && waitingNow.every((r) => r.status === 'pending'), 'the main list is only what’s waiting');
+let arch = ok(await lee.c('GET', '/api/office/requests/archive'));
+assert.equal(arch.total, 3);
+assert.equal(arch.all, 3);
+assert.deepEqual(arch.items.map((r) => r.title), ['Youth movie night', 'Bake sale', 'Baby shower'], 'newest decision first');
+const archShower = arch.items.find((r) => r.title === 'Baby shower');
+assert.deepEqual([archShower.status, archShower.decidedBy, archShower.reply, archShower.requestedBy, archShower.contact.email, archShower.meeting.title], ['approved', 'Lee', 'Please stack the chairs after.', 'Maria Lopez', 'maria@example.com', 'Church board']);
+assert.ok(archShower.decidedAt);
+assert.equal(arch.canPurge, false, 'only the head leader or the admin purges');
+assert.deepEqual(ok(await lee.c('GET', '/api/office/requests/archive?status=declined')).items.map((r) => r.title), ['Bake sale']);
+assert.deepEqual(ok(await lee.c('GET', '/api/office/requests/archive?q=MARIA')).items.map((r) => r.title), ['Baby shower'], 'search by who asked (link)');
+assert.deepEqual(ok(await lee.c('GET', '/api/office/requests/archive?q=ben')).items.map((r) => r.title), ['Youth movie night'], 'search by who asked (member)');
+assert.deepEqual(ok(await lee.c('GET', '/api/office/requests/archive?q=chairs')).items.map((r) => r.title), ['Baby shower'], 'search the note back');
+assert.equal(ok(await lee.c('GET', '/api/office/requests/archive?q=(')).total, 0, 'odd characters are just text');
+const thisYear = new Date().getUTCFullYear();
+assert.equal(ok(await lee.c('GET', `/api/office/requests/archive?year=${thisYear}`)).total, 3);
+assert.equal(ok(await lee.c('GET', '/api/office/requests/archive?year=2001')).total, 0);
+assert.ok(arch.years.includes(thisYear));
+ok(await sam.c('GET', '/api/office/requests/archive'), 403);
+ok(await ben.c('GET', '/api/office/requests/archive'), 403);
+step('every decision is kept in the archive: newest first, searchable by who asked, the request or the note, by year and decision');
+
+// Download it as a spreadsheet (a plain link works, with ?team=)
+const leePlain = client();
+ok(await leePlain('POST', '/api/auth/login', { email: 'lee@example.com', password: 'password123' }));
+const csv = ok(await leePlain('GET', `/api/office/requests/archive.csv?team=${O}`));
+const rows = csv.replace(/^\ufeff/, '').trim().split('\r\n');
+assert.equal(rows.length, 4, 'a header and three decisions');
+assert.match(rows[0], /^"Decided","Decision","Decided by","Note to them","Request"/);
+assert.ok(csv.includes('"maria@example.com"') && csv.includes('"request link"') && csv.includes('"Crew Call"'));
+assert.equal(ok(await leePlain('GET', `/api/office/requests/archive.csv?team=${O}&status=declined`)).trim().split('\r\n').length, 2, 'the download follows the filters');
+ok(await sam.c('GET', '/api/office/requests/archive.csv'), 403);
+step('the archive downloads as a spreadsheet, whole or filtered');
+
+// Purge: the head leader or the admin, decisions older than a date; it counts first
+ok(await lee.c('POST', '/api/office/requests/purge', { before: iso(1) }), 403);
+assert.equal(ok(await olivia.c('GET', '/api/office/requests/archive')).canPurge, true);
+assert.deepEqual(ok(await olivia.c('POST', '/api/office/requests/purge', { before: iso(0) })), { count: 0 }, 'today’s decisions aren’t older than today');
+assert.deepEqual(ok(await olivia.c('POST', '/api/office/requests/purge', { before: iso(1) })), { count: 3 });
+assert.deepEqual(ok(await olivia.c('POST', '/api/office/requests/purge', { before: iso(1), status: 'declined' })), { count: 1 });
+assert.equal(ok(await lee.c('GET', '/api/office/requests/archive')).total, 3, 'counting doesn’t remove anything');
+ok(await olivia.c('POST', '/api/office/requests/purge', { before: iso(1), status: 'declined', confirm: true, count: 2 }), 400);
+ok(await olivia.c('POST', '/api/office/requests/purge', { before: 'soon', confirm: true }), 400);
+assert.deepEqual(ok(await olivia.c('POST', '/api/office/requests/purge', { before: iso(1), status: 'declined', confirm: true, count: 1 })), { purged: 1 });
+assert.deepEqual(ok(await lee.c('GET', '/api/office/requests/archive')).items.map((r) => r.title), ['Youth movie night', 'Baby shower']);
+assert.equal(ok(await lee.c('GET', '/api/office/requests')).length, 5, 'waiting requests are never purged');
+assert.ok(ok(await lee.c('GET', `/api/office/events/${meet1.id}`)).agenda.some((a) => a.title === 'Room request (declined): Bake sale'), 'the meeting’s agenda keeps its record');
+assert.deepEqual(ok(await adminO('POST', '/api/office/requests/purge', { before: iso(1) })), { count: 2 }, 'the admin can purge too');
+step('purging: only the head leader or the admin, decisions made before a date, counted first, never waiting requests');
+
 console.log('\nAll room request checks passed.');

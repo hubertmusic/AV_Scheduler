@@ -404,6 +404,12 @@ assert.ok(!ok(await adminO('GET', '/api/office/committees')).find((c) => c.key =
 step('the admin is on Church Admin only when its leaders ask and they accept; committee places come from the head leader');
 
 // ---------- tiers: the pastor on the AV team is asked to join ----------
+// Which teams each person can bring someone onto, from Team & roles
+assert.deepEqual(ok(await oliviaC('GET', '/api/bootstrap')).addTo, [{ key: O, name: 'Church Admin', ask: true }]);
+const adminAddTo = ok(await admin('GET', '/api/bootstrap')).addTo;
+assert.ok(adminAddTo.some((t) => t.key === 'av' && !t.ask) && adminAddTo.some((t) => t.key === 'praise' && !t.ask), 'the admin adds to every service team');
+assert.ok(!adminAddTo.some((t) => t.key === O), 'but not to Church Admin once it has a head leader');
+assert.deepEqual(ok(await samC('GET', '/api/bootstrap')).addTo, [], 'a board member without the privilege can’t add anyone');
 // Picked by name from everyone on Crew Call (no email needed)
 assert.ok(ok(await oliviaC('GET', '/api/bootstrap')).everyone.some((p) => p.id === ben.id), 'the picker lists people on other teams');
 ok(await oliviaC('POST', '/api/people', { userId: 'nope' }), 400);

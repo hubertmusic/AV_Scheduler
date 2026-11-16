@@ -1027,3 +1027,12 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 .rq-late { color: var(--amber-ink, #8a5a00); }
 .rq-url { display: flex; gap: 8px; flex-wrap: wrap; }
 .rq-url input { flex: 1 1 260px; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--field); background: var(--ground); font-family: var(--mono); font-size: 13px; }
+.ra-filters input[type='search'] { min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--field); background: var(--surface); font-size: 15px; flex: 1 1 240px; }
+.ra-filters select { min-height: 44px; }
+.ra-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ra-list > li { border-top: 1px solid var(--line); }
+.ra-item summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; min-height: 44px; }
+.ra-body { padding: 0 0 12px 4px; }
+.ra-body .link-btn { padding: 0; min-height: 0; }
+.ap-results { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ap-fail { color: var(--red); }
