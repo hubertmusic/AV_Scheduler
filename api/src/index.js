@@ -104,7 +104,7 @@ app.use((err, req, res, next) => {
   const status = err.status || 500;
   if (status >= 500 && !(err instanceof HttpError)) console.error(err);
   // Our own 5xx errors (e.g. "the NAS isn't reachable") carry a message meant for people.
-  res.status(status).json({ error: status >= 500 && !(err instanceof HttpError) ? 'Something went wrong on the server.' : err.message });
+  res.status(status).json({ error: status >= 500 && !(err instanceof HttpError) ? 'Something went wrong on the server.' : err.message, ...(err.extra || {}) });
 });
 
 // One-time data updates, each applied once and remembered in Settings.

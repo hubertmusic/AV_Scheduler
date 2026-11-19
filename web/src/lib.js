@@ -57,6 +57,7 @@ export async function api(path, { method = 'GET', body, background = false, team
   if (!res.ok) {
     const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
+    err.data = data;
     if (res.status === 401 && !path.startsWith('/auth/') && !path.startsWith('/guest/') && path !== '/bootstrap') signalSignedOut(err.message);
     throw err;
   }

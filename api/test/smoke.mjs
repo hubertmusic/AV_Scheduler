@@ -104,7 +104,7 @@ const feedPath = new URL(me1.calUrl).pathname;
 let ics = await crew1('GET', feedPath);
 assert.equal(ics.status, 200);
 assert.match(ics.data, /BEGIN:VCALENDAR/);
-assert.match(ics.data, /SUMMARY:FOH Audio — Vespers/);
+assert.match(ics.data.replace(/\r\n /g, ''), /SUMMARY:Vespers — FOH Audio/, 'titled like a roster entry: service, then role');
 assert.equal(shiftsIn(ics.data), 1);
 assert.match(ics.data.replace(/\r\n /g, ''), /\r\nURL:http[^\r]*\/#mine\r\n/, 'each event links back to My shifts');
 step('personal calendar feed lists the shift');
@@ -135,7 +135,17 @@ const pr = ok(await crew1('POST', '/api/requests', { type: 'pickup', eventId: wo
 ok(await admin('POST', `/api/requests/${pr.id}/approve`));
 // Swap Marcus's Worship stream with Nia's Vespers stream. While Nia is also on
 // Worship (FOH) the swap would double-book her, so it isn't offered.
-ok(await admin('PUT', `/api/events/${vespers.id}/assign/stream`, { userId: n.person.id }), 200);
+// Booking someone twice at one service warns first, and goes through once the leader confirms
+const dbl = ok(await admin('PUT', `/api/events/${vespers.id}/assign/stream`, { userId: n.person.id }), 409);
+assert.match(dbl.error, /^Nia J\. is already on FOH Audio at this service\.$/);
+assert.deepEqual(dbl.double, ['FOH Audio']);
+ok(await admin('PUT', `/api/events/${vespers.id}/assign/stream`, { userId: n.person.id, confirmDouble: true }), 200);
+const niaIcs = (await client()('GET', new URL(ok(await crew2('GET', '/api/bootstrap')).me.calUrl).pathname)).data.replace(/\r\n /g, '');
+assert.match(niaIcs, /SUMMARY:⚠️ Double-booked: Vespers — Stream Audio/, 'double bookings are flagged in the calendar title');
+assert.match(niaIcs, /⚠️ DOUBLE-BOOKED\\nYou’re also on FOH Audio/, 'and at the top of the description');
+assert.match(niaIcs, /TRIGGER:-P1D/, 'with an extra reminder the day before');
+const niaShift = ok(await crew2('GET', '/api/me/overview')).shifts.find((x) => x.id === vespers.id && x.position === 'stream');
+assert.equal(niaShift.alsoOn[0].startsWith('FOH Audio'), true, 'My shifts flags it too');
 let sw = ok(await crew1('GET', `/api/requests/options?type=swap&eventId=${worship.id}&position=stream`));
 assert.ok(!sw.some((o) => o.eventId === vespers.id), 'double-booking swap must not be offered');
 ok(await admin('PUT', `/api/events/${worship.id}/assign/foh`, { userId: boot.me.id }));
@@ -210,7 +220,7 @@ const scRow = events.find((e) => e.id === sc.id);
 assert.equal(scRow.assignments.stream, n.person.id);
 ics = await crew2('GET', new URL(ok(await crew2('GET', '/api/bootstrap')).me.calUrl).pathname);
 assert.match(ics.data, /Sound check · Worship Service/);
-assert.match(ics.data, /Sound checking: Praise Team/);
+assert.match(ics.data.replace(/\r\n /g, ''), /SOUND CHECKING\\nPraise Team/);
 step('outside groups, sound checks copy the service crew and land in calendars');
 
 const tmpl = ok(await admin('GET', '/api/bootstrap')).settings.weekendTemplate;
@@ -501,7 +511,7 @@ ok(await admin('PUT', `/api/events/${worship3.id}/assign/nope+shadow`, { userId:
 const eliOv = ok(await eli.c('GET', '/api/me/overview'));
 assert.ok(eliOv.shifts.some((x) => x.shadow && x.position === 'light'));
 const eliIcs = await eli.c('GET', new URL(ok(await eli.c('GET', '/api/bootstrap')).me.calUrl).pathname);
-assert.match(eliIcs.data, /Lighting \(shadowing\) — Worship Service/);
+assert.match(eliIcs.data.replace(/\r\n /g, ""), /Worship Service — Lighting \(shadowing\)/);
 step('trainee shadow spots show in My shifts and calendars');
 
 // Copy last weekend onto the following one
@@ -575,9 +585,9 @@ const devShift = ok(await dev.c('GET', '/api/me/overview')).shifts.find((x) => x
 assert.match(devShift.regular, new RegExp(`${['', '1st', '2nd', '3rd', '4th', '5th'][Number(nth5)]} Sabbath`));
 const devFeed = await client()('GET', new URL(ok(await dev.c('GET', '/api/bootstrap')).me.calUrl).pathname);
 const devIcs = devFeed.data.replace(/\r\n /g, '');
-assert.match(devIcs, /This is your regular .*Sabbath.* shift/, 'calendar says it is their regular shift');
+assert.match(devIcs, /Your regular .*Sabbath.* shift/, 'calendar says it is their regular shift');
 assert.match(devIcs, /TRIGGER:-P5D/, 'calendar alert 5 days before');
-assert.match(devIcs, /You're on Lighting for Worship Service on Sabbath/);
+assert.match(devIcs, /You’re on Lighting for Worship Service on Sabbath/);
 ok(await admin('PATCH', '/api/settings', { calendarAlertDays: 0 }));
 assert.doesNotMatch((await client()('GET', new URL(ok(await dev.c('GET', '/api/bootstrap')).me.calUrl).pathname)).data, /TRIGGER:-P\d+D/, 'alert can be turned off');
 ok(await admin('PATCH', '/api/settings', { calendarAlertDays: 5 }));
@@ -619,7 +629,7 @@ step('build ahead: upcoming weekends are built from the template with regulars p
 const t0 = ok(await admin('GET', '/api/bootstrap')).settings.weekendTemplate;
 const t1 = t0.map((t) => (t.title === 'Worship Service' ? { ...t, call: '09:55', needs: t.needs.filter((k) => k !== 'prod') } : t));
 ok(await admin('PATCH', '/api/settings', { weekendTemplate: t1 }));
-ok(await admin('PUT', `/api/events/${worship5.id}/assign/prod`, { userId: dev.id }));
+ok(await admin('PUT', `/api/events/${worship5.id}/assign/prod`, { userId: dev.id, confirmDouble: true })); // also on Lighting: booked on purpose
 let syncR = ok(await admin('POST', '/api/events/weekend', { friday: fri5 }));
 const diff = syncR.differs.find((d) => d.id === worship5.id);
 assert.ok(diff && diff.changed.includes('times') && diff.changed.includes('positions') && diff.placedOnDropped === 1, JSON.stringify(syncR));
@@ -697,7 +707,7 @@ assert.equal(ann.weekly[friday].text, 'Communion this Sabbath — extra mic at t
 const feedText = (await crew2('GET', new URL(ok(await crew2('GET', '/api/bootstrap')).me.calUrl).pathname)).data.replace(/\r\n /g, '');
 assert.match(feedText, /IMPORTANT: Arrive 15 minutes before call time/);
 assert.match(feedText, /THIS WEEKEND: Communion this Sabbath/);
-assert.match(feedText, /IMPORTANT FOR THIS SHIFT: Baptism after the sermon/);
+assert.match(feedText, /📌 READ FIRST\\n.*FOR THIS SHIFT: Baptism after the sermon/);
 const rs2 = ok(await crew1('GET', `/api/weekend/runsheet/${worship.id}`));
 assert.equal(rs2.notices.weekly, 'Communion this Sabbath — extra mic at the table.');
 ok(await admin('PUT', `/api/announcements/weekly/${friday}`, { text: '' }));

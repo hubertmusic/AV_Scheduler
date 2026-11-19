@@ -32,8 +32,25 @@ function fold(line) {
   return parts.join('\r\n');
 }
 
+// 24-hour "13:05" → "1:05 PM"
+export const t12 = (t) => {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+// Who's serving, one team at a time, one person per line
+const lineupText = (lineup) =>
+  (lineup || []).map((t) => [t.team, ...t.rows.map((r) => `• ${r.label}: ${r.name}${r.you ? ' (you)' : ''}`)].join('\n')).join('\n\n');
+// Sections with a label and a blank line between them, so the description is easy to scan
+const sections = (list) =>
+  list
+    .filter((x) => x && x[1])
+    .map(([label, text]) => (label ? `${label}\n${text}` : text))
+    .join('\n\n');
+const RULE = '────────────';
+
 /**
- * items: [{ uid, event, positionLabel, crew, lineup, updatedAt }]
+ * items: [{ uid, event, positionLabel, teamName, confirmed, alsoOn, lineup, updatedAt }]
  * A shift (positionLabel set) starts at the call time so people arrive on time, with reminders.
  * Every other service and rehearsal (positionLabel empty) is shown as free time, with who's
  * serving on each team, so everyone sees the whole picture from one subscription.
@@ -65,16 +82,24 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
     let end = localToDate(e.date, e.end, tz);
     if (end <= start) end = new Date(start.getTime() + 2 * 3600 * 1000);
     const isCheck = e.kind === 'soundcheck';
-    const top = [...(it.notices || []), e.notes ? `IMPORTANT FOR THIS SHIFT: ${e.notes}` : ''].filter(Boolean);
-    const body = [
-      `${it.positionLabel} for ${e.title}.`,
-      it.viaRegular ? `This is your regular ${it.viaRegular} shift.` : '',
-      `Call time ${e.call}, ${isCheck ? 'sound check' : 'service'} starts ${e.start}.`,
-      it.groups ? `${isCheck ? 'Sound checking' : 'With'}: ${it.groups}` : '',
-      it.lineup ? `Who's serving:\n${it.lineup}` : it.crew ? `Crew: ${it.crew}` : '',
-      link ? `Confirm, swap, transfer or drop this shift in Crew Call: ${link}` : 'Confirm, swap, transfer or drop this shift in Crew Call.',
-    ].filter(Boolean);
-    const desc = [...top, ...(top.length ? [''] : []), ...body].join('\n');
+    const role = `${it.positionLabel}${it.teamName ? ` (${it.teamName})` : ''}`;
+    const double = it.alsoOn?.length ? it.alsoOn.join(' and ') : '';
+    const important = [...(it.notices || []), e.notes ? `FOR THIS SHIFT: ${e.notes}` : ''].filter(Boolean).join('\n\n');
+    const desc = sections([
+      double && ['⚠️ DOUBLE-BOOKED', `You’re also on ${double} at this ${isCheck ? 'sound check' : 'service'}. Make sure you can cover both, or talk to a leader.`],
+      important && ['📌 READ FIRST', important],
+      ['YOUR ROLE', [role, it.viaRegular ? `Your regular ${it.viaRegular} shift` : ''].filter(Boolean).join('\n')],
+      ['TIMES', [`Arrive: ${t12(e.call)}`, `${isCheck ? 'Sound check' : 'Service'}: ${t12(e.start)}${e.end ? ` – ${t12(e.end)}` : ''}`, dayWord(e.date, tz)].join('\n')],
+      it.groups && [isCheck ? 'SOUND CHECKING' : 'WITH', it.groups],
+      ['WHO’S SERVING', it.lineup?.length ? lineupText(it.lineup) : it.crew || ''],
+      ['', RULE],
+      [
+        it.confirmed ? '✓ CONFIRMED' : 'PLEASE CONFIRM',
+        [it.confirmed ? 'You’ve confirmed this shift.' : 'You haven’t confirmed this shift yet.', `${it.confirmed ? 'Swap' : 'Confirm, swap'}, transfer or drop it in Crew Call${link ? `:\n${link}` : '.'}`].join('\n'),
+      ],
+    ]);
+    const title = `${e.title} — ${role}`;
+    const alarm = (trigger, text) => ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(text)}`, `TRIGGER:${trigger}`, 'END:VALARM'];
     lines.push(
       'BEGIN:VEVENT',
       `UID:${it.uid}`,
@@ -82,25 +107,15 @@ export function buildCalendar({ name, tz, items, link = '', alertDays = 0 }) {
       `LAST-MODIFIED:${fmt(it.updatedAt || new Date())}`,
       `DTSTART:${fmt(start)}`,
       `DTEND:${fmt(end)}`,
-      `SUMMARY:${esc(`${it.positionLabel} — ${e.title}`)}`,
+      `SUMMARY:${esc(double ? `⚠️ Double-booked: ${title}` : title)}`,
       `DESCRIPTION:${esc(desc)}`,
       ...(link ? [`URL:${link}`] : []),
       'STATUS:CONFIRMED',
       'TRANSP:OPAQUE',
-      ...(alertDays > 0
-        ? [
-            'BEGIN:VALARM',
-            'ACTION:DISPLAY',
-            `DESCRIPTION:${esc(`You're on ${it.positionLabel} for ${e.title} on ${dayWord(e.date, tz)}`)}`,
-            `TRIGGER:-P${alertDays}D`,
-            'END:VALARM',
-          ]
-        : []),
-      'BEGIN:VALARM',
-      'ACTION:DISPLAY',
-      `DESCRIPTION:${esc(`Call time for ${e.title}`)}`,
-      'TRIGGER:-PT60M',
-      'END:VALARM',
+      ...(alertDays > 0 ? alarm(`-P${alertDays}D`, `You’re on ${it.positionLabel} for ${e.title} on ${dayWord(e.date, tz)}${double ? `, and also on ${double}` : ''}`) : []),
+      // A double booking gets its own heads-up the day before
+      ...(double && alertDays !== 1 ? alarm('-P1D', `Heads up: tomorrow you’re double-booked at ${e.title}: ${it.positionLabel} and ${double}`) : []),
+      ...alarm('-PT60M', `Call time for ${e.title} (${it.positionLabel}${double ? ` + ${double}` : ''}) is ${t12(e.call)}`),
       'END:VEVENT'
     );
   }
@@ -155,14 +170,12 @@ function infoEvent(it, tz, now, link) {
   let end = localToDate(e.date, e.end, tz);
   if (end <= start) end = new Date(start.getTime() + 2 * 3600 * 1000);
   const kind = { soundcheck: 'Sound check', rehearsal: `${it.teamName || 'Team'} rehearsal` }[e.kind] || 'Service';
-  const desc = [
-    `${kind}: ${e.title}. Starts ${e.start}.`,
-    e.notes ? `Note: ${e.notes}` : '',
-    it.lineup ? `Who's serving:\n${it.lineup}` : 'No one is scheduled yet.',
-    link ? `Contacts and details in Crew Call: ${link}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  const desc = sections([
+    [kind.toUpperCase(), [`${t12(e.start)}${e.end ? ` – ${t12(e.end)}` : ''}`, dayWord(e.date, tz)].join('\n')],
+    e.notes && ['📌 NOTE', e.notes],
+    ['WHO’S SERVING', it.lineup?.length ? lineupText(it.lineup) : 'No one is scheduled yet.'],
+    link && ['', `Contacts and details in Crew Call:\n${link}`],
+  ]);
   return [
     'BEGIN:VEVENT',
     `UID:${it.uid}`,

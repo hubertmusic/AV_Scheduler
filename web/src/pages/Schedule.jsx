@@ -103,7 +103,7 @@ export default function Schedule() {
         if (!uid) continue;
         filled++;
         const p = person(uid);
-        const flag = counts[uid] > 1 ? 'Double-booked' : e.away.includes(uid) ? 'Away that day' : e.unavailable.includes(uid) ? 'Marked unavailable' : p && !p.active ? 'Deactivated' : '';
+        const flag = counts[uid] > 1 || e.elsewhere?.[uid]?.length ? 'Double-booked' : e.away.includes(uid) ? 'Away that day' : e.unavailable.includes(uid) ? 'Marked unavailable' : p && !p.active ? 'Deactivated' : '';
         if (flag) flags.push({ eventId: e.id, pos: k, flag, name: p?.name || 'Unknown', where: `${posLabel(k)}, ${e.title}` });
       }
     }
@@ -128,7 +128,14 @@ export default function Schedule() {
   const place = async (eventId, pos, userId) => {
     setBusy(true);
     try {
-      await api(`/events/${eventId}/assign/${pos}`, { method: 'PUT', body: { userId } });
+      try {
+        await api(`/events/${eventId}/assign/${pos}`, { method: 'PUT', body: { userId } });
+      } catch (err) {
+        // Already serving at this service (maybe on another team): book them only if the leader says so
+        if (!err.data?.double) throw err;
+        if (!window.confirm(`${err.message}\n\nBook them on both anyway? They’ll get a double-booking warning and an extra reminder in their calendar.`)) return;
+        await api(`/events/${eventId}/assign/${pos}`, { method: 'PUT', body: { userId, confirmDouble: true } });
+      }
       patchLocal(eventId, pos, userId);
       const ev = events.find((e) => e.id === eventId);
       const label = pos.endsWith(SH) ? `${posLabel(pos.slice(0, -SH.length))} (shadow)` : posLabel(pos);
@@ -570,9 +577,11 @@ function PlacePanel({ event, pos, events, busy, autoNext, setAutoNext, onPlace, 
     const unav = event.unavailable.includes(p.id);
     const away = event.away.includes(p.id);
     const other = Object.entries(event.assignments).find(([k, v]) => v === p.id && k !== slot)?.[0];
+    const elsewhere = event.elsewhere?.[p.id] || [];
     if (away) return ['Away that day', 4, true];
     if (unav) return ['Marked unavailable for this service', 3, true];
     if (other) return [`Already on ${other.endsWith(SH) ? `${posLabel(other.slice(0, -SH.length))} (shadow)` : posLabel(other)} this service`, 2, true];
+    if (elsewhere.length) return [`Already on ${elsewhere.join(' and ')} this service`, 2, true];
     return null;
   };
   const trainees = people
