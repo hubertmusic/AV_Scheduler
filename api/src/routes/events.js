@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { DateTime } from 'luxon';
 import { Assignment, Event, EVENT_KINDS, Group, Position, Request, Skip, Unavailable, User } from '../models.js';
 import { requirePerm } from '../auth.js';
-import { addDays, bad, DATE_RE, forbidden, fridayOf, getSettings, isId, notFound, str, TIME_RE, wrap } from '../lib/util.js';
+import { addDays, bad, DATE_RE, forbidden, fridayOf, getSettings, HttpError, isId, notFound, str, TIME_RE, wrap } from '../lib/util.js';
 import { eventView } from '../lib/views.js';
 import { deletePlanFor } from './plans.js';
 import { awayByEvent, slotValid, touchAvailability } from '../lib/availability.js';
@@ -79,11 +79,19 @@ eventsRouter.get('/', wrap(async (req, res) => {
   const keys = await teamKeys(req);
   const out = events.map((e) => ({ ...eventView(e), needs: onlyTeam(e.needs, keys), otherNeeds: e.needs.filter((k) => !keys.has(k)).length, otherFilled: 0, assignments: {}, confirmed: {}, unavailable: [], away: [...(away[String(e._id)] || [])] }));
   const byId = Object.fromEntries(out.map((e) => [e.id, e]));
+  // Where people are serving on other teams at the same service, so leaders see a double booking coming
+  const [plist, tlist] = await Promise.all([positionsList(), teamsList()]);
+  const elsewhereLabel = (pos) => {
+    const p = plist.find((x) => x.key === baseKey(pos));
+    const t = tlist.find((x) => x.key === (p?.team || 'av'));
+    return `${p?.label || baseKey(pos)}${pos.endsWith('+shadow') ? ' (shadowing)' : ''}${t ? ` (${t.name})` : ''}`;
+  };
   for (const a of asg) {
     const e = byId[String(a.event)];
     if (!e) continue;
     if (!keys.has(baseKey(a.position))) {
       if (!a.position.endsWith('+shadow')) e.otherFilled++;
+      ((e.elsewhere ||= {})[String(a.user)] ||= []).push(elsewhereLabel(a.position));
       continue;
     }
     e.assignments[a.position] = String(a.user);
@@ -341,6 +349,17 @@ eventsRouter.put('/:id/assign/:position', requirePerm('edit'), wrap(async (req, 
   if (!user || !user.active) throw bad('That person isn’t active.');
   if (user.role !== 'admin' && !(user.teams || []).some((m) => m.team === req.team.key)) throw bad(`${user.name} isn’t on the ${req.team.name}.`);
   if (existing && String(existing.user?._id) === String(user._id)) return res.json({ ok: true });
+  // Already serving at this service (on any team)? Say so, and book them only once the leader confirms.
+  const others = await Assignment.find({ event: ev._id, user: user._id, position: { $ne: position } }).lean();
+  if (others.length && !req.body.confirmDouble) {
+    const [plist, tlist] = await Promise.all([positionsList(), teamsList()]);
+    const where = others.map((o) => {
+      const p = plist.find((x) => x.key === baseKey(o.position));
+      const t = tlist.find((x) => x.key === (p?.team || 'av'));
+      return `${p?.label || baseKey(o.position)}${o.position.endsWith('+shadow') ? ' (shadowing)' : ''}${t && t.key !== req.team.key ? ` on the ${t.name}` : ''}`;
+    });
+    throw new HttpError(409, `${user.name} is already on ${where.join(' and ')} at this service.`, { double: where });
+  }
   if (existing) {
     // A new person has to confirm and be reminded again.
     Object.assign(existing, { user: user._id, confirmedAt: null, reminderEmailAt: null, waRemindedAt: null, viaRegular: '' });
@@ -348,7 +367,7 @@ eventsRouter.put('/:id/assign/:position', requirePerm('edit'), wrap(async (req, 
   } else {
     await Assignment.create({ event: ev._id, position, user: user._id });
   }
-  res.locals.activity = `Placed ${user.name} on ${label} · ${evName(ev)}`;
+  res.locals.activity = `Placed ${user.name} on ${label} · ${evName(ev)}${others.length ? ' (double-booked, confirmed)' : ''}`;
   res.json({ ok: true });
 }));
 

@@ -244,7 +244,7 @@ const icsOf = async (c) => {
 };
 const benIcs = await icsOf(benC);
 assert.equal(shiftsIn(benIcs), 1, 'Ben has one shift');
-assert.match(benIcs, /Who's serving:/);
+assert.match(benIcs, /WHO’S SERVING/);
 assert.match(benIcs, /Praise & Worship/);
 assert.match(benIcs, /Vocals: Tia/);
 assert.match(benIcs, /Praise & Worship rehearsal — Midweek rehearsal/, 'AV crew see Praise rehearsals');

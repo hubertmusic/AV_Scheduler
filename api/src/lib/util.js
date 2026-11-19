@@ -3,9 +3,10 @@ import { DateTime } from 'luxon';
 import { PERMS, Settings } from '../models.js';
 
 export class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, extra = null) {
     super(message);
     this.status = status;
+    this.extra = extra; // more for the app, e.g. { double: [...] } so it can ask "book them anyway?"
   }
 }
 export const bad = (msg) => new HttpError(400, msg);

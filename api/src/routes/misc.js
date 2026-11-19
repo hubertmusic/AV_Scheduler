@@ -146,6 +146,18 @@ meRouter.get('/overview', wrap(async (req, res) => {
   // My shifts cover every team I'm on; each shift says which team it's for
   const posTeam = await positionTeams();
   const teamOf = (pos) => posTeam[baseOf(pos)] || 'av';
+  // Double bookings: every spot I hold at each service, named with its team
+  const [plist, tlist] = await Promise.all([positionsList(), teamsList()]);
+  const spot = (pos) => {
+    const p = plist.find((x) => x.key === baseOf(pos));
+    const t = tlist.find((x) => x.key === teamOf(pos));
+    return `${p?.label || baseOf(pos)}${isShadow(pos) ? ' (shadowing)' : ''}${t ? ` (${t.name})` : ''}`;
+  };
+  const mySlots = {};
+  for (const k of Object.keys(mine)) {
+    const [eid, pos] = k.split('|');
+    (mySlots[eid] ||= []).push(pos);
+  }
   for (const e of events) {
     const eid = String(e._id);
     for (const pos of [...e.needs, ...e.needs.map((k) => `${k}+shadow`)]) {
@@ -155,7 +167,7 @@ meRouter.get('/overview', wrap(async (req, res) => {
         const a = mine[key];
         // A learner shadowing this spot, for a Lead (or the admin) to sign off
         const learner = !isShadow(pos) && (me.role === 'admin' || me.leads?.includes(pos)) ? slotHolder[`${eid}|${pos}+shadow`] || null : null;
-        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), team: teamOf(pos), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null, learner });
+        shifts.push({ ...eventView(e), position: baseOf(pos), slot: pos, shadow: isShadow(pos), team: teamOf(pos), alsoOn: (mySlots[eid] || []).filter((p) => p !== pos).map(spot), regular: a.viaRegular || '', confirmed: !!a.confirmedAt, away: isAway(eid) || unav.has(eid), pending: pending[key] || null, learner });
       } else if (!isShadow(pos) && !holder && me.positions.includes(pos) && !unav.has(eid) && !isAway(eid) && !onEvent[eid]) {
         pickups.push({ ...eventView(e), position: pos, team: teamOf(pos), pending: pending[key] === 'pickup' });
       }
@@ -468,16 +480,17 @@ calRouter.get('/:file', wrap(async (req, res) => {
   const allAsg = await Assignment.find({ event: { $in: events.map((e) => e._id) } }).populate('user', 'name').lean();
   const asgBy = {};
   for (const a of allAsg) if (a.user) (asgBy[String(a.event)] ||= []).push(a);
+  // Who's serving, team by team: [{ team, rows: [{ label, name, you }] }]
   const lineupOf = (e) => {
     const rows = (asgBy[String(e._id)] || []).slice().sort((a, b) => (order[baseOf(a.position)] ?? 99) - (order[baseOf(b.position)] ?? 99) || isShadow(a.position) - isShadow(b.position));
     return teams
-      .map((t) => {
-        const here = rows.filter((a) => (teamOfPos[baseOf(a.position)] || 'av') === t.key);
-        return here.length ? `${t.name} — ${here.map((a) => `${label[a.position] || a.position}: ${a.user.name}`).join(', ')}` : '';
-      })
-      .filter(Boolean)
-      .join('\n');
+      .map((t) => ({
+        team: t.name,
+        rows: rows.filter((a) => (teamOfPos[baseOf(a.position)] || 'av') === t.key).map((a) => ({ label: label[a.position] || a.position, name: a.user.name, you: String(a.user._id) === String(user._id) })),
+      }))
+      .filter((t) => t.rows.length);
   };
+  const spotName = (pos) => `${label[pos] || pos}${teams.length > 1 && teamName[teamOfPos[baseOf(pos)] || 'av'] ? ` (${teamName[teamOfPos[baseOf(pos)] || 'av']})` : ''}`;
   const notices = {};
   const items = [];
   // People only on Church Admin don't get services and rehearsals, just their own calendar
@@ -493,6 +506,10 @@ calRouter.get('/:file', wrap(async (req, res) => {
         uid: `${e._id}-${a.position}-${user._id}@crew-call`,
         event: e,
         positionLabel: label[a.position] || a.position,
+        teamName: teams.length > 1 ? teamName[teamOfPos[baseOf(a.position)] || 'av'] || '' : '',
+        confirmed: !!a.confirmedAt,
+        // Double-booked: their other spots at this same service
+        alsoOn: mine.filter((o) => o.position !== a.position).map((o) => spotName(o.position)),
         lineup,
         groups: (e.groups || []).map((g) => g?.name).filter(Boolean).join(', '),
         updatedAt: a.updatedAt,

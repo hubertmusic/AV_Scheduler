@@ -94,6 +94,11 @@ export default function MyShifts() {
                 </div>
                 <div className="grow stack-sm">
                   <Notices items={noticesFor(app, s.date, s.notes)} compact />
+                  {s.alsoOn?.length > 0 && (
+                    <div className="warn-box small" role="note">
+                      <strong>Double-booked:</strong> you’re also on {s.alsoOn.join(' and ')} at this {s.kind === 'soundcheck' ? 'sound check' : 'service'}. Make sure you can cover both, or talk to a leader.
+                    </div>
+                  )}
                   <div className="row-wrap tight">
                     {app.teams.length > 1 && <span className="chip team-chip">{app.teamName(s.team)}</span>}
                     {s.kind === 'soundcheck' && <span className="chip chip-check">Sound check</span>}
