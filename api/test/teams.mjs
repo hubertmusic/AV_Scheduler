@@ -350,4 +350,21 @@ assert.deepEqual(list.map((t) => t.key), ['av', 'praise', 'office', 'choir']);
 assert.equal(list.find((t) => t.key === 'praise').heads[0].name, 'Sam');
 step('the admin can add more teams (choir, greeters…)');
 
+// ---------- Booth Crew Academy is AV training: AV side only ----------
+// (runs when the API was started with ACADEMY_URL and ACADEMY_SSO_SECRET set)
+if (ok(await benC('GET', '/api/bootstrap')).academy) {
+  assert.equal(ok(await avaC('GET', '/api/bootstrap')).academy.host.length > 0, true, 'shown on the AV side');
+  assert.equal(ok(await adminP('GET', '/api/bootstrap')).academy, null, 'not on the Praise side, even for someone who also sees AV');
+  assert.equal(ok(await tiaC('GET', '/api/bootstrap')).academy, null);
+  const goAs = async (email) => {
+    const login = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'password123' }) });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const r = await fetch(`${BASE}/api/academy/go?to=%2F`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    return r.headers.get('location') || '';
+  };
+  assert.match(await goAs('ben@example.com'), /\/sso\/crew-call\?pass=/, 'AV crew are signed in to the Academy');
+  assert.equal(await goAs('tia@example.com'), '/#resources', 'Praise-only members aren’t');
+  step('Booth Crew Academy shows on the AV side only; Praise-only members can’t sign in to it');
+}
+
 console.log('\nAll team checks passed.');
