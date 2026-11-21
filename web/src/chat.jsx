@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from './lib.js';
 import { Avatar, Modal, useApp } from './ui.jsx';
+import './chat.css';
 
 const EMOJI = ['🎚️', '🎤', '🎹', '🎸', '🥁', '📽️', '💡', '🎥', '🎶', '🙏', '⛪', '📣', '☕', '🎄', '⭐', '❤️'];
 const COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'teal', 'pink', 'gray'];
