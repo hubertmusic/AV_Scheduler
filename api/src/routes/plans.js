@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { lookupTitle, playable, playlistView, readPlaylist } from '../lib/playlist.js';
 import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
@@ -10,7 +11,6 @@ import { isAvTeam, requireMember } from '../lib/teams.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
 import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '../lib/archive.js';
 import { orderView, readOrder } from '../lib/serviceOrder.js';
-import { lookupTitle, playable, playlistView, readPlaylist } from '../lib/playlist.js';
 import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
 import { buildAnnouncementsPptx, buildServicePptx } from '../lib/pptx.js';
@@ -517,6 +517,10 @@ plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
   const has = (k) => b[k] !== undefined;
   if (!rights.lead && ['speaker', 'sermonTitle', 'notes', 'order'].some(has)) throw forbidden(LEAD_ONLY);
   if (!rights.av && ['assets', 'inputs'].some(has)) throw forbidden('The media library and input list are part of the AV team’s side.');
+  if (b.playlist !== undefined) {
+    if (!rights.details) throw forbidden('Only people on a team can change the playlist.');
+    plan.playlist = readPlaylist(b.playlist);
+  }
   if (b.speaker !== undefined) plan.speaker = str(b.speaker, 80);
   if (b.sermonTitle !== undefined) plan.sermonTitle = str(b.sermonTitle, 160);
   if (b.notes !== undefined) plan.notes = str(b.notes, 50000);
@@ -525,10 +529,6 @@ plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
   if (b.assets !== undefined) plan.assets = await readAssets(b.assets);
   if (b.order !== undefined) plan.order = readOrder(b.order);
   if (b.announcements !== undefined) plan.announcements = str(b.announcements, 5000);
-  if (b.playlist !== undefined) {
-    if (!rights.details) throw forbidden('Only people on a team can change the playlist.');
-    plan.playlist = readPlaylist(b.playlist);
-  }
   if (b.inputs !== undefined) {
     plan.inputs = readInputs(b.inputs);
     plan.markModified('inputs');

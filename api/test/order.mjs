@@ -64,6 +64,30 @@ assert.deepEqual(p.order.map((x) => [x.kind, x.title, x.minutes]), [['heading', 
 assert.equal(p.order[0].who, '', 'headings have no who');
 assert.equal(p.announcements, 'Potluck after church.');
 assert.ok(p.share.rundown && p.share.bulletin && p.share.rundown !== p.share.bulletin, 'two separate links');
+
+// ---------- playlist (beta) ----------
+const svcP = ok(await admin('POST', '/api/events', { date: iso(27), title: 'Music Sabbath', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const chk = ok(await crew('GET', `/api/plans/playlist-link?url=${encodeURIComponent('https://open.spotify.com/intl-de/track/4uLU6hMCjMI75M1A2tKUQC?si=abc')}`));
+assert.deepEqual([chk.provider, chk.kind, chk.url], ['spotify', 'track', 'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC']);
+ok(await crew('GET', `/api/plans/playlist-link?url=${encodeURIComponent('https://example.com/song.mp3')}`), 400);
+let pp = ok(await crew('PATCH', `/api/plans/${svcP.id}`, {
+  playlist: [
+    { url: chk.url, title: 'Way Maker', note: 'Special music · Sarah', addedBy: 'Ava Crew' },
+    { url: 'https://music.apple.com/us/album/way-maker-live/1501193566?i=1501193567', title: '' },
+    { url: 'youtu.be/dQw4w9WgXcQ', title: 'Rehearsal video' },
+    { url: 'https://example.com/song.mp3', title: 'Not playable' },
+    { url: 'javascript:alert(1)' },
+  ],
+}));
+assert.deepEqual(pp.playlist.map((x) => [x.provider, x.kind, x.title]), [['spotify', 'track', 'Way Maker'], ['apple', 'song', ''], ['youtube', 'video', 'Rehearsal video']], 'only links the players can play, in order; crew can add');
+assert.equal(pp.playlist[0].embed, 'https://open.spotify.com/embed/track/4uLU6hMCjMI75M1A2tKUQC');
+assert.equal(pp.playlist[1].embed, 'https://embed.music.apple.com/us/album/way-maker-live/1501193566?i=1501193567');
+assert.equal(pp.playlist[2].embed, 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+const rdP = ok(await anon('GET', `/api/public/rundown/${pp.share.rundown}`));
+assert.deepEqual(rdP.playlist.map((x) => x.title), ['Way Maker', '', 'Rehearsal video'], 'the crew rundown lists it');
+assert.ok(!JSON.stringify(ok(await anon('GET', `/api/public/bulletin/${pp.share.bulletin}`))).includes('spotify'), 'the bulletin doesn’t');
+step('playlist: Spotify, Apple Music and YouTube links play in their own players; anyone on the team can add; on the crew rundown, not the bulletin');
+
 ok(await crew('PATCH', `/api/plans/${svc.id}`, { order: [] }), 403);
 assert.equal(ok(await crew('GET', `/api/plans/${svc.id}`)).order.length, 6, 'crew can read it');
 step('order of service saves, cleaned up (kinds, blank lines, minutes)');
@@ -143,28 +167,5 @@ ok(await admin('POST', '/api/plans/archive-weekend', { events: [svc.id], delete:
 ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`), 404);
 ok(await anon('GET', `/api/public/rundown/${renewed.share.rundown}`), 404);
 step('deleting a plan turns its links off');
-
-// ---------- playlist (beta) ----------
-const svcP = ok(await admin('POST', '/api/events', { date: iso(27), title: 'Music Sabbath', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
-const chk = ok(await crew('GET', `/api/plans/playlist-link?url=${encodeURIComponent('https://open.spotify.com/intl-de/track/4uLU6hMCjMI75M1A2tKUQC?si=abc')}`));
-assert.deepEqual([chk.provider, chk.kind, chk.url], ['spotify', 'track', 'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC']);
-ok(await crew('GET', `/api/plans/playlist-link?url=${encodeURIComponent('https://example.com/song.mp3')}`), 400);
-let pp = ok(await crew('PATCH', `/api/plans/${svcP.id}`, {
-  playlist: [
-    { url: chk.url, title: 'Way Maker', note: 'Special music · Sarah', addedBy: 'Ava Crew' },
-    { url: 'https://music.apple.com/us/album/way-maker-live/1501193566?i=1501193567', title: '' },
-    { url: 'youtu.be/dQw4w9WgXcQ', title: 'Rehearsal video' },
-    { url: 'https://example.com/song.mp3', title: 'Not playable' },
-    { url: 'javascript:alert(1)' },
-  ],
-}));
-assert.deepEqual(pp.playlist.map((x) => [x.provider, x.kind, x.title]), [['spotify', 'track', 'Way Maker'], ['apple', 'song', ''], ['youtube', 'video', 'Rehearsal video']], 'only links the players can play, in order; crew can add');
-assert.equal(pp.playlist[0].embed, 'https://open.spotify.com/embed/track/4uLU6hMCjMI75M1A2tKUQC');
-assert.equal(pp.playlist[1].embed, 'https://embed.music.apple.com/us/album/way-maker-live/1501193566?i=1501193567');
-assert.equal(pp.playlist[2].embed, 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
-const rdP = ok(await anon('GET', `/api/public/rundown/${pp.share.rundown}`));
-assert.deepEqual(rdP.playlist.map((x) => x.title), ['Way Maker', '', 'Rehearsal video'], 'the crew rundown lists it');
-assert.ok(!JSON.stringify(ok(await anon('GET', `/api/public/bulletin/${pp.share.bulletin}`))).includes('spotify'), 'the bulletin doesn’t');
-step('playlist: Spotify, Apple Music and YouTube links play in their own players; anyone on the team can add; on the crew rundown, not the bulletin');
 
 console.log('\nAll order-of-service checks passed.');

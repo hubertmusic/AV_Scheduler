@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { api } from './lib.js';
 import { useApp } from './ui.jsx';
+import './playlist.css';
 
 const PROVIDER = {
   spotify: { name: 'Spotify', mark: '●', cls: 'pl-spotify' },
