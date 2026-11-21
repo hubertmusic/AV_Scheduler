@@ -358,7 +358,7 @@ function PlanEditor({ eventId, onChanged }) {
   return (
     <div className="stack-lg">
       {plan.archived && (
-        <div className="archive-banner" role="note">
+        <div className="archive-note" role="note">
           <div>
             <strong>In the archive</strong>
             <div className="small muted">

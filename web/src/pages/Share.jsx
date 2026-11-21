@@ -56,7 +56,7 @@ export function RundownPage({ token }) {
   const timed = times.total > 0;
 
   return (
-    <div className="rs share-page">
+    <div className="rs linkcard-page">
       <div className="rs-tools no-print">
         <span className="chip chip-pending">Platform & crew only — please don’t share</span>
         <button type="button" className="btn btn-primary" onClick={() => window.print()}>
@@ -64,7 +64,7 @@ export function RundownPage({ token }) {
         </button>
       </div>
 
-      <header className="rs-head share-head">
+      <header className="rs-head linkcard-head">
         <div>
           <div className="eyebrow">Service rundown · platform & crew only</div>
           <h1>{e.title}</h1>
@@ -85,7 +85,7 @@ export function RundownPage({ token }) {
             </div>
           )}
         </div>
-        <figure className="share-qr print-only">
+        <figure className="linkcard-qr print-only">
           <Qr value={window.location.origin + window.location.pathname} size={96} label="QR code for this rundown" onReady={onQr} />
           <figcaption>Open on your phone</figcaption>
         </figure>

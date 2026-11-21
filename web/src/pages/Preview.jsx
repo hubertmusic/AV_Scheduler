@@ -6,7 +6,7 @@ import { Avatar, Modal } from '../ui.jsx';
 
 export function PreviewBanner({ me, onSwitch, onExit }) {
   return (
-    <div className="preview-banner" role="status">
+    <div className="preview-bar" role="status">
       <span className="preview-dot" aria-hidden="true" />
       <span className="grow">
         Viewing as <strong>{me.name}</strong> · {roleLabel(me)}

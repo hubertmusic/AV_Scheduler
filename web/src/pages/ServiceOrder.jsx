@@ -362,7 +362,7 @@ export function ShareCard({ plan, canEdit, canAnnounce = canEdit, canPlans, onSa
         </h3>
         <p className="small muted">Two separate links, each with its own QR code and printable page. Neither needs a sign-in, so share each one only with the people it’s for.</p>
       </div>
-      <div className="share-grid">
+      <div className="linkcard-grid">
         <ShareBlock
           plan={plan}
           which="rundown"
@@ -443,8 +443,8 @@ function ShareBlock({ plan, which, title, badge, badgeTone, blurb, canPlans, set
   };
 
   return (
-    <div className="share-block">
-      <div className="share-top">
+    <div className="linkcard-block">
+      <div className="linkcard-top">
         <Qr value={url} size={112} label={`QR code for the ${title.toLowerCase()}`} />
         <div className="stack-xs">
           <strong>{title}</strong>
