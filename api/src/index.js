@@ -23,6 +23,7 @@ import { gearRouter } from './routes/gear.js';
 import { checklistsRouter, debriefRouter, issuesRouter, signoffsRouter } from './routes/extras.js';
 import { plannerRouter } from './routes/planner.js';
 import { officeRouter } from './routes/office.js';
+import { chatRouter } from './routes/chat.js';
 import { notesRouter, vaultRouter } from './routes/vault.js';
 import { ensureVaultKey } from './lib/secrets.js';
 import { ensureOffice, onServiceTeam, startOfficeJob } from './lib/office.js';
@@ -93,6 +94,7 @@ app.use('/api/signoffs', signoffsRouter);
 app.use('/api/planner', plannerRouter);
 app.use('/api/office', officeRouter);
 app.use('/api/vault', vaultRouter);
+app.use('/api/chat', chatRouter);
 app.use('/api/notes', notesRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
