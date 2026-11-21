@@ -370,6 +370,8 @@ const planSchema = new Schema(
     assets: [ref('Media')], // media library items used in this service (backgrounds, countdowns…)
     order: { type: [orderItemSchema], default: [] }, // order of service (optional)
     announcements: { type: String, default: '' }, // bulletin only
+    // Songs to sample or play (beta): Spotify, Apple Music and YouTube links, in order
+    playlist: { type: [new Schema({ url: String, title: String, note: String, addedBy: String }, { _id: false })], default: [] },
     // Live run-of-show: { startedAt, index, itemAt, endedAt, log: [{ index, title, at }] }
     live: { type: Schema.Types.Mixed, default: null },
     inputs: { type: [Schema.Types.Mixed], default: [] }, // input list: [{ ch, source, mic, stand, notes }]

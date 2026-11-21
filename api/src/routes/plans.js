@@ -10,6 +10,7 @@ import { isAvTeam, requireMember } from '../lib/teams.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
 import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '../lib/archive.js';
 import { orderView, readOrder } from '../lib/serviceOrder.js';
+import { lookupTitle, playable, playlistView, readPlaylist } from '../lib/playlist.js';
 import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
 import { buildAnnouncementsPptx, buildServicePptx } from '../lib/pptx.js';
@@ -180,6 +181,7 @@ async function fullPlan(ev, req) {
     media: media.map(mediaView),
     order: orderView(plan.order),
     announcements: plan.announcements,
+    playlist: playlistView(plan.playlist),
     live: plan.live || null,
     inputs: plan.inputs || [],
     share: { rundown: plan.rundownToken, bulletin: plan.bulletinToken },
@@ -346,6 +348,13 @@ plansRouter.get('/archive', wrap(async (req, res) => {
       };
     }),
   });
+}));
+
+// GET /api/plans/playlist-link?url= — is this a link the playlist can play, and what's it called?
+plansRouter.get('/playlist-link', wrap(async (req, res) => {
+  const p = playable(req.query.url);
+  if (!p) throw bad('That isn’t a Spotify, Apple Music or YouTube link the playlist can play. Copy the share link from the app, e.g. Share → Copy link.');
+  res.json({ url: p.url, provider: p.provider, kind: p.kind, title: await lookupTitle(p.url) });
 }));
 
 plansRouter.get('/:eventId', wrap(async (req, res) => {
@@ -516,6 +525,10 @@ plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
   if (b.assets !== undefined) plan.assets = await readAssets(b.assets);
   if (b.order !== undefined) plan.order = readOrder(b.order);
   if (b.announcements !== undefined) plan.announcements = str(b.announcements, 5000);
+  if (b.playlist !== undefined) {
+    if (!rights.details) throw forbidden('Only people on a team can change the playlist.');
+    plan.playlist = readPlaylist(b.playlist);
+  }
   if (b.inputs !== undefined) {
     plan.inputs = readInputs(b.inputs);
     plan.markModified('inputs');
