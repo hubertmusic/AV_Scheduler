@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { CREWS, orderWithFiles } from '../lib/serviceOrder.js';
 import { DateTime } from 'luxon';
 import { Assignment, Event, Group, Media, Plan, Position, Request, Submission, User, Skip } from '../models.js';
 import { requireAdmin, requirePerm } from '../auth.js';
@@ -265,6 +266,8 @@ weekendRouter.get('/runsheet/:eventId', wrap(async (req, res) => {
           scriptures: plan.scriptures,
           songs: plan.songs.filter((x) => x.song).map((x) => ({ title: x.song.title, artist: x.song.artist, key: x.key, lyrics: x.song.lyrics, note: x.note })),
           files: files.map((f) => ({ name: f.originalName, size: f.size })),
+          order: await orderWithFiles(plan.order),
+          crews: Object.fromEntries(CREWS),
         }
       : null,
   });

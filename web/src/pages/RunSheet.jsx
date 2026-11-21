@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, fmtDay, fmtTime, prettyPhone } from '../lib.js';
+import { api, fmtDay, fmtTime, orderTimes, prettyPhone } from '../lib.js';
+import { ItemExtras } from '../orderItem.jsx';
 
 // A printable one-page view of a service for the booth.
 export default function RunSheet({ id }) {
@@ -112,6 +113,8 @@ export default function RunSheet({ id }) {
         ))}
       </div>
 
+      {p?.order?.length > 0 && <RunOrder order={p.order} start={e.start} />}
+
       {p && p.songs.length > 0 && (
         <section className="rs-block">
           <h2>Songs</h2>
@@ -190,5 +193,35 @@ function Crew({ list }) {
         ])}
       </tbody>
     </table>
+  );
+}
+
+// The order of service with times (when minutes are set), who, and every crew's cues
+function RunOrder({ order, start }) {
+  const times = orderTimes(start, order);
+  const timed = times.total > 0;
+  return (
+    <section className="rs-block">
+      <h2>Order of service</h2>
+      <ol className="rs-order">
+        {order.map((x, i) =>
+          x.kind === 'heading' ? (
+            <li key={i} className="rs-order-heading">
+              {x.title}
+            </li>
+          ) : (
+            <li key={i}>
+              {timed && <span className="rs-order-time">{fmtTime(times.at[i])}</span>}
+              <div className="rs-order-main">
+                <strong>{x.title}</strong>
+                {x.who && <span> · {x.who}</span>}
+                {x.minutes > 0 && <span className="muted small"> · {x.minutes} min</span>}
+                <ItemExtras x={x} compact />
+              </div>
+            </li>
+          )
+        )}
+      </ol>
+    </section>
   );
 }

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, fmtDate, fmtDay, fmtMinutes, fmtTime, orderTimes } from '../lib.js';
 import { Qr } from '../qr.jsx';
+import { ItemExtras } from '../orderItem.jsx';
 
 function usePublic(kind, token) {
   const [d, setD] = useState(null);
@@ -119,7 +120,9 @@ export function RundownPage({ token }) {
                       {x.minutes > 0 && <span className="small muted"> · {x.minutes} min</span>}
                     </td>
                     <td>{x.who}</td>
-                    <td className="small">{x.notes}</td>
+                    <td className="small">
+                      <ItemExtras x={x} compact />
+                    </td>
                   </tr>
                 )
               )}
@@ -308,6 +311,7 @@ function BulletinBody({ d, half, copy, onQr }) {
                   <span className="bl-item">{x.title}</span>
                   <span className="bl-dots" aria-hidden="true" />
                   <span className="bl-who">{x.who}</span>
+                  {x.note && <span className="bl-note">{x.note}</span>}
                 </li>
               )
             )}

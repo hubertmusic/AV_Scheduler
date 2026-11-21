@@ -356,6 +356,16 @@ const orderItemSchema = new Schema({
   who: { type: String, default: '' },
   minutes: { type: Number, default: 0 },
   notes: { type: String, default: '' }, // cues for the platform and crew; never in the bulletin
+  // Cues for each crew, labelled on the rundown, run sheet and live view
+  cues: {
+    audio: { type: String, default: '' },
+    slides: { type: String, default: '' }, // slides & ProPresenter
+    lights: { type: String, default: '' },
+    camera: { type: String, default: '' }, // camera & stream
+  },
+  bulletinNote: { type: String, default: '' }, // what the congregation sees under it ("Hymn 100, please stand")
+  links: { type: [new Schema({ url: String, title: String }, { _id: false })], default: [] }, // videos (YouTube…), scripts, pages
+  media: { type: [{ type: Schema.Types.ObjectId, ref: 'Media' }], default: [] }, // files from this service's media
   bulletin: { type: Boolean, default: true }, // listed in the congregation's bulletin
 });
 
