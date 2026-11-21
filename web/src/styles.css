@@ -1036,3 +1036,5 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 .ra-body .link-btn { padding: 0; min-height: 0; }
 .ap-results { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .ap-fail { color: var(--red); }
+.plan-jump { display: flex; align-items: center; gap: 8px; flex-direction: row; }
+.plan-jump input { flex: 1; min-height: 40px; padding: 0 10px; border: 1px solid var(--field); border-radius: 8px; background: var(--surface); }

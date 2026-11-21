@@ -40,7 +40,7 @@ What it does:
   - The Groups page holds the praise team, choir, guest musicians and anyone else you coordinate with. Each group can have a contact person, a WhatsApp group link, tech notes and members.
   - Groups don't need accounts.
   - Attach groups to sound checks or services. One 💬 tap then gets you the message for the group contact, the group chat and the assigned crew.
-- **Service plans.** Each service has:
+- **Service plans.** Shown a week at a time (Monday–Sunday), so weekday programs have plans too. Use **Jump to** to open any week, for example to start December's program now. A plan saves as you go, and nothing changes it on its own: syncing a weekend with the template only updates service times and positions (and only when someone confirms), services added by hand are never touched, and a plan goes only if its service is deleted. Each service has:
   - a sermon title and speaker
   - the pastor's notes
   - Bible texts. KJV, BSB (Berean Standard), WEB, ASV, YLT, Darby, BBE and Douay-Rheims look up automatically. **More translations…** searches 1,000+ more by language from the free bible.helloao.org service (for example, Spanish Reina-Valera 1909); the ones you pick are remembered on that device. Copyrighted versions (NKJV, NIV, ESV, NLT and others) are pasted. References like `1 Cor 13:4-7`, `Psalm 23` and `John 3:16-4:2` work; book names must be in English.
