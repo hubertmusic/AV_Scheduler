@@ -298,6 +298,7 @@ function eventView(ev, req, ctx = {}) {
     rsvps: counts,
     needsAv: ev.needsAv,
     avNote: ev.avNote,
+    callLink: ev.callLink || '',
     agendaItems: (ev.agenda || []).filter((x) => x.kind !== 'heading').length,
     minutesStatus: ev.minutesApprovedAt ? 'approved' : ev.minutes || ev.motions?.length ? 'draft' : 'none',
     bulletin: ev.bulletin?.status ? { status: ev.bulletin.status, service: ev.bulletin.service ? String(ev.bulletin.service) : null, text: ev.bulletin.text } : null,
@@ -370,8 +371,14 @@ async function fullEvent(ev, req) {
     canAgenda: !!req.ocan.plans && edits(req.user, e, true),
     canMinutes: rights,
     canApprove: !!req.ocan.plans && edits(req.user, e, true),
+    // Live: the item being discussed, who can move it along, and a version that changes with any edit
+    liveItem: e.liveItem ? String(e.liveItem) : null,
+    canLead: leads(req, e),
+    v: liveVersion(e, actions),
   };
 }
+const leads = (req, e) => (!!req.ocan.plans && edits(req.user, e, true)) || minutesRights(req, e);
+const liveVersion = (e, actions) => String(Math.max(new Date(e.updatedAt || 0).getTime(), ...actions.map((a) => new Date(a.updatedAt || 0).getTime())));
 
 // Minutes: the secretary by default; anyone in the meeting once a leader opens it up; the head and admin always
 function minutesRights(req, ev) {
@@ -527,7 +534,10 @@ office.put('/events/:id/agenda', need('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   if (!edits(req.user, ev, true)) throw forbidden('You can’t change this meeting.');
   const list = Array.isArray(req.body.agenda) ? req.body.agenda.slice(0, 80) : [];
+  const liveTitle = ev.liveItem ? ev.agenda.id(ev.liveItem)?.title : null;
   ev.agenda = list.map((x) => ({ kind: x?.kind === 'heading' ? 'heading' : 'item', title: str(x?.title, 200), presenter: str(x?.presenter, 80), minutes: Math.max(0, Math.min(600, Number(x?.minutes) || 0)), notes: str(x?.notes, 1000) })).filter((x) => x.title);
+  // Saving gives items new ids: keep "now discussing" on the item with the same title
+  if (ev.liveItem) ev.liveItem = ev.agenda.find((x) => x.kind === 'item' && x.title === liveTitle)?._id || null;
   await ev.save();
   res.locals.activity = `Updated the agenda for ${named(ev, 'a Church Admin meeting')}`;
   res.json(await fullEvent(ev, req));
@@ -559,8 +569,72 @@ export function agendaText(ev, orgName) {
   const when = `${DateTime.fromISO(ev.date).toFormat('cccc, LLLL d')}${ev.start ? ` at ${DateTime.fromFormat(ev.start, 'HH:mm').toFormat('h:mm a')}` : ''}${ev.room ? ` · ${ev.room}` : ''}`;
   let n = 0;
   const lines = ev.agenda.map((x) => (x.kind === 'heading' ? `\n${x.title.toUpperCase()}` : `${++n}. ${x.title}${x.presenter ? ` — ${x.presenter}` : ''}${x.minutes ? ` (${x.minutes} min)` : ''}${x.notes ? `\n   ${x.notes}` : ''}`));
-  return [`${ev.title}`, when, '', 'Agenda', ...lines, '', `Details in Crew Call: ${config.publicUrl}/#office-plan`, '', `— ${orgName}`].join('\n');
+  return [`${ev.title}`, when, ...(ev.callLink ? ['', `Join the call: ${ev.callLink}`] : []), '', 'Agenda', ...lines, '', `Details in Crew Call: ${config.publicUrl}/#office-plan`, '', `— ${orgName}`].join('\n');
 }
+
+// ---------- meeting by phone or video, and the live meeting page ----------
+// PUT /api/office/events/:id/call { link } — a WhatsApp call link (Calls → Create call link), the
+// group's invite link, or any https meeting link. '' removes it.
+const CALL_HOSTS = /(^|\.)(whatsapp\.com|wa\.me|zoom\.us|meet\.google\.com|teams\.microsoft\.com|teams\.live\.com|jit\.si|daily\.co|whereby\.com|facetime\.apple\.com)$/i;
+office.put('/events/:id/call', need('plans'), wrap(async (req, res) => {
+  const ev = await loadEvent(req);
+  if (!edits(req.user, ev, true)) throw forbidden('You can’t change this meeting.');
+  const link = normalizeUrl(str(req.body?.link, 500));
+  if (link) {
+    let host = '';
+    try {
+      const u = new URL(link);
+      if (u.protocol !== 'https:') throw new Error();
+      host = u.hostname;
+    } catch {
+      throw bad('Paste the whole link, starting with https://');
+    }
+    if (!CALL_HOSTS.test(host)) throw bad('Use a WhatsApp call link (in WhatsApp: Calls → Create call link), or a Zoom, Google Meet, Teams or FaceTime link.');
+  }
+  ev.callLink = link;
+  await ev.save();
+  res.locals.activity = `${link ? 'Added a call link to' : 'Removed the call link from'} ${named(ev, 'a Church Admin meeting')}`;
+  res.json(await fullEvent(ev, req));
+}));
+
+// Who has a meeting open right now: meeting id → user id → { name, at, writing }. Kept in memory;
+// it only matters for the next few seconds.
+const here = new Map();
+const HERE_MS = 12000;
+function whoIsHere(id, user, writing) {
+  const now = Date.now();
+  const room = here.get(id) || new Map();
+  if (user) room.set(String(user._id), { name: user.name, at: now, writing });
+  for (const [k, v] of room) if (now - v.at > HERE_MS) room.delete(k);
+  if (room.size) here.set(id, room);
+  else here.delete(id);
+  // forget meetings nobody has looked at for a while
+  if (here.size > 200) for (const [k, r] of here) if (![...r.values()].some((v) => now - v.at < HERE_MS)) here.delete(k);
+  return [...room].map(([uid, v]) => ({ id: uid, name: v.name, writing: v.writing || '' }));
+}
+
+// GET /api/office/events/:id/live?writing=minutes — I'm on this meeting's page. Returns who else is,
+// the item being discussed and a version, so the page reloads only when something changed.
+office.get('/events/:id/live', wrap(async (req, res) => {
+  const ev = await loadEvent(req);
+  const writing = ['minutes', 'agenda', 'motion'].includes(req.query.writing) ? req.query.writing : '';
+  const last = await ActionItem.findOne({ meeting: ev._id }, { updatedAt: 1 }).sort({ updatedAt: -1 }).lean();
+  res.set('Cache-Control', 'no-store');
+  res.json({ v: liveVersion(ev, last ? [last] : []), here: whoIsHere(String(ev._id), req.user, writing), liveItem: ev.liveItem ? String(ev.liveItem) : null });
+}));
+
+// PUT /api/office/events/:id/live { item } — move "now discussing" to an agenda item (null clears it).
+// Whoever runs the meeting or takes the minutes.
+office.put('/events/:id/live', wrap(async (req, res) => {
+  const ev = await loadEvent(req);
+  if (!leads(req, ev.toObject())) throw forbidden('Whoever runs the meeting or takes the minutes moves it along.');
+  const item = req.body?.item;
+  if (item && !ev.agenda.id(item)) throw bad('That agenda item isn’t there any more.');
+  ev.liveItem = item || null;
+  ev.liveBy = item ? req.user._id : null;
+  await ev.save();
+  res.json(await fullEvent(ev, req));
+}));
 
 // PUT /api/office/events/:id/minutes { minutes, present, guests }
 office.put('/events/:id/minutes', wrap(async (req, res) => {

@@ -72,6 +72,7 @@ const LABELS = [
   [/^\/api\/positions/, 'Changed positions'],
   [/^\/api\/weekend\/autofill/, 'Auto-filled a weekend'],
   [/^\/api\/weekend\/reminded/, 'Marked WhatsApp reminders as sent'],
+  [/^\/api\/account\/layout/, {}], // arranging tiles isn't worth a line in the log
   [/^\/api\/account\/password/, 'Changed their password'],
   [/^\/api\/account\/calendar/, 'Made a new calendar link'],
   [/^\/api\/account/, 'Updated their account'],

@@ -43,7 +43,8 @@ function useIdleSignOut(minutes) {
     const mark = () => {
       last = Date.now();
     };
-    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    // cc:active: a live meeting someone is following with others counts as activity
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'cc:active'];
     events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
     const id = setInterval(() => {
       const t = Date.now();
