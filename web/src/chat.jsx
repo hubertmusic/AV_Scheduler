@@ -548,3 +548,105 @@ function GroupModal({ people, room, me, onClose, onDone }) {
     </Modal>
   );
 }
+
+// "View as": the chat dock as that person sees it — who's online, their team chats and unread
+// counts — without anything anyone wrote, or who they talk to privately. Nothing can be sent.
+export function ChatPreview() {
+  const app = useApp();
+  const [data, setData] = useState(null);
+  const [panel, setPanel] = useState(false);
+  const [tab, setTab] = useState('chats');
+  useEffect(() => {
+    let live = true;
+    const load = () => api('/chat/preview', { background: true }).then((d) => live && setData(d), () => {});
+    load();
+    const t = setInterval(load, SLOW);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+  if (!data) return null;
+  const people = data.people.filter((p) => p.id !== data.me);
+  const online = people.filter((p) => p.status !== 'offline').length;
+  const unread = data.rooms.reduce((n, r) => n + r.unread, 0) + data.private.unread;
+  const order = { online: 0, away: 1, offline: 2 };
+  const list = [...people].sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
+  const privateText = [data.private.chats && `${data.private.chats} one-on-one chat${data.private.chats === 1 ? '' : 's'}`, data.private.groups && `${data.private.groups} group${data.private.groups === 1 ? '' : 's'}`].filter(Boolean).join(' and ');
+  const readOnly = () => app.toast('Chats stay private, so they don’t open in a preview.');
+
+  return (
+    <div className="ch-dock no-print">
+      {panel && (
+        <section className="ch-panel" aria-label="Chat (preview)">
+          <header className="ch-panel-head">
+            <div className="seg" role="group" aria-label="Show">
+              <button type="button" aria-pressed={tab === 'chats'} onClick={() => setTab('chats')}>
+                Chats{unread ? ` (${unread > 9 ? '9+' : unread})` : ''}
+              </button>
+              <button type="button" aria-pressed={tab === 'people'} onClick={() => setTab('people')}>
+                People ({online} online)
+              </button>
+            </div>
+            <button type="button" className="icon-btn" aria-label="Close chat" onClick={() => setPanel(false)}>
+              ✕
+            </button>
+          </header>
+          <p className="ch-preview-note small">What people write to each other stays private, even in a preview. You see what their chat list looks like, not what’s in it.</p>
+          <div className="ch-list">
+            {tab === 'chats' ? (
+              <>
+                {data.rooms.map((r) => (
+                  <button key={r.id} type="button" className={`ch-item ${r.unread ? 'ch-unread' : ''}`} onClick={readOnly}>
+                    <RoomIcon room={r} people={data.people} />
+                    <span className="ch-item-main">
+                      <span className="ch-name">{r.name}</span>
+                      <span className="ch-snip">Everyone on the team</span>
+                    </span>
+                    {r.unread > 0 && <span className="ch-badge">{r.unread > 9 ? '9+' : r.unread}</span>}
+                  </button>
+                ))}
+                {privateText ? (
+                  <div className="ch-item ch-private">
+                    <span className="ch-room-ic ch-c-gray" style={{ width: 36, height: 36, fontSize: 16 }} aria-hidden="true">
+                      🔒
+                    </span>
+                    <span className="ch-item-main">
+                      <span className="ch-name">Plus {privateText}</span>
+                      <span className="ch-snip">{data.private.unread ? `${data.private.unread > 9 ? '9+' : data.private.unread} unread · ` : ''}names and messages hidden</span>
+                    </span>
+                  </div>
+                ) : (
+                  !data.rooms.length && <p className="muted small ch-empty">No chats yet.</p>
+                )}
+              </>
+            ) : (
+              list.map((p) => (
+                <button key={p.id} type="button" className="ch-item" onClick={readOnly}>
+                  <span className="ch-av">
+                    <Avatar name={p.name} size={36} />
+                    <span className={`ch-dot ch-${p.status}`} />
+                  </span>
+                  <span className="ch-item-main">
+                    <span className="ch-name">{p.name}</span>
+                    <span className="ch-snip">
+                      {lastSeenText(p)}
+                      {p.teams.length ? ` · ${p.teams.join(', ')}` : ''}
+                    </span>
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+      <button type="button" className={`ch-bar ${panel ? 'ch-bar-on' : ''}`} aria-expanded={panel} onClick={() => setPanel(!panel)}>
+        <span aria-hidden="true">💬</span> Chat
+        <span className="ch-bar-online">
+          <span className="ch-dot ch-online ch-dot-inline" /> {online}
+        </span>
+        {unread > 0 && <span className="ch-badge">{unread > 9 ? '9+' : unread}</span>}
+      </button>
+    </div>
+  );
+}

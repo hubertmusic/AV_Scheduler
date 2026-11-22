@@ -135,6 +135,7 @@ What it does:
   - requests and guest uploads waiting for approval
   - stale availability
   - a WhatsApp reminder checklist that ticks people off as you message them
+  - **Arrange the tiles your way:** drag a tile by its ⠿ handle (mouse or finger), or focus the handle and use the arrow keys. Each person's layout is saved to their account, so it's the same on every device; **Put them back in the usual order** undoes it.
 - **Calendar alerts.** Each shift in a synced calendar has an alert a set number of days before (default 5, in **Settings → Shift reminders**), plus one an hour before call time. iPhone and Mac calendars can be set to drop alerts from subscribed calendars, and Google ignores them; **My shifts** shows each person how to fix that.
 - **Email reminders.** Each person gets one email per shift, sent automatically a set number of days before it. The email has the call time, crew, songs and a Confirm link. This needs an SMTP account (see below).
 - **Run sheets.** One printable page per service: crew with phones and confirmations, the linked sound check, songs and keys (lyrics optional), Bible texts, the pastor's notes and the media list.
@@ -246,7 +247,9 @@ Crew Call doesn't write `.pro` files itself. The format is undocumented, and gen
 
 ### View as (admin)
 
-Use **View as…** in the top bar to see Crew Call exactly as one person sees it: their tabs, their shifts, the phone numbers they can see, and the buttons they're allowed to use. A blue banner shows whose view you're in. Nothing can be changed while previewing, either in the app or on the server. Their private calendar link stays hidden. Choose **Switch person** or **Exit preview** in the banner.
+Use **View as…** in the top bar to see Crew Call exactly as one person sees it: their tabs, their shifts, the phone numbers they can see, the buttons they're allowed to use, their tile layout, their account window and their chat dock. If they're on more than one team, switch between their teams at the top. A blue banner shows whose view you're in. Nothing can be changed while previewing, either in the app or on the server, and Exit preview puts you back on your own team.
+
+Some things stay private even in a preview: their notes, the vault, their private calendar link, Church Admin details, and what anyone writes in chat. The chat dock shows who's online, their team chats and unread counts, and how many one-on-one chats and groups they have, but not who those are with or what's in them. Choose **Switch person** or **Exit preview** in the banner.
 
 ### Booth Crew Academy sign-in
 

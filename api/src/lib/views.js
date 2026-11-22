@@ -62,6 +62,7 @@ export function meView(u) {
     regulars: (u.regulars || []).map((r) => ({ id: String(r._id), week: r.week, anchor: r.anchor, service: r.service, positions: r.positions, note: r.note })),
     can: can(u),
     calUrl: `${config.publicUrl}/cal/${u.calToken}.ics`,
+    layout: u.layout && typeof u.layout === 'object' ? u.layout : {},
   };
 }
 

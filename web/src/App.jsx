@@ -14,7 +14,7 @@ import Groups from './pages/Groups.jsx';
 import Plans from './pages/Plans.jsx';
 import Guest from './pages/Guest.jsx';
 import Reserve from './pages/Reserve.jsx';
-import { ChatDock } from './chat.jsx';
+import { ChatDock, ChatPreview } from './chat.jsx';
 import Account from './pages/Account.jsx';
 import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
@@ -90,7 +90,7 @@ export default function App() {
           return;
         }
       }
-      if (!b.me.previewing && b.me.role === 'admin') setRoster(b.everyone.map((p) => b.people.find((x) => x.id === p.id) || p));
+      if (!b.me.previewing && b.me.role === 'admin') setRoster(b.everyone.map((p) => ({ active: true, ...p, ...(b.people.find((x) => x.id === p.id) || {}), teams: p.teams })));
       // The server picked a different team (the saved one isn't theirs any more): remember its choice
       if (!b.me.previewing && b.team && b.team.key !== currentTeam()) setTeam(b.team.key);
       setBoot(b);
@@ -140,8 +140,10 @@ export default function App() {
     return Boolean(viewAsRef.current);
   }
   const viewAsRef = useRef(null);
+  const ownTeam = useRef(null); // the admin's own team, to go back to after a preview
   const startPreview = (person) => {
     unsaved.clear();
+    if (!viewAsRef.current) ownTeam.current = currentTeam();
     viewAsRef.current = person;
     setViewAs(person.id);
     setViewAsState(person);
@@ -150,6 +152,7 @@ export default function App() {
   };
   const exitPreview = () => {
     viewAsRef.current = null;
+    if (ownTeam.current) setTeam(ownTeam.current);
     setViewAs(null);
     setViewAsState(null);
     setBoot(null);
@@ -428,10 +431,10 @@ function Shell({ boot, reload, onSignedOut, preview }) {
           </span>
         </div>
         <div className="topbar-user">
-          {(boot.teams || []).length > 1 && !previewingAs && (
+          {(boot.teams || []).length > 1 && (
             <label className="team-switch">
               <span className="sr-only">Team</span>
-              <select value={team.key} onChange={(e) => switchTeam(e.target.value)} title="Switch between your teams">
+              <select value={team.key} onChange={(e) => switchTeam(e.target.value)} title={previewingAs ? `Switch between ${previewingAs.name}’s teams` : 'Switch between your teams'}>
                 {boot.teams.map((t) => (
                   <option key={t.key} value={t.key}>
                     {t.name}
@@ -513,7 +516,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         )}
       </main>
       {wa && <WaSheet {...wa} groupLink={wa.groupLink ?? settings.groupLink} onClose={() => setWa(null)} />}
-      {account && <Account onClose={() => setAccount(false)} />}
+      {account && <Account preview={!!previewingAs} onClose={() => setAccount(false)} />}
       {syncAsk && (
         <SyncDialog
           differs={syncAsk.differs}
@@ -535,7 +538,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
           }}
         />
       )}
-      {!previewingAs && <ChatDock />}
+      {previewingAs ? <ChatPreview /> : <ChatDock />}
       <div className="toast-region" role="status" aria-live="polite">
         {toastMsg && <div className="toast">{toastMsg}</div>}
       </div>

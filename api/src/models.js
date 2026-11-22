@@ -94,6 +94,8 @@ const userSchema = new Schema(
     lastSeenAt: Date,
     chatPingAt: Date, // last check-in from an open Crew Call (online = within ~70 seconds)
     chatAway: { type: Boolean, default: false }, // the tab was in the background
+    // How this person arranged things (e.g. the order of the Weekend check tiles)
+    layout: { type: Schema.Types.Mixed, default: {} },
     lastDevice: { type: String, default: '' },
     calLastFetchedAt: Date,
     calClient: { type: String, default: '' },

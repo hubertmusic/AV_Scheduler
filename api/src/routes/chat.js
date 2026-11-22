@@ -17,6 +17,37 @@ const MAX_TEXT = 2000;
 const MAX_MEMBERS = 50;
 const PAGE = 50;
 
+// GET /api/chat/preview — "View as": the chat dock as that person sees it (who's online, their team
+// rooms, how many unread), but none of what anyone wrote and not who they talk to privately.
+// Read-only: it doesn't mark them online. Defined before the rule that keeps the rest of chat out.
+chatRouter.get('/preview', wrap(async (req, res, next) => {
+  if (!req.previewing) return next(forbidden('Only for “View as”.'));
+  const now = new Date();
+  const [people, rooms, teams] = await Promise.all([
+    User.find({ active: true }, { name: 1, teams: 1, role: 1, chatPingAt: 1, chatAway: 1, lastSeenAt: 1 }).sort({ name: 1 }).lean(),
+    ChatRoom.find(myRoomsQuery(req.user)).limit(200).lean(),
+    Team.find({}, { key: 1, name: 1, kind: 1 }).sort({ order: 1, name: 1 }).lean(),
+  ]);
+  const names = Object.fromEntries(people.map((u) => [id(u), u.name]));
+  const teamNames = Object.fromEntries(teams.map((t) => [t.key, t.name]));
+  const status = (u) => (u.chatPingAt && now - u.chatPingAt < ONLINE_MS ? (u.chatAway ? 'away' : 'online') : 'offline');
+  const views = await roomViews(req.user, rooms, teamNames, names);
+  // Every team they're on has a room, even if nobody has opened chat there yet
+  const teamRooms = myTeams(req.user)
+    .filter((k) => teamNames[k])
+    .map((k) => {
+      const t = teams.find((x) => x.key === k);
+      const v = views.find((r) => r.kind === 'team' && r.team === k);
+      return { id: v?.id || `team:${k}`, kind: 'team', team: k, name: teamNames[k], emoji: v?.emoji || '', color: v?.color || (t.kind === 'office' ? 'purple' : t.kind === 'music' ? 'amber' : 'blue'), unread: v?.unread || 0 };
+    });
+  const privateRooms = views.filter((r) => r.kind !== 'team');
+  res.json({
+    me: id(req.user),
+    people: people.map((u) => ({ id: id(u), name: u.name, status: status(u), lastSeen: u.chatPingAt || u.lastSeenAt || null, teams: teamsShownTo(req.user, u).map((k) => teamNames[k]).filter(Boolean) })),
+    rooms: teamRooms,
+    private: { chats: privateRooms.filter((r) => r.kind === 'direct').length, groups: privateRooms.filter((r) => r.kind === 'group').length, unread: privateRooms.reduce((n, r) => n + r.unread, 0) },
+  });
+}));
 chatRouter.use((req, res, next) => (req.previewing ? next(forbidden('Chat isn’t shown in a preview.')) : next()));
 const sendLimit = rateLimit({ windowMs: 60 * 1000, limit: 40, keyGenerator: (req) => String(req.user._id), standardHeaders: 'draft-7', legacyHeaders: false, validate: false, message: { error: 'That’s a lot of messages at once. Wait a moment.' } });
 

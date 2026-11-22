@@ -80,3 +80,8 @@
   .ch-bar { padding: 0 12px; }
 }
 @media print { .ch-dock { display: none !important; } }
+
+/* "View as" chat preview */
+.ch-preview-note { margin: 0; padding: 8px 12px; background: var(--accent-soft); color: var(--accent-ink); border-bottom: 1px solid var(--line); }
+.ch-private { cursor: default; }
+.ch-private:hover { background: none; }

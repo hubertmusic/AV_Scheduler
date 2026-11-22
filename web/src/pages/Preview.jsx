@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { roleLabel } from '../lib.js';
-import { Avatar, Modal } from '../ui.jsx';
+import { Avatar, Modal, useApp } from '../ui.jsx';
 
 // Admin only: see the app exactly as one person sees it. Nothing is saved while previewing.
 
@@ -23,6 +23,8 @@ export function PreviewBanner({ me, onSwitch, onExit }) {
 }
 
 export function PreviewPicker({ roster, current, onClose, onPick }) {
+  const { allTeams } = useApp();
+  const teamName = (k) => allTeams.find((t) => t.key === k)?.name;
   const [q, setQ] = useState('');
   const groups = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -38,7 +40,7 @@ export function PreviewPicker({ roster, current, onClose, onPick }) {
   return (
     <Modal title="View as…" onClose={onClose}>
       <div className="stack">
-        <p className="muted small">Pick someone to see Crew Call exactly as they see it: their tabs, their shifts and what they’re allowed to do. You can look around, but nothing is saved.</p>
+        <p className="muted small">Pick someone to see Crew Call exactly as they see it: their tabs, their shifts, their chat list, their account and what they’re allowed to do. If they’re on more than one team, switch between their teams at the top. You can look around, but nothing is saved, and their notes, vault and chat messages stay private.</p>
         <label className="field">
           <span>Find a person</span>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name or email" />
@@ -56,6 +58,7 @@ export function PreviewPicker({ roster, current, onClose, onPick }) {
                       <strong>{p.name}</strong>
                       <span className="muted small">
                         {roleLabel(p)}
+                        {(p.teams || []).map(teamName).filter(Boolean).length ? ` · ${(p.teams || []).map(teamName).filter(Boolean).join(', ')}` : ''}
                         {!p.active ? ' · turned off' : ''}
                       </span>
                     </span>

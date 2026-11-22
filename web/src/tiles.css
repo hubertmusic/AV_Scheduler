@@ -1,0 +1,16 @@
+/* Rearrangeable tiles (tiles.jsx) */
+.tile { min-width: 0; position: relative; }
+.tile > .card { height: 100%; }
+.tile-handle { flex: none; width: 32px; height: 36px; margin: -6px -8px -6px 0; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--field); cursor: grab; touch-action: none; }
+.tile-handle:hover { color: var(--ink); background: var(--sunk); }
+.tile-handle:focus-visible { color: var(--ink); }
+.tile-drag { z-index: 5; }
+.tile-drag > .card { box-shadow: 0 14px 34px rgba(16, 24, 40, 0.18); outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile-drag .tile-handle { cursor: grabbing; color: var(--accent-ink); background: var(--accent-soft); }
+body.tiles-dragging, body.tiles-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.tiles-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: -8px; }
+.tiles-foot .link-btn { min-height: 0; padding: 0; }
+@media (pointer: coarse) {
+  .tile-handle { width: 40px; height: 40px; color: var(--muted); }
+}
+.tight-row { gap: 4px; }
