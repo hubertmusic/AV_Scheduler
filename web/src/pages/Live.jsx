@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addMinutes, api, fmtTime } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
+import { ItemExtras } from '../orderItem.jsx';
 
 const mmss = (sec) => {
   const s = Math.max(0, Math.round(Math.abs(sec)));
@@ -140,7 +141,11 @@ export function LiveView({ eventId, onClose }) {
                 <span className={`chip ${s.drift > 2 ? 'chip-pending' : 'chip-approved'}`}>{s.drift > 0 ? `${s.drift} min behind` : s.drift < 0 ? `${-s.drift} min ahead` : 'On time'}</span>
               </div>
             )}
-            {!s.ended && s.cur?.notes && <div className="live-cue">Cue: {s.cur.notes}</div>}
+            {!s.ended && s.cur && (
+              <div className="live-cue">
+                <ItemExtras x={s.cur} />
+              </div>
+            )}
             {!s.ended && <div className="small muted">Next: {s.next ? s.next.title : 'end of service'}</div>}
           </div>
           <div className="live-buttons">

@@ -144,4 +144,53 @@ ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`), 404);
 ok(await anon('GET', `/api/public/rundown/${renewed.share.rundown}`), 404);
 step('deleting a plan turns its links off');
 
+// ---------- item details: crew cues, bulletin note, links, files ----------
+const svc3 = ok(await admin('POST', '/api/events', { date: iso(20), title: 'Mission Sabbath', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const up = ok(await admin.upload(`/api/plans/${svc3.id}/media`, [{ name: 'mission-story.mp4', type: 'video/mp4', bytes: Buffer.from('fake video bytes') }]), 201);
+const vid = up.media.find((m) => m.originalName === 'mission-story.mp4').id;
+const svc2 = ok(await admin('POST', '/api/events', { date: iso(13), title: 'Worship Service', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const otherFile = ok(await admin.upload(`/api/plans/${svc2.id}/media`, [{ name: 'other.jpg', type: 'image/jpeg', bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) }]), 201).media[0].id;
+p = ok(await admin('PATCH', `/api/plans/${svc3.id}`, {
+  order: [
+    { kind: 'heading', title: 'Worship', cues: { audio: 'x' }, links: [{ url: 'https://example.com' }], media: [vid] },
+    { kind: 'item', title: 'Welcome', who: 'Elder Ruth', minutes: 5, notes: 'Handheld mic 2\nWalk in from the left', cues: { audio: 'Handheld 2 up', slides: 'Welcome slide', lights: 'House to 50%', camera: 'Wide', bogus: 'no' }, bulletinNote: 'Please stand', bulletin: true },
+    { kind: 'item', title: 'Mission story', minutes: 4, links: [{ url: 'youtu.be/dQw4w9WgXcQ', title: 'Mission video' }, { url: 'https://example.org/script', title: '' }, { url: 'javascript:alert(1)' }, { url: 'not a link' }], media: [vid, otherFile, 'nope'], bulletinNote: 'Hidden from bulletin', bulletin: false },
+  ],
+}));
+const [hd, welcome, mission] = p.order;
+assert.deepEqual([hd.cues, hd.links, hd.media], [{ audio: '', slides: '', lights: '', camera: '' }, [], []], 'headings carry no details');
+assert.deepEqual(welcome.cues, { audio: 'Handheld 2 up', slides: 'Welcome slide', lights: 'House to 50%', camera: 'Wide' });
+assert.equal(welcome.notes, 'Handheld mic 2\nWalk in from the left', 'line breaks are kept');
+assert.equal(welcome.bulletinNote, 'Please stand');
+assert.deepEqual(mission.links, [{ url: 'https://youtu.be/dQw4w9WgXcQ', title: 'Mission video', youtube: 'dQw4w9WgXcQ' }, { url: 'https://example.org/script', title: '', youtube: '' }], 'web links only; YouTube recognised');
+assert.deepEqual(mission.media, [vid], 'only files from this service');
+step('order items keep crew cues, a bulletin note, links (YouTube recognised) and files from this service; line breaks kept');
+
+// The rundown shows every cue, links and file names; the bulletin shows only the bulletin note
+const rdD = ok(await anon('GET', `/api/public/rundown/${p.share.rundown}`));
+const rdW = rdD.order.find((x) => x.title === 'Welcome');
+assert.deepEqual(rdW.cues, welcome.cues);
+assert.deepEqual(rdD.order.find((x) => x.title === 'Mission story').files, ['mission-story.mp4']);
+assert.equal(rdD.order.find((x) => x.title === 'Mission story').links[0].youtube, 'dQw4w9WgXcQ');
+assert.ok(!('media' in rdW) && !('id' in rdW), 'no ids on the public page');
+assert.equal(rdD.crews.slides, 'Slides & ProPresenter');
+const blD = ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`));
+assert.deepEqual(blD.order.map((x) => [x.title, x.note]), [['Worship', ''], ['Welcome', 'Please stand']], 'items left off the bulletin stay off, note too');
+assert.ok(!JSON.stringify(blD).includes('Handheld') && !JSON.stringify(blD).includes('youtu'), 'no cues or links in the bulletin');
+// The run sheet has the order with cues
+const rsD = ok(await crew('GET', `/api/weekend/runsheet/${svc3.id}`));
+assert.deepEqual(rsD.plan.order.find((x) => x.title === 'Welcome').cues.lights, 'House to 50%');
+assert.deepEqual(rsD.plan.order.find((x) => x.title === 'Mission story').files, ['mission-story.mp4']);
+// The ProPresenter download names the file after its item and lists the links
+const zipD = ok(await admin('GET', `/api/plans/${svc3.id}/propresenter.zip`));
+const zipNames = zipD.toString('latin1');
+assert.ok(zipNames.includes('Media/03 Mission story - mission-story.mp4'), 'attached files are numbered by item');
+assert.ok(zipNames.includes('Links.txt'));
+// Templates keep cues and links, not files
+ok(await admin('POST', '/api/order-templates', { name: 'Detailed', order: p.order }), 201);
+const tplD = ok(await admin('GET', '/api/order-templates')).find((t) => t.name === 'Detailed');
+assert.equal(tplD.order.find((x) => x.title === 'Welcome').cues.audio, 'Handheld 2 up');
+assert.deepEqual(tplD.order.find((x) => x.title === 'Mission story').media, []);
+step('the rundown and run sheet show each crew’s cues, links and files; the bulletin only its notes; the ProPresenter download numbers files by item and lists links');
+
 console.log('\nAll order-of-service checks passed.');

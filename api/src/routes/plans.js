@@ -9,7 +9,7 @@ import { addDays, bad, DATE_RE, forbidden, getSettings, isId, notFound, roleIn, 
 import { isAvTeam, requireMember } from '../lib/teams.js';
 import { copyStoredFile, deleteMediaFile, deleteStored, fileHash, filesOf, mediaView, originalName, removeUploads, sendStored, storedPath, uploader } from '../lib/media.js';
 import { archivedQuery, isArchived, isArchivedDate, openQuery, orgToday } from '../lib/archive.js';
-import { orderView, readOrder } from '../lib/serviceOrder.js';
+import { orderView, readOrder, youtubeId } from '../lib/serviceOrder.js';
 import { applyItem, defaultSchedule, updateItem, windowState } from '../lib/guestItems.js';
 import { safeFileName, toProPresenterText } from '../lib/propresenter.js';
 import { buildAnnouncementsPptx, buildServicePptx } from '../lib/pptx.js';
@@ -514,7 +514,11 @@ plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
   if (b.scriptures !== undefined) plan.scriptures = readScriptures(b.scriptures);
   if (b.songs !== undefined) plan.songs = await readPlanSongs(b.songs);
   if (b.assets !== undefined) plan.assets = await readAssets(b.assets);
-  if (b.order !== undefined) plan.order = readOrder(b.order);
+  if (b.order !== undefined) {
+    // Items can point to files in this service (its own uploads and library items it uses)
+    const files = new Set([...(await Media.find({ plan: plan._id, status: { $ne: 'rejected' } }, { _id: 1 }).lean()).map((m) => String(m._id)), ...(plan.assets || []).map((a) => String(a?._id || a))]);
+    plan.order = readOrder(b.order, { media: files });
+  }
   if (b.announcements !== undefined) plan.announcements = str(b.announcements, 5000);
   if (b.inputs !== undefined) {
     plan.inputs = readInputs(b.inputs);
@@ -650,14 +654,20 @@ plansRouter.get('/:eventId/propresenter.zip', wrap(async (req, res) => {
   }
   const header = [ev.title, ev.date, plan.sermonTitle && `Sermon: ${plan.sermonTitle}`, plan.speaker && `Speaker: ${plan.speaker}`].filter(Boolean).join('\n');
   zip.append(`${header}\n\n${plan.notes || ''}\n`, { name: 'Service notes.txt' });
-  // Everything uploaded to the plan (pictures, videos, slides, documents), as uploaded.
+  // Everything uploaded to the plan (pictures, videos, slides, documents), as uploaded. A file
+  // attached to an order-of-service item is numbered and named after it, so it sorts in service order.
   const used = new Set();
   const files = await planFiles(plan);
+  const itemOf = {};
+  plan.order.forEach((x, i) => (x.media || []).forEach((id) => (itemOf[String(id)] ||= `${String(i + 1).padStart(2, '0')} ${safeFileName(x.title, 'Item')} - `)));
   for (const m of files) {
     const file = !m.purgedAt && storedPath(m);
     if (!file || !fs.existsSync(file)) continue; // removed, or in the archive while the NAS is off
-    zip.file(file, { name: `Media/${uniqueName(m.originalName, used)}` });
+    zip.file(file, { name: `Media/${uniqueName(`${itemOf[String(m._id)] || ''}${m.originalName}`, used)}` });
   }
+  // Links attached to items (videos, scripts): one list to open on the ProPresenter computer
+  const links = plan.order.flatMap((x, i) => (x.links || []).map((l) => `${String(i + 1).padStart(2, '0')} ${x.title}${l.title ? ` — ${l.title}` : ''}${youtubeId(l.url) ? ' (YouTube)' : ''}\n${l.url}`));
+  if (links.length) zip.append(`Links for ${ev.title}, ${ev.date}\n\n${links.join('\n\n')}\n`, { name: 'Links.txt' });
   // The same service as a PowerPoint, for ProPresenter's PowerPoint import.
   try {
     const { buffer } = await buildServicePptx(ev, plan, files, (await getSettings()).orgName);

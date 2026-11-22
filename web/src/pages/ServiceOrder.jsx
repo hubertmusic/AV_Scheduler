@@ -5,11 +5,12 @@ import { useEffect, useState } from 'react';
 import { api, fmtDate, fmtMinutes, fmtTime, orderTimes } from '../lib.js';
 import { Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { Qr, qrPng } from '../qr.jsx';
+import { AutoText, CREWS, ItemDetails, ItemExtras, detailSummary, emptyCues } from '../orderItem.jsx';
 
 export const KIND_LABEL = { item: 'Item', song: 'Song', scripture: 'Scripture', prayer: 'Prayer', sermon: 'Sermon', heading: 'Heading' };
 
 let tempId = 0;
-const newItem = (over = {}) => ({ id: `new-${++tempId}`, kind: 'item', title: '', who: '', minutes: '', notes: '', bulletin: true, ...over });
+const newItem = (over = {}) => ({ id: `new-${++tempId}`, kind: 'item', title: '', who: '', minutes: '', notes: '', cues: emptyCues(), bulletinNote: '', links: [], media: [], bulletin: true, ...over });
 
 const BASIC = [
   ['item', 'Welcome and announcements'],
@@ -26,16 +27,36 @@ const BASIC = [
 const clean = (list) =>
   list
     .filter((x) => x.title.trim())
-    .map((x) => ({ kind: x.kind, title: x.title.trim(), who: x.kind === 'heading' ? '' : x.who.trim(), minutes: x.kind === 'heading' ? 0 : Number(x.minutes) || 0, notes: x.kind === 'heading' ? '' : x.notes.trim(), bulletin: x.bulletin }));
+    .map((x) => {
+      const h = x.kind === 'heading';
+      return {
+        kind: x.kind,
+        title: x.title.trim(),
+        who: h ? '' : x.who.trim(),
+        minutes: h ? 0 : Number(x.minutes) || 0,
+        notes: h ? '' : x.notes.trim(),
+        cues: Object.fromEntries(CREWS.map(([k]) => [k, h ? '' : (x.cues?.[k] || '').trim()])),
+        bulletinNote: h ? '' : (x.bulletinNote || '').trim(),
+        links: h ? [] : (x.links || []).map((l) => ({ url: l.url, title: (l.title || '').trim() })),
+        media: h ? [] : x.media || [],
+        bulletin: x.bulletin,
+      };
+    });
 const same = (a, b) => JSON.stringify(clean(a)) === JSON.stringify(clean(b));
-const fromPlanOrder = (order) => order.map((x) => ({ ...x, minutes: x.minutes || '' }));
+const fromPlanOrder = (order) => order.map((x) => ({ ...x, minutes: x.minutes || '', cues: { ...emptyCues(), ...(x.cues || {}) }, bulletinNote: x.bulletinNote || '', links: x.links || [], media: x.media || [] }));
+// Files an item can point to: this service's uploads and the library items it uses
+const planFilesOf = (plan) => [...(plan.media || []).filter((m) => m.status !== 'rejected'), ...(plan.assets || [])];
 
 export function OrderOfService({ plan, canEdit, onSave, setPlan, onLive }) {
   const app = useApp();
   const ev = plan.event;
   const [items, setItems] = useState(() => fromPlanOrder(plan.order));
   const [busy, setBusy] = useState(false);
-  useEffect(() => setItems(fromPlanOrder(plan.order)), [plan.order]);
+  const [open, setOpen] = useState({}); // which items have their details shown
+  // Reset only when the saved order itself changes (not when a file upload refreshes the plan)
+  const savedKey = JSON.stringify(plan.order);
+  useEffect(() => setItems(fromPlanOrder(plan.order)), [savedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const files = planFilesOf(plan);
 
   const dirty = !same(items, plan.order);
   const times = orderTimes(ev.start, items);
@@ -152,7 +173,8 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan, onLive }) {
                       <strong>{x.title}</strong>
                       {x.who && <span className="muted"> · {x.who}</span>}
                       {x.minutes > 0 && <span className="muted small"> · {x.minutes} min</span>}
-                      {x.notes && <span className="small block">{x.notes}</span>}
+                      <ItemExtras x={x} files={planFilesOf(plan)} />
+                      {x.bulletin && x.bulletinNote && <span className="small muted block">Bulletin: {x.bulletinNote}</span>}
                     </span>
                   </li>
                 )
@@ -225,7 +247,16 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan, onLive }) {
                     ✕
                   </button>
                 </span>
-                {!heading && <input className="oos-notes" aria-label="Cues for the team" placeholder="Cues for the team: mics, slides, lights (rundown only)" value={x.notes} onChange={(e) => set(i, { notes: e.target.value })} />}
+                {!heading && (
+                  <div className="oos-notes">
+                    <AutoText aria-label="Cues and notes for the team" maxLength={2000} placeholder="Cues and notes for everyone on the team (rundown only). Press Return for a new line." value={x.notes} onChange={(v) => set(i, { notes: v })} />
+                    <button type="button" className="oos-more" aria-expanded={!!open[x.id]} onClick={() => setOpen({ ...open, [x.id]: !open[x.id] })}>
+                      <span aria-hidden="true">{open[x.id] ? '▾' : '▸'}</span> Crew cues, bulletin note, links &amp; files
+                      {detailSummary(x) && <span className="oos-more-sum"> · {detailSummary(x)}</span>}
+                    </button>
+                    {open[x.id] && <ItemDetails x={x} onChange={(patch) => set(i, patch)} plan={plan} setPlan={setPlan} files={files} />}
+                  </div>
+                )}
               </li>
             );
           })}
