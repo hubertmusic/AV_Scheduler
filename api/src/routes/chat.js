@@ -10,6 +10,7 @@ import { CHAT_COLORS, ChatMessage, ChatRoom, ChatSeen, Team, User } from '../mod
 import { bad, forbidden, isId, membershipOf, notFound, str, wrap } from '../lib/util.js';
 import { open, seal } from '../lib/secrets.js';
 import { teamsShownTo } from '../lib/teams.js';
+import { seesPhone } from '../lib/views.js';
 
 export const chatRouter = Router();
 const ONLINE_MS = 70 * 1000;
@@ -143,7 +144,7 @@ chatRouter.get('/sync', wrap(async (req, res) => {
   await User.updateOne({ _id: req.user._id }, { $set: { chatPingAt: now, chatAway: away } });
   await ensureTeamRooms(req.user);
   const [people, rooms, teams] = await Promise.all([
-    User.find({ active: true }, { name: 1, teams: 1, role: 1, chatPingAt: 1, chatAway: 1, lastSeenAt: 1 }).sort({ name: 1 }).lean(),
+    User.find({ active: true }, { name: 1, teams: 1, role: 1, phone: 1, chatPingAt: 1, chatAway: 1, lastSeenAt: 1 }).sort({ name: 1 }).lean(),
     ChatRoom.find(myRoomsQuery(req.user)).sort({ lastMessageAt: -1 }).limit(200).lean(),
     Team.find({}, { key: 1, name: 1 }).lean(),
   ]);
@@ -153,7 +154,8 @@ chatRouter.get('/sync', wrap(async (req, res) => {
   const out = {
     now,
     me: id(req.user),
-    people: people.map((u) => ({ id: id(u), name: u.name, status: status(u), lastSeen: u.chatPingAt || u.lastSeenAt || null, teams: teamsShownTo(req.user, u).map((k) => teamNames[k]).filter(Boolean) })),
+    // phone: for the WhatsApp button, only where the viewer may see it (same rule as Team & roles)
+    people: people.map((u) => ({ id: id(u), name: u.name, status: status(u), lastSeen: u.chatPingAt || u.lastSeenAt || null, teams: teamsShownTo(req.user, u).map((k) => teamNames[k]).filter(Boolean), ...(u.phone && seesPhone(u, req.user) ? { phone: u.phone } : {}) })),
     rooms: await roomViews(req.user, rooms, teamNames, names),
     messages: [],
   };

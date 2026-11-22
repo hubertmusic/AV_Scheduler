@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, fmtDate, fmtDay, fmtTime, fmtWhen } from '../lib.js';
 import { Empty, Modal, useApp } from '../ui.jsx';
+import { useDraft } from '../live.jsx';
 
 export const FEATURE_INFO = [
   ['liveShow', 'Live run-of-show', 'A booth view that follows the order of service during the service (Now, Next, ahead or behind), and a stage clock link for a screen the speaker can see.'],
@@ -130,6 +131,7 @@ export function InputListCard({ plan, canEdit, onSave, setPlan }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => setRows(plan.inputs), [plan.inputs]);
   const dirty = JSON.stringify(rows.filter((r) => r.ch || r.source || r.mic)) !== JSON.stringify(plan.inputs);
+  useDraft('inputs', canEdit && dirty);
   const set = (i, k, v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
   const save = async () => {
     setBusy(true);

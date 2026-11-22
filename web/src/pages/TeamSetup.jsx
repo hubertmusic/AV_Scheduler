@@ -6,6 +6,7 @@ import { Icon, useApp } from '../ui.jsx';
 import { COMMITTEE_COLORS } from '../office.jsx';
 import { Positions, useSaver } from './Settings.jsx';
 import TeamLook from './TeamLook.jsx';
+import { CallLinkHelp } from '../live.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
 const KIND_LABEL = { av: 'AV', music: 'Music / praise', other: 'Other', office: 'Church office' };
@@ -38,7 +39,7 @@ export default function TeamSetup() {
 // Name and WhatsApp group for the team you're working in
 function TeamInfo() {
   const { team } = useApp();
-  const [f, setF] = useState({ name: team.name, groupLink: team.groupLink || '' });
+  const [f, setF] = useState({ name: team.name, groupLink: team.groupLink || '', callLink: team.callLink || '' });
   const { busy, error, run } = useSaver();
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
@@ -49,6 +50,12 @@ function TeamInfo() {
         <input value={f.name} onChange={set('name')} maxLength={40} />
       </label>
       <GroupLinkField value={f.groupLink} onChange={set('groupLink')} />
+      <label className="field">
+        <span>Team call link (optional)</span>
+        <input type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} value={f.callLink} onChange={set('callLink')} placeholder="https://call.whatsapp.com/voice/…" />
+      </label>
+      <p className="muted small">A standing call for quick huddles: everyone on the {team.name} gets a <strong>Team call</strong> button at the top of Crew Call.</p>
+      <CallLinkHelp />
       {error && <div className="error" role="alert">{error}</div>}
       <button type="button" className="btn btn-primary self-start" disabled={busy} onClick={() => run(() => api(`/teams/${team.key}`, { method: 'PATCH', body: f }), 'Team saved')}>
         Save
@@ -178,10 +185,10 @@ export function TeamsAdmin() {
 
 function TeamRow({ t, onSaved }) {
   const app = useApp();
-  const [f, setF] = useState({ name: t.name, groupLink: t.groupLink || '' });
+  const [f, setF] = useState({ name: t.name, groupLink: t.groupLink || '', callLink: t.callLink || '' });
   const [head, setHead] = useState(t.heads.find((h) => h.id !== app.me.id)?.id || '');
   const { busy, error, run } = useSaver();
-  const changed = f.name !== t.name || f.groupLink !== (t.groupLink || '');
+  const changed = f.name !== t.name || f.groupLink !== (t.groupLink || '') || f.callLink !== (t.callLink || '');
   const candidates = app.everyone.filter((p) => p.id !== app.me.id);
   const saveHead = () => {
     const p = candidates.find((x) => x.id === head);
@@ -208,6 +215,10 @@ function TeamRow({ t, onSaved }) {
         <label className="field">
           <span>WhatsApp group link</span>
           <input type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} value={f.groupLink} onChange={(e) => setF({ ...f, groupLink: e.target.value })} placeholder="https://chat.whatsapp.com/…" />
+        </label>
+        <label className="field">
+          <span>Team call link</span>
+          <input type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} value={f.callLink} onChange={(e) => setF({ ...f, callLink: e.target.value })} placeholder="https://call.whatsapp.com/…" />
         </label>
       </div>
       {changed && (

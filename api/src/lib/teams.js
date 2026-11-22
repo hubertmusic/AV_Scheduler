@@ -38,7 +38,7 @@ export function teamsShownTo(viewer, u) {
 }
 export const forgetPositions = () => (posCache.at = 0);
 
-export const teamView = (t) => ({ key: t.key, name: t.name, kind: t.kind, groupLink: t.groupLink || '', order: t.order || 0, theme: themeView(t) });
+export const teamView = (t) => ({ key: t.key, name: t.name, kind: t.kind, groupLink: t.groupLink || '', callLink: t.callLink || '', order: t.order || 0, theme: themeView(t) });
 export const isAvTeam = (team) => (team?.kind || 'av') === 'av';
 
 // Position key -> team key

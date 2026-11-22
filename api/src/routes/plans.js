@@ -19,6 +19,8 @@ import { evName } from '../lib/activity.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import { requireFeature } from '../lib/features.js';
+import { readCallLink } from '../lib/callLink.js';
+import { whoIsHere } from '../lib/presence.js';
 
 export const plansRouter = Router();
 export const songsRouter = Router();
@@ -181,12 +183,14 @@ async function fullPlan(ev, req) {
     media: media.map(mediaView),
     order: orderView(plan.order),
     announcements: plan.announcements,
+    callLink: plan.callLink || '',
     playlist: playlistView(plan.playlist),
     live: plan.live || null,
     inputs: plan.inputs || [],
     share: { rundown: plan.rundownToken, bulletin: plan.bulletinToken },
     updatedAt: plan.updatedAt,
     updatedBy: plan.updatedBy?.name || null,
+    v: await planVersion(plan, ev),
     rights,
   };
   if (viewerCan.plans) {
@@ -205,6 +209,13 @@ async function fullPlan(ev, req) {
     out.submissions = subs.map(submissionView);
   }
   return out;
+}
+
+// Changes whenever anything on the plan changes (its own fields, its files, guest uploads), so pages
+// that have it open reload only when they need to
+async function planVersion(plan, ev) {
+  const [m, x] = await Promise.all([Media.findOne({ plan: plan._id }, { updatedAt: 1 }).sort({ updatedAt: -1 }).lean(), Submission.findOne({ event: ev._id }, { updatedAt: 1 }).sort({ updatedAt: -1 }).lean()]);
+  return String(Math.max(...[plan.updatedAt, m?.updatedAt, x?.updatedAt].map((d) => (d ? new Date(d).getTime() : 0))));
 }
 
 // Remove a service's plan, its files, guest links and submissions (used when a service is deleted).
@@ -360,6 +371,16 @@ plansRouter.get('/playlist-link', wrap(async (req, res) => {
 plansRouter.get('/:eventId', wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
   res.json(await fullPlan(ev, req));
+}));
+
+// GET /api/plans/:eventId/here?writing=order — I have this plan open. Returns who else does (and
+// what they're editing) and a version, so open pages reload only when something changed.
+plansRouter.get('/:eventId/here', wrap(async (req, res) => {
+  const ev = await loadEvent(req.params.eventId);
+  const plan = await planFor(ev._id);
+  const writing = ['order', 'notes', 'songs', 'scriptures', 'announcements', 'inputs'].includes(req.query.writing) ? req.query.writing : '';
+  res.set('Cache-Control', 'no-store');
+  res.json({ v: await planVersion(plan, ev), here: req.previewing ? [] : whoIsHere(`plan:${ev._id}`, req.user, writing) });
 }));
 
 // POST /api/plans/:eventId/share/rundown|bulletin — replace a share link (the old link and QR stop working)
@@ -533,13 +554,21 @@ plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
     plan.order = readOrder(b.order, { media: files });
   }
   if (b.announcements !== undefined) plan.announcements = str(b.announcements, 5000);
+  if (b.callLink !== undefined) {
+    if (!rights.lead) throw forbidden(LEAD_ONLY);
+    try {
+      plan.callLink = readCallLink(b.callLink);
+    } catch (e) {
+      throw bad(e.message);
+    }
+  }
   if (b.inputs !== undefined) {
     plan.inputs = readInputs(b.inputs);
     plan.markModified('inputs');
   }
   plan.updatedBy = req.user._id;
   await plan.save();
-  const names = { sermonTitle: 'sermon title', speaker: 'speaker', notes: 'notes', scriptures: 'Bible texts', songs: 'songs', assets: 'library items', order: 'order of service', announcements: 'announcements' };
+  const names = { sermonTitle: 'sermon title', speaker: 'speaker', notes: 'notes', scriptures: 'Bible texts', songs: 'songs', assets: 'library items', order: 'order of service', announcements: 'announcements', callLink: 'call link' };
   const what = Object.keys(names).filter((k) => b[k] !== undefined).map((k) => names[k]);
   res.locals.activity = `Edited ${what.join(', ') || 'the plan'} · ${evName(ev)}`;
   res.json(await fullPlan(ev, req));

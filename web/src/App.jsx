@@ -444,6 +444,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
               </select>
             </label>
           )}
+          {team.callLink && (
+            <a className="btn btn-dark team-call" href={team.callLink} target="_blank" rel="noopener noreferrer" title={`Join the ${team.name} call in WhatsApp`}>
+              <span aria-hidden="true">📞</span> Team call
+            </a>
+          )}
           <button type="button" className="user-btn" onClick={() => setAccount(true)} aria-label="Your account">
             <Avatar name={me.name} size={32} tone="accent" />
             <span>

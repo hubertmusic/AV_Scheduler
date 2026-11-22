@@ -10,6 +10,7 @@ import WeeklyLinks from './WeeklyLinks.jsx';
 import { DebriefAnswers, featureOn, InputListCard } from './Extras.jsx';
 import { LiveView } from './Live.jsx';
 import { LineupButton } from '../lineup.jsx';
+import { BehindNote, CallBar, HereBar, useDraft, useDrafts, useLive } from '../live.jsx';
 
 const VIEWS = [
   { id: 'plans', tab: 'Plans', title: 'Service plans', blurb: 'Sermon notes, Bible texts, songs and media for each service, ready for ProPresenter. Each weekend moves to the Archive on Monday morning.' },
@@ -329,7 +330,7 @@ function PlanEditor({ eventId, onChanged }) {
 
   const load = useCallback(async () => {
     try {
-      setPlan(await api(`/plans/${eventId}`));
+      setPlan(await api(`/plans/${eventId}`, { background: true }));
     } catch (e) {
       setError(e.message);
     }
@@ -337,6 +338,10 @@ function PlanEditor({ eventId, onChanged }) {
   useEffect(() => {
     load();
   }, [load]);
+  // Planning together: who else has this plan open, and their changes as they save them. A reload
+  // waits while you have unsaved edits, so it never wipes what you're typing.
+  const editing = useDrafts();
+  const { here, behind } = useLive({ url: `/plans/${eventId}/here`, v: plan?.v, reload: load, writing: editing[0] || '', hold: editing.length > 0 });
 
   const patch = async (body, msg) => {
     try {
@@ -407,8 +412,19 @@ function PlanEditor({ eventId, onChanged }) {
             </a>
           </div>
         </div>
+        {ev.kind !== 'soundcheck' && (
+          <CallBar
+            link={plan.callLink}
+            canEdit={canEdit}
+            follow="the plan"
+            onSave={(callLink) => patch({ callLink }, callLink ? 'Call link saved' : 'Call link removed').then(() => true, () => false)}
+            addBlurb="Planning this service together? Add a WhatsApp call link; everyone with the plan open gets a Join button and sees each other’s changes."
+          />
+        )}
         <Details plan={plan} canEdit={canEdit} onSave={patch} />
       </section>
+      <HereBar here={here} what="this plan" />
+      {behind && <BehindNote onLoad={load} />}
       {canEdit && plan.officeAnnouncements?.length > 0 && <OfficeAnnouncements plan={plan} onDone={load} />}
       {canEdit && plan.submissions?.some((s) => s.status === 'pending') && <Approvals plan={plan} onDone={() => { load(); onChanged(); }} />}
       <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} onLive={featureOn(app, 'liveShow') && plan.order.length > 0 ? () => setLive(true) : null} />
@@ -554,6 +570,7 @@ function Details({ plan, canEdit, onSave }) {
   const [f, setF] = useState({ sermonTitle: plan.sermonTitle, speaker: plan.speaker, notes: plan.notes });
   const [busy, setBusy] = useState(false);
   const dirty = f.sermonTitle !== plan.sermonTitle || f.speaker !== plan.speaker || f.notes !== plan.notes;
+  useDraft('notes', dirty);
   useEffect(() => setF({ sermonTitle: plan.sermonTitle, speaker: plan.speaker, notes: plan.notes }), [plan.sermonTitle, plan.speaker, plan.notes]);
 
   if (!canEdit)
@@ -614,6 +631,7 @@ function Details({ plan, canEdit, onSave }) {
 function Scriptures({ plan, canEdit, onSave }) {
   const empty = { reference: '', version: 'KJV', text: '' };
   const [f, setF] = useState(empty);
+  useDraft('scriptures', !!(f.reference.trim() || f.text.trim()));
   const list = plan.scriptures;
 
   const add = async (e) => {

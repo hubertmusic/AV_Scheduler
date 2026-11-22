@@ -176,6 +176,14 @@ ok(await admin('PATCH', '/api/teams/praise', { theme: null }));
 assert.equal(ok(await piaC('GET', '/api/bootstrap')).team.theme.preset, 'sanctuary', 'back to the default');
 step('each team has its own look; only its head leader or the admin changes it');
 
+// ---------- the team's standing call ----------
+ok(await piaC('PATCH', '/api/teams/praise', { callLink: 'https://example.com/call' }), 400);
+ok(await samC('PATCH', '/api/teams/praise', { callLink: 'https://call.whatsapp.com/voice/Praise1' }), 403);
+assert.equal(ok(await piaC('PATCH', '/api/teams/praise', { callLink: 'https://call.whatsapp.com/voice/Praise1' })).callLink, 'https://call.whatsapp.com/voice/Praise1');
+assert.equal(ok(await samC('GET', '/api/bootstrap')).team.callLink, 'https://call.whatsapp.com/voice/Praise1', 'everyone on the team gets the Team call button');
+assert.equal(ok(await avaC('GET', '/api/bootstrap')).team.callLink, '', 'other teams have their own');
+step('each team can keep a standing WhatsApp call; only its head leader or the admin sets it');
+
 // ---------- each person's tile layout ----------
 ok(await avaC('PUT', '/api/account/layout/weekend-check', { order: 'open' }), 400);
 ok(await avaC('PUT', '/api/account/layout/weekend-check', { order: ['<script>'] }), 400);

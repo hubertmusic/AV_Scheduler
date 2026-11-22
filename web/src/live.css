@@ -1,4 +1,4 @@
-/* The live meeting page (liveMeeting.jsx) */
+/* Working on a page together (live.jsx): meetings and service plans */
 .lm-here { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
 .lm-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #b42318; }
 .lm-dot { width: 8px; height: 8px; border-radius: 50%; background: #d92d20; box-shadow: 0 0 0 3px #fde3e1; }
