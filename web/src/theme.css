@@ -65,3 +65,7 @@ h1, h2, h3 { font-family: var(--head); }
 .bl-swatch-on { box-shadow: 0 0 0 3px var(--ink); }
 .bl-swatch-own { background: conic-gradient(#c0392b, #e67e22, #f1c40f, #27ae60, #2980b9, #8e44ad, #c0392b); display: inline-block; }
 .bl-swatch-own input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+
+/* Read-only windows in "View as" */
+.plain-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.preview-note { background: var(--accent-soft); color: var(--accent-ink); border-radius: 8px; padding: 8px 10px; font-weight: 600; }

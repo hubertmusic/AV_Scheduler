@@ -128,6 +128,19 @@ step('named groups: pick people, name, emoji and colour; anyone in it renames or
 
 // ---------- privacy ----------
 ok(await admin('GET', '/api/chat/sync', null, { 'X-View-As': ben.id }), 403);
+for (const p of [`/api/chat/rooms/${dm}/messages`, '/api/chat/sync?away=0']) ok(await admin('GET', p, null, { 'X-View-As': pia.id }), 403);
+// "View as" gets a look at the dock: who's online, their team rooms, counts — no words, no names of private chats
+ok(await ben.c('GET', '/api/chat/preview'), 403, 'only in a preview');
+const before = ok(await pia.c('GET', '/api/chat/sync')).people.find((p) => p.name === 'Pia').lastSeen;
+const pv = ok(await admin('GET', '/api/chat/preview', null, { 'X-View-As': pia.id }));
+assert.equal(pv.me, pia.id);
+assert.deepEqual(pv.rooms.map((r) => r.name), ['Praise Team'], 'their team rooms');
+assert.ok(pv.private.chats >= 1 && pv.private.groups >= 1, 'private chats are only counted');
+const raw = JSON.stringify(pv);
+for (const t of ['Sabbath crew', 'XLR', 'Sabbath?', 'Ben started']) assert.ok(!raw.includes(t), `no “${t}” in a preview`);
+assert.ok(!pv.rooms.some((r) => 'last' in r || 'members' in r));
+assert.equal(pv.people.find((p) => p.name === 'Olivia').teams.length, 0, 'still as Pia sees people');
+assert.equal(ok(await ben.c('GET', '/api/chat/sync')).people.find((p) => p.name === 'Pia').lastSeen, before, 'a preview doesn’t mark them online');
 if (process.env.MONGO_URL) {
   const { MongoClient } = await import('mongodb');
   const db = new MongoClient(process.env.MONGO_URL);
@@ -139,6 +152,6 @@ if (process.env.MONGO_URL) {
 }
 const feed = JSON.stringify(ok(await admin('GET', '/api/activity/feed?limit=200')));
 assert.ok(!feed.includes('XLR') && !feed.includes('Sabbath?'), 'no chat in the activity log');
-step('chat isn’t in previews or the activity log, and messages are stored scrambled');
+step('chat messages aren’t in previews (only the shape of the dock) or the activity log, and they’re stored scrambled');
 
 console.log('\nAll chat checks passed.');

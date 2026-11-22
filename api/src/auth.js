@@ -289,6 +289,20 @@ accountRouter.post('/sign-out-everywhere', wrap(async (req, res) => {
   res.status(204).end();
 }));
 
+// PUT /api/account/layout/:page { order: ['open', 'unconfirmed', …] } — how someone arranged a
+// page's tiles. Only short tile names are kept, so this can't grow into a place to store anything.
+const LAYOUT_PAGES = ['weekend-check'];
+accountRouter.put('/layout/:page', wrap(async (req, res) => {
+  if (!LAYOUT_PAGES.includes(req.params.page)) throw bad('That page can’t be arranged.');
+  const order = req.body?.order;
+  if (order !== null && (!Array.isArray(order) || order.length > 20 || !order.every((x) => typeof x === 'string' && /^[a-z-]{1,24}$/.test(x)))) throw bad('That layout isn’t valid.');
+  const layout = { ...(req.user.layout || {}) };
+  if (order === null) delete layout[req.params.page];
+  else layout[req.params.page] = [...new Set(order)];
+  await User.updateOne({ _id: req.user._id }, { $set: { layout } });
+  res.json({ layout });
+}));
+
 // Keeps a session alive while someone is working on a page without saving anything
 accountRouter.get('/ping', (req, res) => res.status(204).end());
 

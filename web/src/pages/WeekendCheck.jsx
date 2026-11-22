@@ -4,6 +4,7 @@ import { Avatar, Empty, Icon, useApp } from '../ui.jsx';
 import { AutoFillModal } from './AutoFill.jsx';
 import { buildFromTemplate } from '../template.js';
 import { AnnouncementsModal, canAnnounce, Notices, noticesFor } from '../notices.jsx';
+import { TileHandle, Tiles } from '../tiles.jsx';
 
 export default function WeekendCheck() {
   const app = useApp();
@@ -144,104 +145,139 @@ export default function WeekendCheck() {
       )}
 
       {d && d.events.length > 0 && (
-        <div className="check-grid-cards">
-          <CheckCard title="Open spots" count={d.open.length} done="Every spot is filled.">
-            <ul className="check-list">
-              {d.open.map((x) => (
-                <li key={x.event.id + x.position}>
-                  <strong>{posLabel(x.position)}</strong> · {x.event.title} <span className="muted small">{fmtDay(x.event.date)}</span>
-                </li>
-              ))}
-            </ul>
-            {can.edit && d.open.length > 0 && (
-              <div className="row-wrap">
-                <button type="button" className="btn btn-primary" onClick={() => setAutofill(true)}>
-                  Auto-fill
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => app.goTab('schedule')}>
-                  Open schedule
-                </button>
-              </div>
-            )}
-          </CheckCard>
-
-          <CheckCard title="Not confirmed yet" count={d.unconfirmed.length} done="Everyone has confirmed.">
-            <ul className="check-list">
-              {d.unconfirmed.map((x) => (
-                <li key={x.id}>
-                  <strong>{x.person.name}</strong> · {where(x)} <span className="muted small">{fmtDay(x.event.date)}</span>
-                </li>
-              ))}
-            </ul>
-            {can.message && d.unconfirmed.length > 0 && (
-              <button type="button" className="btn btn-green self-start" onClick={nudgeAll}>
-                <Icon name="chat" size={16} /> Ask them to confirm
-              </button>
-            )}
-          </CheckCard>
-
-          <CheckCard title="Needs attention" count={d.flags.length} done="No one is double-booked or away.">
-            <ul className="check-list">
-              {d.flags.map((x) => (
-                <li key={x.id}>
-                  <strong>{x.person.name}</strong> · {where(x)} — <span className="danger">{x.flag}</span>
-                </li>
-              ))}
-            </ul>
-          </CheckCard>
-
-          <CheckCard title="Service plans" count={d.plansMissing.length} done="Every service has songs, notes and Bible texts.">
-            <ul className="check-list">
-              {d.plansMissing.map((x) => (
-                <li key={x.event.id}>
-                  <strong>{x.event.title}</strong> needs {x.missing.join(', ')}
-                </li>
-              ))}
-            </ul>
-            {d.plansMissing.length > 0 && (
-              <button type="button" className="btn btn-ghost self-start" onClick={() => app.goTab('plans')}>
-                Open service plans
-              </button>
-            )}
-          </CheckCard>
-
-          <CheckCard title="Waiting on approval" count={d.pendingRequests.length + d.pendingUploads.length} done="Nothing waiting.">
-            <ul className="check-list">
-              {d.pendingRequests.map((r) => (
-                <li key={r.id}>
-                  {r.from}’s {r.type} request
-                </li>
-              ))}
-              {d.pendingUploads.map((u) => (
-                <li key={u.event.id}>
-                  {u.count} quick-link upload{u.count === 1 ? '' : 's'} for {u.event.title}
-                </li>
-              ))}
-            </ul>
-            <div className="row-wrap">
-              {d.pendingRequests.length > 0 && can.approve && (
-                <button type="button" className="btn btn-ghost" onClick={() => app.goTab('requests')}>
-                  Requests
-                </button>
-              )}
-              {d.pendingUploads.length > 0 && can.plans && (
-                <button type="button" className="btn btn-ghost" onClick={() => app.goTab('plans')}>
-                  Quick-link uploads
-                </button>
-              )}
-            </div>
-          </CheckCard>
-
-          <CheckCard title="Availability" count={d.availability.stale.length} done="Everyone updated in the last 30 days." note={`${d.availability.total - d.availability.stale.length} of ${d.availability.total} up to date`}>
-            <p className="small muted">Not updated in 30 days:</p>
-            <p className="small">{d.availability.stale.map((p) => p.name).join(', ')}</p>
-            {can.message && d.availability.stale.length > 0 && (
-              <button type="button" className="btn btn-green self-start" onClick={askAvailability}>
-                <Icon name="chat" size={16} /> Ask them to update
-              </button>
-            )}
-          </CheckCard>
-        </div>
+        <Tiles
+          page="weekend-check"
+          className="check-grid-cards"
+          items={[
+            {
+              id: 'open',
+              title: 'Open spots',
+              node: (
+                <CheckCard title="Open spots" count={d.open.length} done="Every spot is filled.">
+                  <ul className="check-list">
+                    {d.open.map((x) => (
+                      <li key={x.event.id + x.position}>
+                        <strong>{posLabel(x.position)}</strong> · {x.event.title} <span className="muted small">{fmtDay(x.event.date)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {can.edit && d.open.length > 0 && (
+                    <div className="row-wrap">
+                      <button type="button" className="btn btn-primary" onClick={() => setAutofill(true)}>
+                        Auto-fill
+                      </button>
+                      <button type="button" className="btn btn-ghost" onClick={() => app.goTab('schedule')}>
+                        Open schedule
+                      </button>
+                    </div>
+                  )}
+                </CheckCard>
+              ),
+            },
+            {
+              id: 'unconfirmed',
+              title: 'Not confirmed yet',
+              node: (
+                <CheckCard title="Not confirmed yet" count={d.unconfirmed.length} done="Everyone has confirmed.">
+                  <ul className="check-list">
+                    {d.unconfirmed.map((x) => (
+                      <li key={x.id}>
+                        <strong>{x.person.name}</strong> · {where(x)} <span className="muted small">{fmtDay(x.event.date)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {can.message && d.unconfirmed.length > 0 && (
+                    <button type="button" className="btn btn-green self-start" onClick={nudgeAll}>
+                      <Icon name="chat" size={16} /> Ask them to confirm
+                    </button>
+                  )}
+                </CheckCard>
+              ),
+            },
+            {
+              id: 'attention',
+              title: 'Needs attention',
+              node: (
+                <CheckCard title="Needs attention" count={d.flags.length} done="No one is double-booked or away.">
+                  <ul className="check-list">
+                    {d.flags.map((x) => (
+                      <li key={x.id}>
+                        <strong>{x.person.name}</strong> · {where(x)} — <span className="danger">{x.flag}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CheckCard>
+              ),
+            },
+            {
+              id: 'plans',
+              title: 'Service plans',
+              node: (
+                <CheckCard title="Service plans" count={d.plansMissing.length} done="Every service has songs, notes and Bible texts.">
+                  <ul className="check-list">
+                    {d.plansMissing.map((x) => (
+                      <li key={x.event.id}>
+                        <strong>{x.event.title}</strong> needs {x.missing.join(', ')}
+                      </li>
+                    ))}
+                  </ul>
+                  {d.plansMissing.length > 0 && (
+                    <button type="button" className="btn btn-ghost self-start" onClick={() => app.goTab('plans')}>
+                      Open service plans
+                    </button>
+                  )}
+                </CheckCard>
+              ),
+            },
+            {
+              id: 'approval',
+              title: 'Waiting on approval',
+              node: (
+                <CheckCard title="Waiting on approval" count={d.pendingRequests.length + d.pendingUploads.length} done="Nothing waiting.">
+                  <ul className="check-list">
+                    {d.pendingRequests.map((r) => (
+                      <li key={r.id}>
+                        {r.from}’s {r.type} request
+                      </li>
+                    ))}
+                    {d.pendingUploads.map((u) => (
+                      <li key={u.event.id}>
+                        {u.count} quick-link upload{u.count === 1 ? '' : 's'} for {u.event.title}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="row-wrap">
+                    {d.pendingRequests.length > 0 && can.approve && (
+                      <button type="button" className="btn btn-ghost" onClick={() => app.goTab('requests')}>
+                        Requests
+                      </button>
+                    )}
+                    {d.pendingUploads.length > 0 && can.plans && (
+                      <button type="button" className="btn btn-ghost" onClick={() => app.goTab('plans')}>
+                        Quick-link uploads
+                      </button>
+                    )}
+                  </div>
+                </CheckCard>
+              ),
+            },
+            {
+              id: 'availability',
+              title: 'Availability',
+              node: (
+                <CheckCard title="Availability" count={d.availability.stale.length} done="Everyone updated in the last 30 days." note={`${d.availability.total - d.availability.stale.length} of ${d.availability.total} up to date`}>
+                  <p className="small muted">Not updated in 30 days:</p>
+                  <p className="small">{d.availability.stale.map((p) => p.name).join(', ')}</p>
+                  {can.message && d.availability.stale.length > 0 && (
+                    <button type="button" className="btn btn-green self-start" onClick={askAvailability}>
+                      <Icon name="chat" size={16} /> Ask them to update
+                    </button>
+                  )}
+                </CheckCard>
+              ),
+            },
+          ]}
+        />
       )}
 
       {d && d.events.length > 0 && (
@@ -337,7 +373,10 @@ function CheckCard({ title, count, done, note, children }) {
     <section className={`card stack-sm check-card ${count ? 'check-todo' : 'check-ok'}`} aria-label={title}>
       <div className="section-head">
         <h2>{title}</h2>
-        <span className={`chip ${count ? 'chip-pending' : 'chip-approved'}`}>{count ? count : '✓'}</span>
+        <span className="row tight-row">
+          <span className={`chip ${count ? 'chip-pending' : 'chip-approved'}`}>{count ? count : '✓'}</span>
+          <TileHandle />
+        </span>
       </div>
       {note && <span className="muted small">{note}</span>}
       {count ? children : <p className="good small strong">{done}</p>}

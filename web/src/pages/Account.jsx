@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api, prettyPhone, signalSignedOut } from '../lib.js';
 import { Modal, useApp } from '../ui.jsx';
 
-export default function Account({ onClose }) {
+// Your account. In “View as” it shows the person’s own account window, read-only.
+export default function Account({ onClose, preview = false }) {
   const app = useApp();
   const [f, setF] = useState({ name: app.me.name, phone: prettyPhone(app.me.phone || '') });
   const [pw, setPw] = useState({ current: '', password: '' });
@@ -25,6 +26,8 @@ export default function Account({ onClose }) {
 
   return (
     <Modal title="Your account" onClose={onClose}>
+      {preview && <p className="preview-note small">This is {app.me.name}’s account window, as they see it. Nothing here can be changed in a preview.</p>}
+      <fieldset className="plain-fieldset stack" disabled={preview}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); run(() => api('/account', { method: 'PATCH', body: f }), 'Saved'); }}>
         <label className="field">
           <span>Name</span>
@@ -70,6 +73,7 @@ export default function Account({ onClose }) {
           Sign out everywhere
         </button>
       </div>
+      </fieldset>
       {error && <div className="error" role="alert">{error}</div>}
     </Modal>
   );

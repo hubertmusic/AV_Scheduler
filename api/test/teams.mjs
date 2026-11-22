@@ -7,13 +7,14 @@ const BASE = process.env.BASE_URL || 'http://localhost:4000';
 
 function client(team = '') {
   let cookie = '';
-  const send = async (method, p, body, isForm) => {
+  const send = async (method, p, body, isForm, extra = {}) => {
     const res = await fetch(BASE + p, {
       method,
       headers: {
         ...(body && !isForm ? { 'Content-Type': 'application/json' } : {}),
         ...(cookie ? { Cookie: cookie } : {}),
         ...(call.team ? { 'X-Team': call.team } : {}),
+        ...extra,
       },
       body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
     });
@@ -26,7 +27,7 @@ function client(team = '') {
     else data = Buffer.from(await res.arrayBuffer());
     return { status: res.status, data };
   };
-  const call = (method, p, body) => send(method, p, body, false);
+  const call = (method, p, body, extra) => send(method, p, body, false, extra);
   call.team = team;
   call.upload = (p, files, field = 'files') => {
     const fd = new FormData();
@@ -174,6 +175,19 @@ assert.equal(ok(await avaC('GET', '/api/bootstrap')).team.theme.preset, 'console
 ok(await admin('PATCH', '/api/teams/praise', { theme: null }));
 assert.equal(ok(await piaC('GET', '/api/bootstrap')).team.theme.preset, 'sanctuary', 'back to the default');
 step('each team has its own look; only its head leader or the admin changes it');
+
+// ---------- each person's tile layout ----------
+ok(await avaC('PUT', '/api/account/layout/weekend-check', { order: 'open' }), 400);
+ok(await avaC('PUT', '/api/account/layout/weekend-check', { order: ['<script>'] }), 400);
+ok(await avaC('PUT', '/api/account/layout/somewhere', { order: ['open'] }), 400);
+assert.deepEqual(ok(await avaC('PUT', '/api/account/layout/weekend-check', { order: ['plans', 'open', 'plans'] })).layout, { 'weekend-check': ['plans', 'open'] });
+assert.deepEqual(ok(await avaC('GET', '/api/bootstrap')).me.layout, { 'weekend-check': ['plans', 'open'] }, 'it follows them to any device');
+assert.deepEqual(ok(await piaC('GET', '/api/bootstrap')).me.layout, {}, 'everyone has their own');
+const avaId = ok(await avaC('GET', '/api/bootstrap')).me.id;
+assert.deepEqual(ok(await admin('GET', '/api/bootstrap', null, { 'X-View-As': avaId })).me.layout['weekend-check'], ['plans', 'open'], 'View as shows their layout');
+ok(await admin('PUT', '/api/account/layout/weekend-check', { order: ['open'] }, { 'X-View-As': avaId }), 403);
+assert.deepEqual(ok(await avaC('PUT', '/api/account/layout/weekend-check', { order: null })).layout, {}, 'back to the usual order');
+step('each person arranges their own Weekend check tiles; saved to their account');
 
 // ---------- the AV side's own parts ----------
 for (const p of ['/api/gear', '/api/groups', '/api/library']) ok(await piaC('GET', p), 403);
