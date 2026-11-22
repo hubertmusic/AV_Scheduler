@@ -72,8 +72,8 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     everyone: everyone.map((u) => ({ id: String(u._id), name: u.name, teams: u.role === 'admin' && !(u.teams || []).length ? ['av'] : teamsShownTo(req.user, u) })),
     groups: groups.map((g) => groupView(g, req.user)),
     announcements: await announcementsFor(addDays(todayIn(s.timezone), -7), addDays(todayIn(s.timezone), 120)),
-    // Booth Crew Academy is for the service teams, not people only on Church Admin
-    academy: config.academyOn && serviceSide ? { url: config.academyUrl, host: new URL(config.academyUrl).host } : null,
+    // Booth Crew Academy is AV training: it shows on the AV team's side only
+    academy: config.academyOn && serviceSide && av ? { url: config.academyUrl, host: new URL(config.academyUrl).host } : null,
     serviceSide, // on a team that serves on services (sees services, plans and line-ups)
     // Teams whose leaders asked this person to join (Church Admin); accepted from a banner
     invites: await invitesFor(req.user),

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { onServiceTeam } from '../lib/office.js';
+import { isAvTeam, teamsList } from '../lib/teams.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { User } from '../models.js';
@@ -45,6 +45,13 @@ async function signedInUser(req) {
   }
 }
 
+// The Academy is AV training, so it's for the admin and people on an AV team
+async function onAvTeam(user) {
+  if (user.role === 'admin') return true;
+  const av = new Set((await teamsList()).filter(isAvTeam).map((t) => t.key));
+  return (user.teams || []).some((m) => av.has(m.team));
+}
+
 // GET /api/academy/go?to=/lesson/foh-1 — a normal link (opened in a tab), not a fetch.
 academyRouter.get('/go', wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -53,7 +60,7 @@ academyRouter.get('/go', wrap(async (req, res) => {
   if (!config.academyOn) return res.redirect(302, '/#resources');
   const user = await signedInUser(req);
   if (!user) return res.redirect(302, `/?academy=${encodeURIComponent(to)}`);
-  if (!(await onServiceTeam(user))) return res.redirect(302, '/#resources'); // not for people only on Church Admin
+  if (!(await onAvTeam(user))) return res.redirect(302, '/#resources'); // AV training: for people on an AV team
   if (user.role !== 'admin') logActivity({ user, kind: 'view', page: 'academy', action: 'Opened Booth Crew Academy', req });
   const pass = academyPass(user, to);
   res.redirect(302, `${config.academyUrl}/sso/crew-call?pass=${encodeURIComponent(pass)}`);
