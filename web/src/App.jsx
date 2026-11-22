@@ -21,6 +21,7 @@ import Activity, { ActivityTicker } from './pages/Activity.jsx';
 import RunSheet from './pages/RunSheet.jsx';
 import Gear from './pages/Gear.jsx';
 import TeamSetup from './pages/TeamSetup.jsx';
+import { applyTheme } from './theme.js';
 // The flow-chart library is big, so the Planning tab loads only when opened
 const Planning = lazy(() => import('./pages/Planning.jsx'));
 const OfficePlanning = lazy(() => import('./pages/OfficePlanning.jsx'));
@@ -288,6 +289,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   const [officeMeeting, setOfficeMeeting] = useState(null); // a meeting to open on Planning
   const timer = useRef(null);
   const isAdmin = me.role === 'admin';
+  // The team's look (Team setup → Look); a draft shows while a leader is trying one out
+  const [themeDraft, setThemeDraft] = useState(null);
+  const theme = themeDraft || team.theme || { preset: { av: 'console', music: 'sanctuary', office: 'boardroom' }[team.kind] || 'classic' };
+  const themeKey = JSON.stringify(theme);
+  useEffect(() => applyTheme(JSON.parse(themeKey)), [themeKey]);
 
   const setTab = (id) => {
     if (unsaved.size && !window.confirm('You have unsaved changes on this page. Leave without saving?')) return;
@@ -392,6 +398,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       weekend,
       setWeekend,
       noteView,
+      previewTheme: setThemeDraft,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot, toast, resFilter, refreshPending, weekend, officeMeeting]);

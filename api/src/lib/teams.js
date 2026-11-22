@@ -3,6 +3,7 @@
 // header, from the team switcher); team screens see positions, people and assignments through
 // that team, and saves are merged back so other teams' data is never touched.
 import { Position, Settings, Team, User } from '../models.js';
+import { themeView } from './theme.js';
 import { forbidden, membershipOf, roleIn } from './util.js';
 
 export const AV = 'av';
@@ -37,7 +38,7 @@ export function teamsShownTo(viewer, u) {
 }
 export const forgetPositions = () => (posCache.at = 0);
 
-export const teamView = (t) => ({ key: t.key, name: t.name, kind: t.kind, groupLink: t.groupLink || '', order: t.order || 0 });
+export const teamView = (t) => ({ key: t.key, name: t.name, kind: t.kind, groupLink: t.groupLink || '', order: t.order || 0, theme: themeView(t) });
 export const isAvTeam = (team) => (team?.kind || 'av') === 'av';
 
 // Position key -> team key

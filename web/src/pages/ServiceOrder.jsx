@@ -418,7 +418,8 @@ export function ShareCard({ plan, canEdit, canAnnounce = canEdit, canPlans, onSa
       {canAnnounce ? (
         <label className="field">
           <span>Announcements (bulletin only)</span>
-          <textarea rows={4} value={ann} maxLength={5000} placeholder="Potluck after church, prayer meeting Wednesday 7 PM…" onChange={(e) => setAnn(e.target.value)} />
+          <textarea rows={6} value={ann} maxLength={5000} placeholder={'Potluck lunch\nRight after the service in the fellowship hall. Bring a dish to share.\n\nPrayer meeting\nWednesdays at 7 PM in the chapel.'} onChange={(e) => setAnn(e.target.value)} />
+          <span className="muted small" style={{ fontWeight: 400 }}>Put a short title on the first line of each announcement and a blank line between them. The title prints in bold.</span>
           {ann === plan.announcements && plan.announcements.trim() && (
             <a className="btn btn-ghost btn-sm oos-slides" href={`/api/plans/${plan.event.id}/announcements.pptx`}>
               Download as slides (.pptx) for ProPresenter

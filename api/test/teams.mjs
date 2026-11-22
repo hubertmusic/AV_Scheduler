@@ -155,6 +155,26 @@ assert.equal(piaBoot.team.name, 'Praise & Worship');
 assert.equal(piaBoot.settings.groupLink, 'https://chat.whatsapp.com/praise123', 'message sheets use the team’s own WhatsApp group');
 step('leaders: the admin sets the head leader; the head names leaders and privileges; roles stay per team');
 
+// ---------- each team's look ----------
+assert.equal(piaBoot.team.theme.preset, 'sanctuary', 'Praise starts plum and gold');
+assert.equal(ok(await avaC('GET', '/api/bootstrap')).team.theme.preset, 'console', 'AV starts navy and teal');
+ok(await piaC('PATCH', '/api/teams/praise', { theme: { preset: 'neon' } }), 400);
+ok(await piaC('PATCH', '/api/teams/praise', { theme: { accent: 'red' } }), 400);
+ok(await piaC('PATCH', '/api/teams/praise', { theme: { size: 3 } }), 400);
+ok(await piaC('PATCH', '/api/teams/praise', { theme: { font: 'papyrus' } }), 400);
+ok(await piaC('PATCH', '/api/teams/av', { theme: { preset: 'crimson' } }), 403);
+ok(await samC('PATCH', '/api/teams/praise', { theme: { preset: 'crimson' } }), 403);
+let look = ok(await piaC('PATCH', '/api/teams/praise', { theme: { preset: 'crimson', accent: '#AA3300', font: 'atkinson', head: 'serif', size: 1.1 } })).theme;
+assert.deepEqual(look, { preset: 'crimson', accent: '#aa3300', bar: '', font: 'atkinson', head: 'serif', size: 1.1 });
+look = ok(await piaC('PATCH', '/api/teams/praise', { theme: { accent: '' } })).theme;
+assert.equal(look.accent, '', 'clearing a colour goes back to the theme’s');
+assert.equal(look.font, 'atkinson', 'other choices stay');
+assert.equal(ok(await piaC('GET', '/api/bootstrap')).team.theme.preset, 'crimson');
+assert.equal(ok(await avaC('GET', '/api/bootstrap')).team.theme.preset, 'console', 'other teams keep their own look');
+ok(await admin('PATCH', '/api/teams/praise', { theme: null }));
+assert.equal(ok(await piaC('GET', '/api/bootstrap')).team.theme.preset, 'sanctuary', 'back to the default');
+step('each team has its own look; only its head leader or the admin changes it');
+
 // ---------- the AV side's own parts ----------
 for (const p of ['/api/gear', '/api/groups', '/api/library']) ok(await piaC('GET', p), 403);
 ok(await piaC('GET', '/api/planner/month?month=' + iso(0).slice(0, 7)));
