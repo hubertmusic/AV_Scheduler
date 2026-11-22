@@ -14,6 +14,7 @@ import Groups from './pages/Groups.jsx';
 import Plans from './pages/Plans.jsx';
 import Guest from './pages/Guest.jsx';
 import Reserve from './pages/Reserve.jsx';
+import { ChatDock } from './chat.jsx';
 import Account from './pages/Account.jsx';
 import WeekendCheck from './pages/WeekendCheck.jsx';
 import Activity, { ActivityTicker } from './pages/Activity.jsx';
@@ -527,6 +528,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
           }}
         />
       )}
+      {!previewingAs && <ChatDock />}
       <div className="toast-region" role="status" aria-live="polite">
         {toastMsg && <div className="toast">{toastMsg}</div>}
       </div>

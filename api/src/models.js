@@ -92,6 +92,8 @@ const userSchema = new Schema(
     availabilityUpdatedAt: Date,
     lastLoginAt: Date,
     lastSeenAt: Date,
+    chatPingAt: Date, // last check-in from an open Crew Call (online = within ~70 seconds)
+    chatAway: { type: Boolean, default: false }, // the tab was in the background
     lastDevice: { type: String, default: '' },
     calLastFetchedAt: Date,
     calClient: { type: String, default: '' },
@@ -896,3 +898,41 @@ const noteSchema = new Schema(
 export const Note = model('Note', noteSchema);
 
 export { Types };
+
+// ---------- chat ----------
+// Rooms: one per team (its members only), named groups anyone can start, and one-on-one chats.
+export const CHAT_COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'teal', 'pink', 'gray'];
+const chatRoomSchema = new Schema(
+  {
+    kind: { type: String, enum: ['team', 'group', 'direct'], required: true },
+    team: { type: String, default: '' }, // team rooms: Team.key
+    key: { type: String, index: { unique: true, sparse: true } }, // team:<key> or direct:<id>:<id>
+    name: { type: String, default: '' },
+    emoji: { type: String, default: '' },
+    color: { type: String, default: 'blue' },
+    members: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [], index: true }, // groups and direct chats
+    owner: ref('User'),
+    lastMessageAt: { type: Date, index: true },
+  },
+  { timestamps: true }
+);
+export const ChatRoom = model('ChatRoom', chatRoomSchema);
+
+const chatMessageSchema = new Schema(
+  {
+    room: { ...ref('ChatRoom'), required: true, index: true },
+    user: ref('User'),
+    text: { type: String, default: '' }, // encrypted
+    system: { type: Boolean, default: false }, // "Hub renamed the group"
+    deletedAt: Date,
+  },
+  { timestamps: true }
+);
+chatMessageSchema.index({ room: 1, createdAt: -1 });
+export const ChatMessage = model('ChatMessage', chatMessageSchema);
+
+// When each person last read each room (for unread counts)
+const chatSeenSchema = new Schema({ room: { ...ref('ChatRoom'), required: true }, user: { ...ref('User'), required: true }, at: Date });
+chatSeenSchema.index({ room: 1, user: 1 }, { unique: true });
+chatSeenSchema.index({ user: 1 });
+export const ChatSeen = model('ChatSeen', chatSeenSchema);
