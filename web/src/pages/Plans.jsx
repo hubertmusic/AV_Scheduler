@@ -102,8 +102,9 @@ function ArchiveBrowser() {
   );
 }
 
-// One weekend at a time. Archived services leave this page (they're on the Archive tab), so once
-// a weekend is archived it's a clean slate for the next one.
+// One week (Monday–Sunday) at a time, so weekday programs have their plans too; jump to any date
+// to start on something months out. Archived services leave this page (they're on the Archive tab),
+// so once a weekend is archived it's a clean slate for the next one.
 function PlanBrowser({ onOpenArchive }) {
   const app = useApp();
   const thisFri = fridayOf(todayISO());
@@ -114,7 +115,7 @@ function PlanBrowser({ onOpenArchive }) {
   const firstLoad = useRef(true);
 
   const load = useCallback(async () => {
-    const all = await api(`/plans/summary?from=${fri}&to=${addDays(fri, 2)}`).catch(() => []);
+    const all = await api(`/plans/summary?from=${addDays(fri, -4)}&to=${addDays(fri, 2)}`).catch(() => []);
     const open = all.filter((r) => !r.archived);
     if (firstLoad.current) {
       firstLoad.current = false;
@@ -145,19 +146,23 @@ function PlanBrowser({ onOpenArchive }) {
     <div className="split">
       <aside className="side-col stack" aria-label="Services">
         <div className="week-nav">
-          <button type="button" className="icon-btn" aria-label="Previous weekend" onClick={() => setFri(addDays(fri, -7))}>
+          <button type="button" className="icon-btn" aria-label="Previous week" onClick={() => setFri(addDays(fri, -7))}>
             <Icon name="chevL" />
           </button>
           <div className="week-label">
-            <span className="muted small">Weekend of</span>
-            <strong className="mono">{weekendLabel(fri)}</strong>
+            <span className="muted small">Week of</span>
+            <strong className="mono">{weekendLabel(addDays(fri, -4), 6)}</strong>
           </div>
-          <button type="button" className="icon-btn" aria-label="Next weekend" onClick={() => setFri(addDays(fri, 7))}>
+          <button type="button" className="icon-btn" aria-label="Next week" onClick={() => setFri(addDays(fri, 7))}>
             <Icon name="chevR" />
           </button>
         </div>
-        {rows && rows.length === 0 && <Empty>Nothing scheduled this weekend. Build it on the Schedule tab first.</Empty>}
-        {rows && rows.length > 0 && list.length === 0 && <Empty>This weekend is done and archived.</Empty>}
+        <label className="field field-inline plan-jump">
+          <span className="small muted">Jump to</span>
+          <input type="date" value="" aria-label="Jump to a date" onChange={(e) => e.target.value && setFri(fridayOf(e.target.value))} />
+        </label>
+        {rows && rows.length === 0 && <Empty>Nothing scheduled this week. Add a service or program on the Schedule tab, then plan it here.</Empty>}
+        {rows && rows.length > 0 && list.length === 0 && <Empty>This week is done and archived.</Empty>}
         <div className="plan-list">
           {(list || []).map((r) => (
             <button key={r.id} type="button" className={`plan-item ${r.id === selId ? 'plan-on' : ''}`} aria-pressed={r.id === selId} onClick={() => setSelId(r.id)}>
@@ -192,7 +197,7 @@ function PlanBrowser({ onOpenArchive }) {
         )}
         {rows && fri !== thisFri && (
           <button type="button" className="link-btn" onClick={() => setFri(thisFri)}>
-            Back to this weekend
+            Back to this week
           </button>
         )}
         {canArchive && (

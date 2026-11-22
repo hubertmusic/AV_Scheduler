@@ -151,9 +151,10 @@ export function fmtDate(s) {
 }
 export const dowShort = (s) => SHORT[parseDay(s).getUTCDay()];
 export const dayNum = (s) => String(parseDay(s).getUTCDate());
-export function weekendLabel(fri) {
+// "Nov 20–22" for a weekend (from its Friday), or any span: weekendLabel(monday, 6) → "Nov 16–22"
+export function weekendLabel(fri, days = 2) {
   const a = parseDay(fri);
-  const b = parseDay(addDays(fri, 2));
+  const b = parseDay(addDays(fri, days));
   return a.getUTCMonth() === b.getUTCMonth()
     ? `${MONTHS[a.getUTCMonth()]} ${a.getUTCDate()}–${b.getUTCDate()}`
     : `${MONTHS[a.getUTCMonth()]} ${a.getUTCDate()} – ${MONTHS[b.getUTCMonth()]} ${b.getUTCDate()}`;
