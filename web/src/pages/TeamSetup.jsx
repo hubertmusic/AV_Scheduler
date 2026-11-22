@@ -5,6 +5,7 @@ import { api, unsaved } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
 import { COMMITTEE_COLORS } from '../office.jsx';
 import { Positions, useSaver } from './Settings.jsx';
+import TeamLook from './TeamLook.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
 const KIND_LABEL = { av: 'AV', music: 'Music / praise', other: 'Other', office: 'Church office' };
@@ -26,6 +27,7 @@ export default function TeamSetup() {
         </div>
         <div className="side-col stack-lg">
           <TeamInfo />
+          <TeamLook />
           <Positions />
         </div>
       </div>
@@ -252,6 +254,7 @@ function OfficeSetup() {
         </div>
         <div className="side-col stack-lg">
           <TeamInfo />
+          <TeamLook />
           <RoomsCard />
         </div>
       </div>

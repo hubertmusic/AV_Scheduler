@@ -3,6 +3,7 @@ import { api, unsaved, uploadFiles } from '../lib.js';
 import { Icon, useApp } from '../ui.jsx';
 import { ExtraFeaturesCard } from './Extras.jsx';
 import { TeamsAdmin } from './TeamSetup.jsx';
+import TeamLook from './TeamLook.jsx';
 
 const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
 
@@ -13,13 +14,14 @@ export default function Settings() {
       <div className="page-head">
         <div>
           <h1>Settings</h1>
-          <div className="muted">Only you (the admin) see this page. Positions and the template’s checkboxes are for the {team.name}; switch teams at the top to set up another team.</div>
+          <div className="muted">Only you (the admin) see this page. Positions, the look and the template’s checkboxes are for the {team.name}; switch teams at the top to set up another team.</div>
         </div>
       </div>
       <div className="split">
         <div className="main-col stack-lg">
           <Template />
           <TeamsAdmin />
+          <TeamLook />
         </div>
         <div className="side-col stack-lg">
           <Reminders />
@@ -268,6 +270,7 @@ function BulletinLogo() {
           </button>
         )}
       </div>
+      <BulletinLook run={run} busy={busy} />
       <label className="field divider-top">
         <span>End of every livestream description</span>
         <textarea rows={3} maxLength={2000} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder={'Website: …\nGive online: …\nPrayer requests: …'} />
@@ -278,6 +281,45 @@ function BulletinLogo() {
         </button>
       )}
     </section>
+  );
+}
+
+// The bulletin's colour (section headings, rules, the sermon bar) and its type
+const BULLETIN_COLORS = [
+  ['#1f3a5f', 'Navy'],
+  ['#4a2358', 'Plum'],
+  ['#1f5a43', 'Forest'],
+  ['#7a1f2b', 'Burgundy'],
+  ['#0f5f6b', 'Teal'],
+  ['#2b2f36', 'Charcoal'],
+];
+function BulletinLook({ run, busy }) {
+  const { settings } = useApp();
+  const color = settings.bulletinColor || '#1f3a5f';
+  const font = settings.bulletinFont || 'serif';
+  const save = (body) => run(() => api('/settings', { method: 'PATCH', body }), 'Bulletin look saved');
+  return (
+    <div className="stack-sm divider-top">
+      <div className="label-sm" id="bl-color">Bulletin colour</div>
+      <div className="row-wrap" role="group" aria-labelledby="bl-color">
+        {BULLETIN_COLORS.map(([c, name]) => (
+          <button key={c} type="button" className={`bl-swatch${color === c ? ' bl-swatch-on' : ''}`} style={{ background: c }} aria-pressed={color === c} aria-label={name} title={name} disabled={busy} onClick={() => save({ bulletinColor: c })} />
+        ))}
+        <label className="bl-swatch bl-swatch-own" title="Pick your own">
+          <span className="sr-only">Pick your own colour</span>
+          <input type="color" value={color} disabled={busy} onChange={(e) => save({ bulletinColor: e.target.value })} />
+        </label>
+      </div>
+      <div className="label-sm" id="bl-font">Bulletin type</div>
+      <div className="seg self-start" role="group" aria-labelledby="bl-font">
+        <button type="button" aria-pressed={font === 'serif'} disabled={busy} onClick={() => save({ bulletinFont: 'serif' })} style={{ fontFamily: "'Source Serif 4', Georgia, serif" }}>
+          Classic serif
+        </button>
+        <button type="button" aria-pressed={font === 'sans'} disabled={busy} onClick={() => save({ bulletinFont: 'sans' })}>
+          Clean sans
+        </button>
+      </div>
+    </div>
   );
 }
 

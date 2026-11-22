@@ -61,7 +61,7 @@ async function find(field, token) {
   const ev = plan ? await Event.findById(plan.event).lean() : null;
   if (!ev) throw notFound(GONE);
   const s = await getSettings();
-  return { plan, ev, orgName: s.orgName || '', logo: s.logo ? `/api/public/logo?v=${s.logoAt ? s.logoAt.getTime() : 0}` : '' };
+  return { plan, ev, orgName: s.orgName || '', style: { color: s.bulletinColor || '', font: s.bulletinFont === 'sans' ? 'sans' : 'serif' }, logo: s.logo ? `/api/public/logo?v=${s.logoAt ? s.logoAt.getTime() : 0}` : '' };
 }
 
 publicRouter.get('/rundown/:token', wrap(async (req, res) => {
@@ -71,7 +71,7 @@ publicRouter.get('/rundown/:token', wrap(async (req, res) => {
 }));
 
 publicRouter.get('/bulletin/:token', wrap(async (req, res) => {
-  const { plan, ev, orgName, logo } = await find('bulletinToken', req.params.token);
+  const { plan, ev, orgName, logo, style } = await find('bulletinToken', req.params.token);
   res.set('Cache-Control', 'no-store');
-  res.json({ ...(await bulletinData(plan, ev, orgName)), logo });
+  res.json({ ...(await bulletinData(plan, ev, orgName)), logo, style });
 }));

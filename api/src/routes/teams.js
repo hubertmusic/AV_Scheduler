@@ -6,6 +6,7 @@ import { requireAdmin } from '../auth.js';
 import { bad, conflict, forbidden, getSettings, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, wrap } from '../lib/util.js';
 import { forgetTeams, isTeamHead, mergeTeam, requireTeamHead, teamKeys, teamView } from '../lib/teams.js';
 import { seesRoster } from '../lib/office.js';
+import { readTheme, themeView } from '../lib/theme.js';
 
 export const teamsRouter = Router();
 
@@ -48,7 +49,7 @@ teamsRouter.post('/', requireAdmin, wrap(async (req, res) => {
   res.status(201).json(teamView(t));
 }));
 
-// PATCH /api/teams/:key { name, groupLink, kind } — the admin, or that team's head leader
+// PATCH /api/teams/:key { name, groupLink, kind, theme } — the admin, or that team's head leader
 teamsRouter.patch('/:key', wrap(async (req, res) => {
   const t = await loadTeam(req.params.key);
   const isAdmin = req.user.role === 'admin';
@@ -68,6 +69,14 @@ teamsRouter.patch('/:key', wrap(async (req, res) => {
     if (!TEAM_KINDS.includes(req.body.kind)) throw bad('Pick AV, music or other.');
     if (t.key === 'av' && req.body.kind !== 'av') throw bad('The AV team stays an AV team.');
     t.kind = req.body.kind;
+  }
+  if (req.body.theme !== undefined) {
+    try {
+      t.theme = req.body.theme === null ? {} : readTheme(req.body.theme, themeView(t));
+    } catch (e) {
+      throw bad(e.message);
+    }
+    t.markModified('theme');
   }
   await t.save();
   forgetTeams();

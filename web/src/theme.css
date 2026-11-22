@@ -1,0 +1,67 @@
+/* Team looks: the top bar, tabs, page titles and section headings take the team's colours and fonts
+   (theme.js sets the variables). Without a team (sign-in, public pages) the defaults below apply. */
+:root {
+  --bar: var(--ink);
+  --bar-ink: #fff;
+  --bar-sub: #b9bdc4;
+  --bar-raise: #22252a;
+  --bar-line: #3a3e45;
+  --head-ink: var(--ink);
+  --head: var(--sans);
+  --primary: var(--ink);
+  --primary-hover: #2b2e33;
+}
+body { zoom: var(--zoom, 1); }
+h1, h2, h3 { font-family: var(--head); }
+
+/* ---- top bar: the team's colour, with a lit strip along the bottom ---- */
+.topbar { background: var(--bar); color: var(--bar-ink); box-shadow: inset 0 -3px 0 var(--accent-bright); padding-bottom: 13px; }
+.topbar .brand strong { font-family: var(--head); font-size: 17px; letter-spacing: 0.01em; }
+.topbar-sub { color: var(--bar-sub); }
+.user-btn { color: var(--bar-ink); }
+.user-btn:hover { background: var(--bar-raise); }
+.btn-dark { background: var(--bar-raise); border-color: var(--bar-line); color: var(--bar-ink); }
+.btn-dark:hover { background: var(--bar-line); color: var(--bar-ink); }
+.team-switch select { background-color: var(--bar-raise); border-color: var(--bar-line); color: var(--bar-ink); }
+.team-switch select option { color: #17191c; background: #fff; }
+
+/* ---- tabs: the open one is lit in the accent ---- */
+.tabs { gap: 2px; padding-top: 6px; }
+.tab { border-radius: 8px 8px 0 0; min-height: 44px; }
+.tab:hover { color: var(--head-ink); background: var(--ground); }
+.tab-on, .tab-on:hover { color: var(--accent-ink); background: var(--accent-soft); border-bottom-color: var(--accent); }
+
+/* ---- page titles ---- */
+.page-head { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.page-head h1 { color: var(--head-ink); font-size: 30px; letter-spacing: -0.01em; }
+[data-preset='console'] .page-head h1 { letter-spacing: 0; }
+
+/* ---- sections: every card heading gets a mark in the team colour ---- */
+.card h2 { color: var(--head-ink); display: flex; align-items: center; gap: 10px; }
+.card h2::before { content: ''; flex: none; width: 5px; height: 1em; border-radius: 3px; background: var(--accent); }
+.modal h2 { color: var(--head-ink); }
+
+/* ---- "selected" and main actions use the team colour instead of plain black ---- */
+.btn-primary { background: var(--primary); }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-outline { border-color: var(--primary); color: var(--primary); }
+.card-dark, .live-now, .mp-tile-draft, .toast, .notice-permanent, .role-admin, .datebox, .avatar-dark { background: var(--primary); border-color: var(--primary); }
+.pill-on, .cat-filter button[aria-pressed='true'] { background: var(--primary); border-color: var(--primary); }
+.plan-on, .person-on, .card-strong { border-color: var(--primary); }
+.datebox span { color: var(--accent-soft); }
+.seg button[aria-pressed='true'] { color: var(--accent-ink); }
+.check input, .af-row input { accent-color: var(--primary); }
+.eyebrow { color: var(--accent-ink); }
+
+@media (max-width: 640px) {
+  .page-head h1 { font-size: 25px; }
+}
+
+/* Chat dock in the team colour */
+.ch-bar { background: var(--primary); }
+
+/* Settings → bulletin colour swatches */
+.bl-swatch { width: 36px; height: 36px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+.bl-swatch-on { box-shadow: 0 0 0 3px var(--ink); }
+.bl-swatch-own { background: conic-gradient(#c0392b, #e67e22, #f1c40f, #27ae60, #2980b9, #8e44ad, #c0392b); display: inline-block; }
+.bl-swatch-own input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }

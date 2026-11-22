@@ -2,10 +2,12 @@
 //   /rundown/<token>   service rundown for the platform and crew (times, cues, who's serving)
 //   /bulletin/<token>  the congregation's bulletin
 // Add ?print=1 to open the print dialog straight away.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, fmtDate, fmtDay, fmtMinutes, fmtTime, orderTimes } from '../lib.js';
 import { Qr } from '../qr.jsx';
 import { ItemExtras } from '../orderItem.jsx';
+import './bulletin.css';
+import './runsheet.css';
 
 function usePublic(kind, token) {
   const [d, setD] = useState(null);
@@ -93,7 +95,7 @@ export function RundownPage({ token }) {
       </header>
 
       {d.order.length > 0 ? (
-        <section className="rs-block">
+        <section className="rs-block rs-sec-order">
           <h2>Order of service</h2>
           <table className="rd-table">
             <thead>
@@ -113,7 +115,7 @@ export function RundownPage({ token }) {
                     </th>
                   </tr>
                 ) : (
-                  <tr key={i}>
+                  <tr key={i} className={`rd-k rs-k-${x.kind}`}>
                     {timed && <td className="rd-time">{fmtTime(times.at[i])}</td>}
                     <td>
                       <strong>{x.title}</strong>
@@ -141,7 +143,7 @@ export function RundownPage({ token }) {
 
       <div className="rs-cols">
         {d.songs.length > 0 && (
-          <section className="rs-block">
+          <section className="rs-block rs-sec-songs">
             <h2>Songs</h2>
             <ol className="rs-songs">
               {d.songs.map((s, i) => (
@@ -156,7 +158,7 @@ export function RundownPage({ token }) {
           </section>
         )}
         {d.playlist?.length > 0 && (
-          <section className="rs-block">
+          <section className="rs-block rs-sec-playlist">
             <h2>Playlist</h2>
             <ol className="rs-songs">
               {d.playlist.map((s, i) => (
@@ -171,7 +173,7 @@ export function RundownPage({ token }) {
           </section>
         )}
         {d.crew.length > 0 && (
-          <section className="rs-block">
+          <section className="rs-block rs-sec-crew">
             <h2>Who’s serving</h2>
             <table className="rs-crew">
               <tbody>
@@ -198,7 +200,7 @@ export function RundownPage({ token }) {
       </div>
 
       {d.inputs?.length > 0 && (
-        <section className="rs-block">
+        <section className="rs-block rs-sec-inputs">
           <h2>Inputs</h2>
           <table className="rd-table">
             <thead>
@@ -226,7 +228,7 @@ export function RundownPage({ token }) {
       )}
 
       {d.scriptures.length > 0 && (
-        <section className="rs-block">
+        <section className="rs-block rs-sec-scripture">
           <h2>Bible texts</h2>
           {d.scriptures.map((s, i) => (
             <div key={i} className="rs-scripture">
@@ -243,70 +245,144 @@ export function RundownPage({ token }) {
   );
 }
 
+// Printed sizes, in CSS pixels (96 to the inch): a full letter page with half-inch margins, or
+// one of two half sheets side by side on a landscape page
+const PAPER = {
+  full: { w: 7.5 * 96, h: 10 * 96, page: '@page { size: letter portrait; margin: 0.5in; }' },
+  half: { w: 4.75 * 96, h: 7.8 * 96, page: '@page { size: letter landscape; margin: 0.35in; }' },
+};
+
+// Shrink the printed bulletin just enough to fit on one page (or one half sheet). It's measured off
+// screen at the printed width; narrower type would reflow, so the width grows as the zoom shrinks.
+function fitSheet(sheet, size) {
+  const pages = sheet ? [...sheet.querySelectorAll('.bl-paper')] : [];
+  if (!pages.length) return;
+  const { w, h } = PAPER[size];
+  const el = pages[0];
+  const height = (z) => {
+    el.style.zoom = '1';
+    el.style.width = `${w / z}px`;
+    return el.offsetHeight * z;
+  };
+  let z = 1;
+  if (height(1) > h * 0.985) {
+    let lo = 0.45;
+    let hi = 1;
+    for (let i = 0; i < 9; i++) {
+      const mid = (lo + hi) / 2;
+      if (height(mid) <= h * 0.985) lo = mid;
+      else hi = mid;
+    }
+    z = lo;
+  }
+  for (const p of pages) {
+    p.style.width = `${w / z}px`;
+    p.style.zoom = String(z);
+  }
+  sheet.dataset.fit = z.toFixed(3);
+}
+
 export function BulletinPage({ token }) {
   const [d, error] = usePublic('bulletin', token);
   const wanted = new URLSearchParams(window.location.search).get('print');
   const [half, setHalf] = useState(wanted === 'half');
   const printed = useRef(false);
+  const sheet = useRef(null);
+  const size = half ? 'half' : 'full';
+  const refit = useCallback(() => fitSheet(sheet.current, size), [size]);
   useEffect(() => {
     if (d) document.title = `${d.event.title} · ${fmtDate(d.event.date)}`;
   }, [d]);
-  // Half sheets: two copies side by side on a landscape page, to cut in half
+  // The page size for printing
   useEffect(() => {
-    if (!half) return;
     const style = document.createElement('style');
-    style.textContent = '@page { size: letter landscape; margin: 0.35in; }';
+    style.textContent = PAPER[size].page;
     document.head.appendChild(style);
     return () => style.remove();
-  }, [half]);
+  }, [size]);
+  useLayoutEffect(() => {
+    if (!d) return;
+    refit();
+    document.fonts?.ready.then(refit);
+    window.addEventListener('beforeprint', refit);
+    return () => window.removeEventListener('beforeprint', refit);
+  }, [d, refit]);
   useEffect(() => {
     const after = () => wanted !== 'half' && setHalf(false);
     window.addEventListener('afterprint', after);
     return () => window.removeEventListener('afterprint', after);
   }, [wanted]);
   const onQr = useCallback(() => {
+    refit();
     if (!wanted || printed.current) return;
     printed.current = true;
-    setTimeout(() => window.print(), 400);
-  }, [wanted]);
-  const printHalf = () => {
-    setHalf(true);
-    setTimeout(() => window.print(), 400);
+    setTimeout(() => (refit(), window.print()), 500);
+  }, [wanted, refit]);
+  const print = (h) => {
+    setHalf(h);
+    setTimeout(() => (fitSheet(sheet.current, h ? 'half' : 'full'), window.print()), 400);
   };
   if (error) return <Problem error={error} />;
   if (!d) return <div className="loading">Loading…</div>;
+  const look = { '--bl': d.style?.color || '#1f3a5f' };
+  const font = d.style?.font === 'sans' ? 'bl-sans' : 'bl-serif';
 
   return (
-    <div className={half ? 'bl-two' : ''}>
+    <div className={`blp ${font}`} style={look}>
       <div className="bl-tools no-print">
-        <button type="button" className="btn btn-outline btn-sm" onClick={() => (setHalf(false), setTimeout(() => window.print(), 200))}>
+        <button type="button" className="btn btn-outline btn-sm" onClick={() => print(false)}>
           Print full page
         </button>
-        <button type="button" className="btn btn-outline btn-sm" onClick={printHalf}>
+        <button type="button" className="btn btn-outline btn-sm" onClick={() => print(true)}>
           Print half sheets
         </button>
       </div>
-      <BulletinBody d={d} half={half} onQr={onQr} />
-      {half && <BulletinBody d={d} half copy />}
+      <BulletinBody d={d} className="bl-screen no-print" />
+      {/* What prints: laid out off screen at paper size so it can be fitted to one page */}
+      <div className={`bl-sheet bl-sheet-${size}`} ref={sheet} aria-hidden="true">
+        <BulletinBody d={d} paper={size} onQr={onQr} onImg={refit} />
+        {half && <BulletinBody d={d} paper="half" onImg={refit} />}
+      </div>
     </div>
   );
 }
 
-function BulletinBody({ d, half, copy, onQr }) {
+// Announcements as separate notices with a bold title: the first line of each one (a blank line
+// between them), or the part before a dash or colon, or the first sentence.
+export function splitAnnouncements(text) {
+  const t = String(text || '').replace(/\r/g, '').trim();
+  if (!t) return [];
+  const blocks = /\n\s*\n/.test(t) ? t.split(/\n\s*\n/) : t.split('\n');
+  return blocks
+    .map((b) => b.trim())
+    .filter(Boolean)
+    .map((b) => {
+      const lines = b.split('\n');
+      if (lines.length > 1 && lines[0].length <= 90) return { title: lines[0].trim(), body: lines.slice(1).join('\n').trim() };
+      const m = b.match(/^(.{3,70}?)\s+[—–-]\s+([\s\S]+)$/) || b.match(/^([^:\n]{3,60}):\s+([\s\S]+)$/) || b.match(/^(.{3,90}?[.!?])\s+([\s\S]+)$/);
+      if (m) return { title: m[1].trim(), body: m[2].trim() };
+      return b.length <= 90 ? { title: b, body: '' } : { title: '', body: b };
+    });
+}
+
+function BulletinBody({ d, paper, onQr, onImg, className = '' }) {
   const e = d.event;
+  const notices = splitAnnouncements(d.announcements);
   return (
-    <div className={`bl${half ? ' bl-half' : ''}${copy ? ' bl-copy' : ''}`} aria-hidden={copy || undefined}>
+    <article className={`bl ${paper ? `bl-paper bl-${paper}` : ''} ${className}`}>
       <header className="bl-head">
-        {d.logo && <img className="bl-logo" src={d.logo} alt={d.orgName ? `${d.orgName} logo` : 'Logo'} />}
-        {d.orgName && <div className="bl-org">{d.orgName}</div>}
-        <h1>{e.title}</h1>
-        <div className="bl-date">
-          {fmtDate(e.date)} · {fmtTime(e.start)}
+        {d.logo && <img className="bl-logo" src={d.logo} alt={d.orgName ? `${d.orgName} logo` : 'Logo'} onLoad={onImg} />}
+        <div className="bl-titles">
+          {d.orgName && <div className="bl-org">{d.orgName}</div>}
+          <h1>{e.title}</h1>
+          <div className="bl-date">
+            {fmtDay(e.date)}, {e.date.slice(0, 4)} · {fmtTime(e.start)}
+          </div>
         </div>
       </header>
 
       {(d.sermonTitle || d.speaker) && (
-        <section className="bl-sermon">
+        <section className="bl-sermon" aria-label="Sermon">
           {d.sermonTitle && <div className="bl-sermon-title">“{d.sermonTitle}”</div>}
           {d.speaker && <div className="bl-speaker">{d.speaker}</div>}
         </section>
@@ -318,11 +394,11 @@ function BulletinBody({ d, half, copy, onQr }) {
           <ol className="bl-order">
             {d.order.map((x, i) =>
               x.kind === 'heading' ? (
-                <li key={i} className="bl-order-heading">
-                  {x.title}
+                <li key={i} className="bl-phase">
+                  <span>{x.title}</span>
                 </li>
               ) : (
-                <li key={i}>
+                <li key={i} className={`bl-k-${x.kind}`}>
                   <span className="bl-item">{x.title}</span>
                   <span className="bl-dots" aria-hidden="true" />
                   <span className="bl-who">{x.who}</span>
@@ -334,45 +410,60 @@ function BulletinBody({ d, half, copy, onQr }) {
         </section>
       )}
 
-      {d.scriptures.length > 0 && (
-        <section className="bl-section">
-          <h2>Scripture</h2>
-          <ul className="bl-list">
-            {d.scriptures.map((s, i) => (
-              <li key={i}>
-                {s.reference}
-                {s.version ? ` (${s.version})` : ''}
-              </li>
-            ))}
-          </ul>
-        </section>
+      {(d.scriptures.length > 0 || d.songs.length > 0) && (
+        <div className="bl-pair">
+          {d.scriptures.length > 0 && (
+            <section className="bl-section">
+              <h2>Scripture</h2>
+              <ul className="bl-list">
+                {d.scriptures.map((s, i) => (
+                  <li key={i}>
+                    {s.reference}
+                    {s.version && <span className="bl-muted"> {s.version}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {d.songs.length > 0 && (
+            <section className="bl-section">
+              <h2>Songs</h2>
+              <ul className="bl-list">
+                {d.songs.map((s, i) => (
+                  <li key={i}>
+                    {s.title}
+                    {s.artist && <span className="bl-muted"> · {s.artist}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       )}
 
-      {d.songs.length > 0 && (
-        <section className="bl-section">
-          <h2>Songs</h2>
-          <ul className="bl-list">
-            {d.songs.map((s, i) => (
-              <li key={i}>
-                {s.title}
-                {s.artist && <span className="bl-muted"> · {s.artist}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {d.announcements && (
+      {notices.length > 0 && (
         <section className="bl-section">
           <h2>Announcements</h2>
-          <div className="bl-announce">{d.announcements}</div>
+          <div className="bl-notices">
+            {notices.map((n, i) => (
+              <div key={i} className="bl-notice">
+                {n.title && <strong>{n.title}</strong>}
+                {n.body && <p>{n.body}</p>}
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
-      <footer className="bl-foot print-only">
-        <Qr value={window.location.origin + window.location.pathname} size={half ? 64 : 88} label="QR code for the digital bulletin" onReady={onQr} />
-        <span>Scan for the digital bulletin</span>
-      </footer>
-    </div>
+      {paper && (
+        <footer className="bl-foot">
+          <Qr value={window.location.origin + window.location.pathname} size={paper === 'half' ? 56 : 72} label="QR code for the digital bulletin" onReady={onQr} />
+          <span>
+            Scan for this bulletin on your phone
+            {d.orgName && <span className="bl-muted"> · {d.orgName}</span>}
+          </span>
+        </footer>
+      )}
+    </article>
   );
 }

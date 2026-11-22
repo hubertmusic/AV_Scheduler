@@ -24,6 +24,8 @@ const settingsView = (s) => ({
   countryCode: s.countryCode,
   groupLink: s.groupLink,
   streamFooter: s.streamFooter,
+  bulletinColor: s.bulletinColor || '',
+  bulletinFont: s.bulletinFont === 'sans' ? 'sans' : 'serif',
   features: Object.fromEntries(FEATURES.map((k) => [k, !!s.features?.[k]])),
   checklists: s.checklists || {},
   burnoutWeeks: s.burnoutWeeks ?? 4,
@@ -296,6 +298,15 @@ settingsRouter.patch('/', requireAdmin, wrap(async (req, res) => {
   }
   if (b.endOnBrowserClose !== undefined) s.endOnBrowserClose = !!b.endOnBrowserClose;
   if (b.streamFooter !== undefined) s.streamFooter = str(b.streamFooter, 2000);
+  if (b.bulletinColor !== undefined) {
+    const c = String(b.bulletinColor || '').trim().toLowerCase();
+    if (c && !/^#[0-9a-f]{6}$/.test(c)) throw bad('Colours look like #1f3a5f.');
+    s.bulletinColor = c;
+  }
+  if (b.bulletinFont !== undefined) {
+    if (!['serif', 'sans'].includes(b.bulletinFont)) throw bad('Pick serif or sans for the bulletin.');
+    s.bulletinFont = b.bulletinFont;
+  }
   if (b.features !== undefined) {
     if (typeof b.features !== 'object' || !b.features) throw bad('Features must be on or off.');
     s.features = { ...(s.features || {}), ...Object.fromEntries(FEATURES.filter((k) => k in b.features).map((k) => [k, !!b.features[k]])) };

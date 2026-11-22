@@ -120,6 +120,14 @@ assert.equal(bl.announcements, 'Potluck after church.');
 assert.ok(!('crew' in bl));
 ok(await anon('GET', `/api/public/bulletin/${p.share.rundown}`), 404);
 ok(await anon('GET', `/api/public/rundown/${p.share.bulletin}`), 404);
+// The bulletin's colour and type (Settings → Bulletin and livestream)
+assert.deepEqual(bl.style, { color: '', font: 'serif' }, 'navy serif until someone picks');
+ok(await admin('PATCH', '/api/settings', { bulletinColor: 'navy' }), 400);
+ok(await admin('PATCH', '/api/settings', { bulletinFont: 'comic' }), 400);
+ok(await admin('PATCH', '/api/settings', { bulletinColor: '#4A2358', bulletinFont: 'sans' }));
+assert.deepEqual(ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`)).style, { color: '#4a2358', font: 'sans' });
+assert.equal(ok(await admin('GET', '/api/bootstrap')).settings.bulletinColor, '#4a2358');
+ok(await admin('PATCH', '/api/settings', { bulletinColor: '', bulletinFont: 'serif' }));
 ok(await anon('GET', '/api/public/rundown/not-a-real-token-at-all'), 404);
 step('bulletin link: order without times or cues, sermon, Bible texts, announcements');
 

@@ -125,6 +125,16 @@ const teamSchema = new Schema(
     kind: { type: String, enum: TEAM_KINDS, default: 'other' },
     groupLink: { type: String, default: '' }, // the team's WhatsApp group
     order: { type: Number, default: 0 },
+    // How this team's side of the app looks (lib/theme.js): a preset, optional colour overrides,
+    // fonts and text size. Empty values mean the preset's default.
+    theme: {
+      preset: { type: String, default: '' },
+      accent: { type: String, default: '' },
+      bar: { type: String, default: '' },
+      font: { type: String, default: '' },
+      head: { type: String, default: '' },
+      size: { type: Number, default: 1 },
+    },
     // Office teams: rooms (services: the room services and rehearsals use), calendar reminders
     // on meetings people are invited to, and the yearly rhythm to fill each year's calendar from
     rooms: { type: [new Schema({ name: String, services: { type: Boolean, default: false } }, { _id: false })], default: [] },
@@ -304,6 +314,8 @@ const settingsSchema = new Schema({
   groupLink: { type: String, default: '' }, // WhatsApp group invite link, optional
   logo: { type: String, default: '' }, // stored file name of the church logo (bulletin)
   streamFooter: { type: String, default: '' }, // added to every livestream description
+  bulletinColor: { type: String, default: '' }, // the bulletin's colour (#rrggbb), '' = navy
+  bulletinFont: { type: String, default: 'serif' }, // serif or sans
   features: { type: Schema.Types.Mixed, default: {} }, // extra features the admin turned on (Settings → Extra features)
   checklists: { type: Schema.Types.Mixed, default: {} }, // { positionKey: ['Check mic batteries', …] }
   burnoutWeeks: { type: Number, default: 4 }, // warn after this many weekends in a row (0 = off)
