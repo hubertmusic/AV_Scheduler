@@ -121,6 +121,7 @@ export async function rundownData(plan, ev, orgName) {
     speaker: plan.speaker,
     scriptures: plan.scriptures.map((x) => ({ reference: x.reference, version: x.version, text: x.text })),
     songs: plan.songs.filter((x) => x.song).map((x) => ({ title: x.song.title, artist: x.song.artist, key: x.key, note: x.note })),
+    playlist: (plan.playlist || []).map((x) => ({ title: x.title, note: x.note || '', url: x.url })),
     crew: await crewNames(ev),
   };
 }

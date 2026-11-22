@@ -5,6 +5,7 @@ import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
 import { LivestreamCard, OrderOfService, ShareCard } from './ServiceOrder.jsx';
+import { PlaylistCard } from '../playlist.jsx';
 import WeeklyLinks from './WeeklyLinks.jsx';
 import { DebriefAnswers, featureOn, InputListCard } from './Extras.jsx';
 import { LiveView } from './Live.jsx';
@@ -413,6 +414,7 @@ function PlanEditor({ eventId, onChanged }) {
       <OrderOfService plan={plan} canEdit={canEdit} onSave={patch} setPlan={setPlan} onLive={featureOn(app, 'liveShow') && plan.order.length > 0 ? () => setLive(true) : null} />
       <Scriptures plan={plan} canEdit={canDetails} onSave={patch} />
       <Songs plan={plan} canEdit={canDetails} onSave={patch} reload={load} />
+      {ev.kind !== 'soundcheck' && <PlaylistCard key={plan.event.id} plan={plan} canEdit={canDetails && !plan.archived} onSave={patch} />}
       <MediaSection plan={plan} canEdit={canDetails} canLibrary={canAv} canPlans={canPlans} eventId={eventId} setPlan={setPlan} reload={load} onChanged={onChanged} />
       {ev.kind !== 'soundcheck' && <ShareCard plan={plan} canEdit={canEdit} canAnnounce={canDetails} canPlans={canPlans} onSave={patch} setPlan={setPlan} />}
       {featureOn(app, 'inputList') && (app.isAv || plan.inputs.length > 0) && (canAv || plan.inputs.length > 0) && <InputListCard plan={plan} canEdit={canAv} onSave={patch} setPlan={setPlan} />}

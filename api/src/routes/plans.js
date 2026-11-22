@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { lookupTitle, playable, playlistView, readPlaylist } from '../lib/playlist.js';
 import { Router } from 'express';
 import archiver from 'archiver';
 import { DateTime } from 'luxon';
@@ -180,6 +181,7 @@ async function fullPlan(ev, req) {
     media: media.map(mediaView),
     order: orderView(plan.order),
     announcements: plan.announcements,
+    playlist: playlistView(plan.playlist),
     live: plan.live || null,
     inputs: plan.inputs || [],
     share: { rundown: plan.rundownToken, bulletin: plan.bulletinToken },
@@ -348,6 +350,13 @@ plansRouter.get('/archive', wrap(async (req, res) => {
   });
 }));
 
+// GET /api/plans/playlist-link?url= — is this a link the playlist can play, and what's it called?
+plansRouter.get('/playlist-link', wrap(async (req, res) => {
+  const p = playable(req.query.url);
+  if (!p) throw bad('That isn’t a Spotify, Apple Music or YouTube link the playlist can play. Copy the share link from the app, e.g. Share → Copy link.');
+  res.json({ url: p.url, provider: p.provider, kind: p.kind, title: await lookupTitle(p.url) });
+}));
+
 plansRouter.get('/:eventId', wrap(async (req, res) => {
   const ev = await loadEvent(req.params.eventId);
   res.json(await fullPlan(ev, req));
@@ -508,6 +517,10 @@ plansRouter.patch('/:eventId', requireMember, wrap(async (req, res) => {
   const has = (k) => b[k] !== undefined;
   if (!rights.lead && ['speaker', 'sermonTitle', 'notes', 'order'].some(has)) throw forbidden(LEAD_ONLY);
   if (!rights.av && ['assets', 'inputs'].some(has)) throw forbidden('The media library and input list are part of the AV team’s side.');
+  if (b.playlist !== undefined) {
+    if (!rights.details) throw forbidden('Only people on a team can change the playlist.');
+    plan.playlist = readPlaylist(b.playlist);
+  }
   if (b.speaker !== undefined) plan.speaker = str(b.speaker, 80);
   if (b.sermonTitle !== undefined) plan.sermonTitle = str(b.sermonTitle, 160);
   if (b.notes !== undefined) plan.notes = str(b.notes, 50000);

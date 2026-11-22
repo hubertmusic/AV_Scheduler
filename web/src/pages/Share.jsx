@@ -155,6 +155,21 @@ export function RundownPage({ token }) {
             </ol>
           </section>
         )}
+        {d.playlist?.length > 0 && (
+          <section className="rs-block">
+            <h2>Playlist</h2>
+            <ol className="rs-songs">
+              {d.playlist.map((s, i) => (
+                <li key={i}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer">
+                    <strong>{s.title || s.url.replace(/^https?:\/\//, '').slice(0, 50)}</strong>
+                  </a>
+                  {s.note && <div className="small">{s.note}</div>}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
         {d.crew.length > 0 && (
           <section className="rs-block">
             <h2>Who’s serving</h2>
