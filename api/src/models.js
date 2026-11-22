@@ -126,6 +126,7 @@ const teamSchema = new Schema(
     name: { type: String, required: true, trim: true },
     kind: { type: String, enum: TEAM_KINDS, default: 'other' },
     groupLink: { type: String, default: '' }, // the team's WhatsApp group
+    callLink: { type: String, default: '' }, // the team's standing call: a WhatsApp call link (lib/callLink.js)
     order: { type: Number, default: 0 },
     // How this team's side of the app looks (lib/theme.js): a preset, optional colour overrides,
     // fonts and text size. Empty values mean the preset's default.
@@ -396,6 +397,7 @@ const planSchema = new Schema(
     assets: [ref('Media')], // media library items used in this service (backgrounds, countdowns…)
     order: { type: [orderItemSchema], default: [] }, // order of service (optional)
     announcements: { type: String, default: '' }, // bulletin only
+    callLink: { type: String, default: '' }, // a WhatsApp call link (lib/callLink.js) for planning this service together
     // Songs to sample or play (beta): Spotify, Apple Music and YouTube links, in order
     playlist: { type: [new Schema({ url: String, title: String, note: String, addedBy: String }, { _id: false })], default: [] },
     // Live run-of-show: { startedAt, index, itemAt, endedAt, log: [{ index, title, at }] }

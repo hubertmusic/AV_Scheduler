@@ -1,6 +1,6 @@
 // Playlist (beta) on a service plan: songs and playlists from Spotify, Apple Music and YouTube,
 // played in each service's own player. One player open at a time, so the page stays quick.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './lib.js';
 import { useApp } from './ui.jsx';
 import './playlist.css';
@@ -15,6 +15,9 @@ const KIND = { track: 'Song', song: 'Song', album: 'Album', playlist: 'Playlist'
 export function PlaylistCard({ plan, canEdit, onSave }) {
   const app = useApp();
   const [list, setList] = useState(plan.playlist || []);
+  // Someone else added or removed something (the plan reloads while it's open)
+  const savedKey = JSON.stringify(plan.playlist || []);
+  useEffect(() => setList(JSON.parse(savedKey)), [savedKey]);
   const [playing, setPlaying] = useState(null);
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');

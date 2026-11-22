@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { api, fmtDate, fmtMinutes, fmtTime, orderTimes } from '../lib.js';
 import { Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { useDraft } from '../live.jsx';
 import { Qr, qrPng } from '../qr.jsx';
 import { AutoText, CREWS, ItemDetails, ItemExtras, detailSummary, emptyCues } from '../orderItem.jsx';
 
@@ -59,6 +60,7 @@ export function OrderOfService({ plan, canEdit, onSave, setPlan, onLive }) {
   const files = planFilesOf(plan);
 
   const dirty = !same(items, plan.order);
+  useDraft('order', canEdit && dirty);
   const times = orderTimes(ev.start, items);
   const showTimes = times.total > 0;
   const over = ev.end && times.end > ev.end;
@@ -375,6 +377,7 @@ export function ShareCard({ plan, canEdit, canAnnounce = canEdit, canPlans, onSa
   const [ann, setAnn] = useState(plan.announcements);
   const [busy, setBusy] = useState(false);
   useEffect(() => setAnn(plan.announcements), [plan.announcements]);
+  useDraft('announcements', ann !== plan.announcements);
   const saveAnn = async () => {
     setBusy(true);
     try {

@@ -154,4 +154,14 @@ const feed = JSON.stringify(ok(await admin('GET', '/api/activity/feed?limit=200'
 assert.ok(!feed.includes('XLR') && !feed.includes('Sabbath?'), 'no chat in the activity log');
 step('chat messages aren’t in previews (only the shape of the dock) or the activity log, and they’re stored scrambled');
 
+// ---------- calling someone on WhatsApp ----------
+ok(await admin('PATCH', `/api/people/${cam.id}`, { phone: '4235550199' }));
+let peopleSeen = ok(await ben.c('GET', '/api/chat/sync')).people;
+assert.equal(peopleSeen.find((p) => p.name === 'Cam').phone, undefined, 'crew don’t see other crew’s numbers');
+assert.ok(ok(await admin('GET', '/api/chat/sync')).people.find((p) => p.name === 'Cam').phone, 'people who message the crew do');
+ok(await admin('PATCH', `/api/people/${cam.id}`, { role: 'leader' }));
+peopleSeen = ok(await ben.c('GET', '/api/chat/sync')).people;
+assert.ok(peopleSeen.find((p) => p.name === 'Cam').phone, 'leaders’ numbers are for everyone');
+step('the People list offers WhatsApp only where the number may be seen');
+
 console.log('\nAll chat checks passed.');

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, describeRule, firstName, fmtDay, fridayOf, prettyPhone, roleLabel, todayISO, WEEK_OPTIONS } from '../lib.js';
 import { Avatar, Icon, Modal, useApp } from '../ui.jsx';
+import { WhatsAppPerson } from '../live.jsx';
 import { featureOn, SignOffHistory } from './Extras.jsx';
 
 const PERMS = [
@@ -232,6 +233,7 @@ function PersonPanel({ person, me, positions }) {
             {roleLabel(person)}
             {person.phone ? ` · ${prettyPhone(person.phone)}` : ''}
           </div>
+          {person.phone && person.id !== me.id && <WhatsAppPerson name={person.name} phone={person.phone} className="btn btn-ghost btn-sm team-wa" label="Call or message on WhatsApp" />}
           {otherTeams.length > 0 && <div className="muted small">Also on the {otherTeams.map(app.teamName).join(' and ')}</div>}
         </div>
       </div>

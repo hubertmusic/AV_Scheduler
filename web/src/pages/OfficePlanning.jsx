@@ -5,7 +5,7 @@ import { addDays, api, copyText, fmtDate, fmtDay, fmtTime, todayISO } from '../l
 import { Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { CommitteeChips, CommitteePicker, committeeName, MEETING_TYPES, TYPES, TypeChip, whenText } from '../office.jsx';
 import Boards from './Boards.jsx';
-import { CallBar, HereBar, useLive } from './liveMeeting.jsx';
+import { CallBar, HereBar, useLive } from '../live.jsx';
 
 const VIEWS = [
   { id: 'meetings', tab: 'Meetings', blurb: 'Agendas before, minutes after. The secretary takes the minutes; a leader can open them to anyone in the meeting.' },
@@ -134,7 +134,7 @@ function Meeting({ id, onChanged }) {
     load();
   }, [load]);
   const [writing, setWriting] = useState('');
-  const here = useLive(m, load, writing);
+  const { here } = useLive({ url: m ? `/office/events/${m.id}/live` : '', v: m?.v, reload: load, writing });
   const act = async (fn, msg) => {
     try {
       const out = await fn();
@@ -180,7 +180,12 @@ function Meeting({ id, onChanged }) {
             <CommitteeChips keys={m.committees} shared={m.sharedWith} />
           </div>
         </div>
-        <CallBar m={m} act={act} />
+        <CallBar
+          link={m.callLink}
+          canEdit={m.canAgenda}
+          onSave={(link) => act(() => api(`/office/events/${m.id}/call`, { method: 'PUT', body: { link } }), link ? 'Call link saved' : 'Call link removed')}
+          addBlurb="Meeting by phone or video? Add a WhatsApp call link and everyone gets a Join button here and in the agenda."
+        />
         <div className="small muted">
           {going} of {m.audience.filter((a) => a.invited).length} said they’re coming
           {m.quorum > 0 && (
@@ -192,7 +197,7 @@ function Meeting({ id, onChanged }) {
         </div>
       </section>
 
-      <HereBar here={here} />
+      <HereBar here={here} what="this meeting" />
       <AgendaCard m={m} act={act} totalMin={totalMin} onPrint={printAgenda} onWriting={setWriting} />
 
       <section className="card stack" aria-label="Minutes">

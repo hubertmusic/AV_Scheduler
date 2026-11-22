@@ -7,6 +7,7 @@ import { bad, conflict, forbidden, getSettings, isHttpUrl, isId, membershipOf, n
 import { forgetTeams, isTeamHead, mergeTeam, requireTeamHead, teamKeys, teamView } from '../lib/teams.js';
 import { seesRoster } from '../lib/office.js';
 import { readTheme, themeView } from '../lib/theme.js';
+import { readCallLink } from '../lib/callLink.js';
 
 export const teamsRouter = Router();
 
@@ -49,7 +50,7 @@ teamsRouter.post('/', requireAdmin, wrap(async (req, res) => {
   res.status(201).json(teamView(t));
 }));
 
-// PATCH /api/teams/:key { name, groupLink, kind, theme } — the admin, or that team's head leader
+// PATCH /api/teams/:key { name, groupLink, callLink, kind, theme } — the admin, or that team's head leader
 teamsRouter.patch('/:key', wrap(async (req, res) => {
   const t = await loadTeam(req.params.key);
   const isAdmin = req.user.role === 'admin';
@@ -63,6 +64,13 @@ teamsRouter.patch('/:key', wrap(async (req, res) => {
     const link = normalizeUrl(str(req.body.groupLink, 300));
     if (link && !isHttpUrl(link)) throw bad('That doesn’t look like a link.');
     t.groupLink = link;
+  }
+  if (req.body.callLink !== undefined) {
+    try {
+      t.callLink = readCallLink(req.body.callLink);
+    } catch (e) {
+      throw bad(e.message);
+    }
   }
   if (req.body.kind !== undefined) {
     if (!isAdmin) throw forbidden('Only the admin can change what kind of team this is.');

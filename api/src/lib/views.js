@@ -6,6 +6,15 @@ import { teamsShownTo } from './teams.js';
 // title, positions and monthly limit on that team. Phones of leaders and the admin are visible to
 // everyone (so crew can reach them); everyone else's phone only to people who message the crew or
 // manage people.
+// Leaders' and the admin's phones are for everyone; anyone else's only for people who message the
+// crew or manage people (and themselves)
+export function seesPhone(u, viewer) {
+  if (String(u._id) === String(viewer._id)) return true;
+  if (u.role === 'admin' || (u.teams || []).some((t) => t.head || t.role === 'leader')) return true;
+  const vc = can(viewer);
+  return !!(vc.message || vc.people);
+}
+
 export function personView(u, viewer) {
   const team = viewer._team;
   const keys = viewer._teamKeys; // positions on the viewer's team (unset = no filtering)
@@ -35,7 +44,7 @@ export function personView(u, viewer) {
     out.maxPerMonth = m ? m.maxPerMonth || 0 : u.maxPerMonth || 0;
     out.availabilityUpdatedAt = u.availabilityUpdatedAt || null;
   }
-  if (isLead || isSelf || vc.message || vc.people) out.phone = u.phone;
+  if (seesPhone(u, viewer)) out.phone = u.phone;
   if (isSelf || vc.people) {
     out.email = u.email;
     out.invited = !u.passwordHash;

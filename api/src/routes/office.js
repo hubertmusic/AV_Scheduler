@@ -9,6 +9,8 @@ import { DateTime } from 'luxon';
 import { config } from '../config.js';
 import { ActionItem, Assignment, Committee, DOC_CATEGORIES, Event, Goal, OFFICE_TYPES, OfficeDoc, OfficeEvent, OfficeRequest, OfficeSeries, Plan, Team, User } from '../models.js';
 import { requirePerm } from '../auth.js';
+import { readCallLink } from '../lib/callLink.js';
+import { whoIsHere } from '../lib/presence.js';
 import { planFor } from './plans.js';
 import { addDays, bad, DATE_RE, forbidden, getSettings, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { deleteStored, filesOf, originalName, removeUploads, uploader } from '../lib/media.js';
@@ -573,45 +575,21 @@ export function agendaText(ev, orgName) {
 }
 
 // ---------- meeting by phone or video, and the live meeting page ----------
-// PUT /api/office/events/:id/call { link } — a WhatsApp call link (Calls → Create call link), the
-// group's invite link, or any https meeting link. '' removes it.
-const CALL_HOSTS = /(^|\.)(whatsapp\.com|wa\.me|zoom\.us|meet\.google\.com|teams\.microsoft\.com|teams\.live\.com|jit\.si|daily\.co|whereby\.com|facetime\.apple\.com)$/i;
+// PUT /api/office/events/:id/call { link } — see lib/callLink.js. '' removes it.
 office.put('/events/:id/call', need('plans'), wrap(async (req, res) => {
   const ev = await loadEvent(req);
   if (!edits(req.user, ev, true)) throw forbidden('You can’t change this meeting.');
-  const link = normalizeUrl(str(req.body?.link, 500));
-  if (link) {
-    let host = '';
-    try {
-      const u = new URL(link);
-      if (u.protocol !== 'https:') throw new Error();
-      host = u.hostname;
-    } catch {
-      throw bad('Paste the whole link, starting with https://');
-    }
-    if (!CALL_HOSTS.test(host)) throw bad('Use a WhatsApp call link (in WhatsApp: Calls → Create call link), or a Zoom, Google Meet, Teams or FaceTime link.');
+  let link;
+  try {
+    link = readCallLink(req.body?.link);
+  } catch (e) {
+    throw bad(e.message);
   }
   ev.callLink = link;
   await ev.save();
   res.locals.activity = `${link ? 'Added a call link to' : 'Removed the call link from'} ${named(ev, 'a Church Admin meeting')}`;
   res.json(await fullEvent(ev, req));
 }));
-
-// Who has a meeting open right now: meeting id → user id → { name, at, writing }. Kept in memory;
-// it only matters for the next few seconds.
-const here = new Map();
-const HERE_MS = 12000;
-function whoIsHere(id, user, writing) {
-  const now = Date.now();
-  const room = here.get(id) || new Map();
-  if (user) room.set(String(user._id), { name: user.name, at: now, writing });
-  for (const [k, v] of room) if (now - v.at > HERE_MS) room.delete(k);
-  if (room.size) here.set(id, room);
-  else here.delete(id);
-  // forget meetings nobody has looked at for a while
-  if (here.size > 200) for (const [k, r] of here) if (![...r.values()].some((v) => now - v.at < HERE_MS)) here.delete(k);
-  return [...room].map(([uid, v]) => ({ id: uid, name: v.name, writing: v.writing || '' }));
-}
 
 // GET /api/office/events/:id/live?writing=minutes — I'm on this meeting's page. Returns who else is,
 // the item being discussed and a version, so the page reloads only when something changed.
@@ -620,7 +598,7 @@ office.get('/events/:id/live', wrap(async (req, res) => {
   const writing = ['minutes', 'agenda', 'motion'].includes(req.query.writing) ? req.query.writing : '';
   const last = await ActionItem.findOne({ meeting: ev._id }, { updatedAt: 1 }).sort({ updatedAt: -1 }).lean();
   res.set('Cache-Control', 'no-store');
-  res.json({ v: liveVersion(ev, last ? [last] : []), here: whoIsHere(String(ev._id), req.user, writing), liveItem: ev.liveItem ? String(ev.liveItem) : null });
+  res.json({ v: liveVersion(ev, last ? [last] : []), here: whoIsHere(`meeting:${ev._id}`, req.user, writing), liveItem: ev.liveItem ? String(ev.liveItem) : null });
 }));
 
 // PUT /api/office/events/:id/live { item } — move "now discussing" to an agenda item (null clears it).

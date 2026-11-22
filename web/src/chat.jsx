@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api } from './lib.js';
 import { Avatar, Modal, useApp } from './ui.jsx';
 import './chat.css';
+import { WaIcon } from './live.jsx';
 
 const EMOJI = ['🎚️', '🎤', '🎹', '🎸', '🥁', '📽️', '💡', '🎥', '🎶', '🙏', '⛪', '📣', '☕', '🎄', '⭐', '❤️'];
 const COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'teal', 'pink', 'gray'];
@@ -238,19 +239,22 @@ export function ChatDock() {
               )
             ) : (
               list.map((p) => (
-                <button key={p.id} type="button" className="ch-item" onClick={() => openPerson(p.id)}>
-                  <span className="ch-av">
-                    <Avatar name={p.name} size={36} />
-                    <span className={`ch-dot ch-${p.status}`} />
-                  </span>
-                  <span className="ch-item-main">
-                    <span className="ch-name">{p.name}</span>
-                    <span className="ch-snip">
-                      {lastSeenText(p)}
-                      {p.teams.length ? ` · ${p.teams.join(', ')}` : ''}
+                <div key={p.id} className="ch-person">
+                  <button type="button" className="ch-item" onClick={() => openPerson(p.id)} title={`Chat with ${p.name}`}>
+                    <span className="ch-av">
+                      <Avatar name={p.name} size={36} />
+                      <span className={`ch-dot ch-${p.status}`} />
                     </span>
-                  </span>
-                </button>
+                    <span className="ch-item-main">
+                      <span className="ch-name">{p.name}</span>
+                      <span className="ch-snip">
+                        {lastSeenText(p)}
+                        {p.teams.length ? ` · ${p.teams.join(', ')}` : ''}
+                      </span>
+                    </span>
+                  </button>
+                  {p.phone && <WaLink person={p} />}
+                </div>
               ))
             )}
           </div>
@@ -346,6 +350,7 @@ function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSen
           </span>
           {min && room.unread > 0 && <span className="ch-badge">{room.unread > 9 ? '9+' : room.unread}</span>}
         </button>
+        {room.kind === 'direct' && !min && people.find((p) => p.id === room.with)?.phone && <WaLink person={people.find((p) => p.id === room.with)} header />}
         {room.kind === 'group' && !min && (
           <button type="button" className="ch-hbtn" aria-label="Group settings" title="Name, look and people" onClick={onEdit}>
             ⚙
@@ -648,5 +653,17 @@ export function ChatPreview() {
         {unread > 0 && <span className="ch-badge">{unread > 9 ? '9+' : unread}</span>}
       </button>
     </div>
+  );
+}
+
+// Call someone: opens your WhatsApp chat with them, where the call buttons are (WhatsApp doesn't let
+// other apps start the call itself). Only for people whose number you're allowed to see.
+function WaLink({ person, header = false }) {
+  const digits = String(person.phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  return (
+    <a className={header ? 'ch-hbtn ch-wa-h' : 'ch-wa'} href={`https://wa.me/${digits}`} target="_blank" rel="noopener noreferrer" aria-label={`Call ${person.name} on WhatsApp`} title={`Call ${person.name}: opens your WhatsApp chat with them; tap the phone or video button there`}>
+      <WaIcon size={header ? 16 : 20} />
+    </a>
   );
 }

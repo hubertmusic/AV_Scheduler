@@ -225,4 +225,22 @@ assert.equal(tplD.order.find((x) => x.title === 'Welcome').cues.audio, 'Handheld
 assert.deepEqual(tplD.order.find((x) => x.title === 'Mission story').media, []);
 step('the rundown and run sheet show each crew’s cues, links and files; the bulletin only its notes; the ProPresenter download numbers files by item and lists links');
 
+// ---------- planning a service together ----------
+const svcT = ok(await admin('POST', '/api/events', { date: iso(9), title: 'Planning test', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+ok(await admin('PATCH', `/api/plans/${svcT.id}`, { callLink: 'https://evil.example/join' }), 400);
+ok(await crew('PATCH', `/api/plans/${svcT.id}`, { callLink: 'https://call.whatsapp.com/voice/Plan123' }), 403);
+let pt = ok(await admin('PATCH', `/api/plans/${svcT.id}`, { callLink: 'https://call.whatsapp.com/voice/Plan123' }));
+assert.equal(pt.callLink, 'https://call.whatsapp.com/voice/Plan123');
+assert.equal(ok(await crew('GET', `/api/plans/${svcT.id}`)).callLink, pt.callLink, 'everyone who sees the plan gets the Join button');
+// Who has it open, and a version that changes with every edit
+let h = ok(await admin('GET', `/api/plans/${svcT.id}/here?writing=order`));
+assert.equal(h.v, pt.v);
+h = ok(await crew('GET', `/api/plans/${svcT.id}/here`));
+assert.deepEqual(h.here.map((x) => [x.name, x.writing]).sort(), [['Ava Crew', ''], ['Hub M.', 'order']]);
+ok(await crew('PATCH', `/api/plans/${svcT.id}`, { scriptures: [{ reference: 'Psalm 23', version: 'KJV' }] }));
+assert.notEqual(ok(await admin('GET', `/api/plans/${svcT.id}/here`)).v, h.v, 'someone else’s change gives a new version');
+pt = ok(await admin('PATCH', `/api/plans/${svcT.id}`, { callLink: '' }));
+assert.equal(pt.callLink, '');
+step('planning together: a WhatsApp call link on the plan, who has it open and what they’re editing, a version so open pages reload');
+
 console.log('\nAll order-of-service checks passed.');
