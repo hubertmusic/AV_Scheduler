@@ -744,6 +744,11 @@ const officeEventSchema = new Schema(
     present: [ref('User')],
     guests: { type: String, default: '' }, // others present, by name
     minutesOpen: { type: Boolean, default: false }, // a leader let anyone in the meeting take minutes
+    // Meeting by phone or video: a WhatsApp call link (or group link, Zoom…) people tap to join
+    callLink: { type: String, default: '' },
+    // During the meeting: the agenda item being discussed now, and who moved it there
+    liveItem: { type: Schema.Types.ObjectId, default: null },
+    liveBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     minutesBy: ref('User'),
     minutesApprovedAt: Date,
     minutesApprovedBy: ref('User'),

@@ -1,10 +1,11 @@
 // Church Admin: Planning — meetings (agenda, minutes, motions, action items), goals and
 // milestones, action items, votes on record, the yearly calendar, event requests and flow charts.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, api, copyText, fmtDate, fmtDay, fmtTime, todayISO } from '../lib.js';
 import { Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { CommitteeChips, CommitteePicker, committeeName, MEETING_TYPES, TYPES, TypeChip, whenText } from '../office.jsx';
 import Boards from './Boards.jsx';
+import { CallBar, HereBar, useLive } from './liveMeeting.jsx';
 
 const VIEWS = [
   { id: 'meetings', tab: 'Meetings', blurb: 'Agendas before, minutes after. The secretary takes the minutes; a leader can open them to anyone in the meeting.' },
@@ -121,17 +122,19 @@ function printDoc(title, body) {
 }
 function agendaText(m, orgName) {
   let n = 0;
-  return [m.title, whenText(m) + (m.room ? ` · ${m.room}` : ''), '', 'Agenda', ...m.agenda.map((x) => (x.kind === 'heading' ? `\n${x.title.toUpperCase()}` : `${++n}. ${x.title}${x.presenter ? ` — ${x.presenter}` : ''}${x.minutes ? ` (${x.minutes} min)` : ''}`)), '', `— ${orgName}`].join('\n');
+  return [m.title, whenText(m) + (m.room ? ` · ${m.room}` : ''), ...(m.callLink ? ['', `Join the call: ${m.callLink}`] : []), '', 'Agenda', ...m.agenda.map((x) => (x.kind === 'heading' ? `\n${x.title.toUpperCase()}` : `${++n}. ${x.title}${x.presenter ? ` — ${x.presenter}` : ''}${x.minutes ? ` (${x.minutes} min)` : ''}`)), '', `— ${orgName}`].join('\n');
 }
 
 function Meeting({ id, onChanged }) {
   const app = useApp();
   const [m, setM] = useState(null);
   const [error, setError] = useState('');
-  const load = useCallback(() => api(`/office/events/${id}`).then(setM, (e) => setError(e.message)), [id]);
+  const load = useCallback(() => api(`/office/events/${id}`, { background: true }).then(setM, (e) => setError(e.message)), [id]);
   useEffect(() => {
     load();
   }, [load]);
+  const [writing, setWriting] = useState('');
+  const here = useLive(m, load, writing);
   const act = async (fn, msg) => {
     try {
       const out = await fn();
@@ -177,6 +180,7 @@ function Meeting({ id, onChanged }) {
             <CommitteeChips keys={m.committees} shared={m.sharedWith} />
           </div>
         </div>
+        <CallBar m={m} act={act} />
         <div className="small muted">
           {going} of {m.audience.filter((a) => a.invited).length} said they’re coming
           {m.quorum > 0 && (
@@ -188,7 +192,8 @@ function Meeting({ id, onChanged }) {
         </div>
       </section>
 
-      <AgendaCard m={m} act={act} totalMin={totalMin} onPrint={printAgenda} />
+      <HereBar here={here} />
+      <AgendaCard m={m} act={act} totalMin={totalMin} onPrint={printAgenda} onWriting={setWriting} />
 
       <section className="card stack" aria-label="Minutes">
         <div className="row-wrap spread">
@@ -207,7 +212,7 @@ function Meeting({ id, onChanged }) {
             <span>Let anyone in this meeting take the minutes (the secretary is away)</span>
           </label>
         )}
-        <MinutesEditor m={m} act={act} />
+        <MinutesEditor m={m} setM={setM} onWriting={setWriting} />
         <p className="small muted">
           {presentCount} present{m.quorum > 0 ? (presentCount >= m.quorum ? ' · quorum met' : ` · quorum (${m.quorum}) not met`) : ''}
           {m.minutesBy ? ` · last written by ${m.minutesBy}` : ''}
@@ -234,10 +239,14 @@ function Meeting({ id, onChanged }) {
   );
 }
 
-function AgendaCard({ m, act, totalMin, onPrint }) {
+function AgendaCard({ m, act, totalMin, onPrint, onWriting }) {
   const app = useApp();
   const [rows, setRows] = useState(null);
   const editing = rows !== null;
+  useEffect(() => onWriting(editing ? 'agenda' : ''), [editing, onWriting]);
+  const items = m.agenda.filter((x) => x.kind === 'item');
+  const nowAt = items.findIndex((x) => x.id === m.liveItem);
+  const discuss = (item) => act(() => api(`/office/events/${m.id}/live`, { method: 'PUT', body: { item } }));
   const start = () => setRows(m.agenda.length ? m.agenda.map((x) => ({ ...x })) : [{ kind: 'item', title: '', presenter: '', minutes: 0, notes: '' }]);
   const setRow = (i, k, v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
   const move = (i, d) => {
@@ -281,6 +290,32 @@ function AgendaCard({ m, act, totalMin, onPrint }) {
         )}
       </div>
       {m.agendaSentAt && !editing && <p className="muted small">Emailed {new Date(m.agendaSentAt).toLocaleString()}</p>}
+      {m.canLead && !editing && items.length > 0 && !m.minutesApprovedAt && (
+        <div className="lm-lead">
+          {nowAt < 0 ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => discuss(items[0].id)}>
+              Start: discuss item 1
+            </button>
+          ) : (
+            <>
+              {nowAt < items.length - 1 && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => discuss(items[nowAt + 1].id)}>
+                  Next item ({nowAt + 2} of {items.length})
+                </button>
+              )}
+              {nowAt > 0 && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => discuss(items[nowAt - 1].id)}>
+                  Back
+                </button>
+              )}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => discuss(null)}>
+                {nowAt === items.length - 1 ? 'Done' : 'Stop'}
+              </button>
+            </>
+          )}
+          <span className="muted small">Everyone with this meeting open sees which item you’re on.</span>
+        </div>
+      )}
       {!editing &&
         (m.agenda.length ? (
           <ol className="agenda-list">
@@ -290,10 +325,16 @@ function AgendaCard({ m, act, totalMin, onPrint }) {
                   {x.title}
                 </li>
               ) : (
-                <li key={x.id} value={++n}>
+                <li key={x.id} value={++n} className={m.liveItem === x.id ? 'agenda-now' : undefined} aria-current={m.liveItem === x.id ? 'step' : undefined}>
+                  {m.liveItem === x.id && <span className="lm-now">Now</span>}
                   <strong>{x.title}</strong>
                   {x.presenter && <span className="muted"> — {x.presenter}</span>}
                   {x.minutes > 0 && <span className="muted small"> · {x.minutes} min</span>}
+                  {m.canLead && !m.minutesApprovedAt && m.liveItem !== x.id && (
+                    <button type="button" className="link-btn lm-discuss" onClick={() => discuss(x.id)}>
+                      Discuss now
+                    </button>
+                  )}
                   {x.notes && <div className="small">{x.notes}</div>}
                 </li>
               )
@@ -349,22 +390,67 @@ function AgendaCard({ m, act, totalMin, onPrint }) {
   );
 }
 
-function MinutesEditor({ m, act }) {
-  const [f, setF] = useState({ minutes: m.minutes, present: m.present, guests: m.guests });
-  const dirty = f.minutes !== m.minutes || f.guests !== m.guests || f.present.join() !== m.present.join();
+// Minutes save as they're typed, so everyone with the meeting open sees them come in
+const minutesOf = (m) => ({ minutes: m.minutes, present: m.present, guests: m.guests });
+const sameMinutes = (a, b) => a.minutes === b.minutes && a.guests === b.guests && a.present.join() === b.present.join();
+function MinutesEditor({ m, setM, onWriting }) {
+  const app = useApp();
+  const [f, setF] = useState(() => minutesOf(m));
+  const [state, setState] = useState('saved'); // saved | waiting | saving | error
+  const [conflict, setConflict] = useState('');
+  const base = useRef(minutesOf(m)); // what the server had last time we heard
+  const fRef = useRef(f);
+  fRef.current = f;
+  const timer = useRef(null);
+  const dirty = !sameMinutes(f, base.current);
+  // Someone else's save came in
+  useEffect(() => {
+    const server = minutesOf(m);
+    if (sameMinutes(server, base.current)) return;
+    base.current = server;
+    if (sameMinutes(fRef.current, server)) return;
+    if (state === 'saved') setF(server);
+    else setConflict(`${m.minutesBy || 'Someone'} also changed the minutes. Yours replace theirs when they save; check you’re not both typing.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [m.minutes, m.guests, m.present.join()]);
+  useEffect(() => onWriting(dirty ? 'minutes' : ''), [dirty, onWriting]);
+  useEffect(() => () => onWriting(''), [onWriting]);
+  const saveNow = async () => {
+    clearTimeout(timer.current);
+    const body = fRef.current;
+    setState('saving');
+    try {
+      const out = await api(`/office/events/${m.id}/minutes`, { method: 'PUT', body, background: true });
+      base.current = minutesOf(out);
+      setState(sameMinutes(fRef.current, body) ? 'saved' : 'waiting');
+      setConflict('');
+      setM(out);
+      if (!sameMinutes(fRef.current, body)) timer.current = setTimeout(saveNow, 1200);
+    } catch (e) {
+      setState('error');
+      app.toast(`Minutes not saved: ${e.message}`);
+    }
+  };
+  const change = (next) => {
+    setF(next);
+    setState('waiting');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(saveNow, 1200);
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
   if (!m.canMinutes)
-    return m.minutes ? (
+    return m.minutes || m.present.length ? (
       <div className="stack-sm">
         <p className="small">
           <strong>Present:</strong> {m.audience.filter((a) => m.present.includes(a.id)).map((a) => a.name).join(', ') || '—'}
           {m.guests ? ` · also ${m.guests}` : ''}
         </p>
-        <div className="pre-wrap minutes-read">{m.minutes}</div>
+        {m.minutes && <div className="pre-wrap minutes-read">{m.minutes}</div>}
       </div>
     ) : (
       <p className="muted">No minutes yet.</p>
     );
-  const toggle = (id) => setF({ ...f, present: f.present.includes(id) ? f.present.filter((x) => x !== id) : [...f.present, id] });
+  const toggle = (id) => change({ ...f, present: f.present.includes(id) ? f.present.filter((x) => x !== id) : [...f.present, id] });
   return (
     <div className="stack-sm">
       <fieldset className="field">
@@ -380,15 +466,23 @@ function MinutesEditor({ m, act }) {
       </fieldset>
       <label className="field">
         <span>Others present (optional)</span>
-        <input value={f.guests} onChange={(e) => setF({ ...f, guests: e.target.value })} maxLength={500} placeholder="e.g. Pastor Jo, the treasurer’s assistant" />
+        <input value={f.guests} onChange={(e) => change({ ...f, guests: e.target.value })} maxLength={500} placeholder="e.g. Pastor Jo, the treasurer’s assistant" />
       </label>
       <label className="field">
         <span>Minutes</span>
-        <textarea rows={10} value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })} maxLength={30000} placeholder="What was discussed and decided, item by item." />
+        <textarea rows={10} value={f.minutes} onChange={(e) => change({ ...f, minutes: e.target.value })} onBlur={() => state === 'waiting' && saveNow()} maxLength={30000} placeholder="What was discussed and decided, item by item." />
       </label>
-      <button type="button" className="btn btn-primary self-start" disabled={!dirty} onClick={() => act(() => api(`/office/events/${m.id}/minutes`, { method: 'PUT', body: f }), 'Minutes saved')}>
-        {dirty ? 'Save minutes' : 'Saved'}
-      </button>
+      {conflict && <p className="lm-conflict">{conflict}</p>}
+      <div className="row-wrap">
+        <span className="lm-saving" role="status">
+          {{ saved: 'Saved. Everyone with this meeting open sees it.', waiting: 'Saving as you type…', saving: 'Saving…', error: 'Not saved.' }[state]}
+        </span>
+        {state === 'error' && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={saveNow}>
+            Try again
+          </button>
+        )}
+      </div>
     </div>
   );
 }

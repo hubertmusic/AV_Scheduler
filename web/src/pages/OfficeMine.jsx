@@ -1,7 +1,7 @@
 // Church Admin: My calendar — meetings I'm invited to (with "will you be there?"), my action items
 // and milestones, my committees and offices, and the calendar feed.
 import { useCallback, useEffect, useState } from 'react';
-import { api, fmtDate, fmtDay } from '../lib.js';
+import { api, fmtDate, fmtDay, todayISO } from '../lib.js';
 import { Empty, useApp } from '../ui.jsx';
 import { CalendarFeedCard, committeeName, EventDetail } from '../office.jsx';
 import { EventRow } from './OfficeSchedule.jsx';
@@ -32,7 +32,7 @@ export default function OfficeMine() {
       app.toast(err.message);
     }
   };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO(); // the local date (toISOString would be tomorrow by evening)
   return (
     <div className="stack-lg">
       <div className="page-head">
@@ -95,6 +95,16 @@ export default function OfficeMine() {
                         {l}
                       </button>
                     ))}
+                    {e.callLink && e.date === today && (
+                      <>
+                        <a className="btn btn-sm btn-green" href={e.callLink} target="_blank" rel="noopener noreferrer">
+                          <span aria-hidden="true">📞</span> Join the call
+                        </a>
+                        <button type="button" className="btn btn-sm btn-outline" onClick={() => app.openMeeting(e.id)}>
+                          Open the meeting
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

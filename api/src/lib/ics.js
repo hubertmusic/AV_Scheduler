@@ -140,7 +140,7 @@ function officeEvent(it, tz, now, link) {
     if (end <= start) end = new Date(start.getTime() + 3600 * 1000);
     when = [`DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`];
   }
-  const desc = [TYPE_WORD[e.type] ? `${TYPE_WORD[e.type]} · ${it.teamName}` : it.teamName, e.room ? `Where: ${e.room}` : '', e.notes || '', link ? `Details in Crew Call: ${link}` : ''].filter(Boolean).join('\n\n');
+  const desc = [TYPE_WORD[e.type] ? `${TYPE_WORD[e.type]} · ${it.teamName}` : it.teamName, e.room ? `Where: ${e.room}` : '', e.callLink ? `📞 Join the call: ${e.callLink}` : '', e.notes || '', link ? `Details in Crew Call: ${link}` : ''].filter(Boolean).join('\n\n');
   const alarms = [];
   if (it.invited && !(e.allDay || !e.start)) {
     if (it.remindDays > 0) alarms.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(`${e.title} on ${dayWord(e.date, tz)}`)}`, `TRIGGER:-P${it.remindDays}D`, 'END:VALARM');

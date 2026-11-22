@@ -250,6 +250,41 @@ const act = ok(await samC('POST', '/api/office/actions', { meeting: board.id, ti
 ok(await fredC('POST', '/api/office/actions', { meeting: board.id, title: 'x' }), 403);
 step('meetings: agenda emailed to the committee; the secretary takes minutes; a leader can open them to anyone; motions and action items');
 
+// ---------- meeting by WhatsApp call, and the live meeting page ----------
+ok(await beaC('PUT', `/api/office/events/${board.id}/call`, { link: 'https://call.whatsapp.com/video/AbC123' }), 403);
+ok(await leeC('PUT', `/api/office/events/${board.id}/call`, { link: 'http://call.whatsapp.com/video/AbC123' }), 400);
+ok(await leeC('PUT', `/api/office/events/${board.id}/call`, { link: 'https://example.com/phish' }), 400);
+mtg = ok(await leeC('PUT', `/api/office/events/${board.id}/call`, { link: 'https://call.whatsapp.com/video/AbC123' }));
+assert.equal(mtg.callLink, 'https://call.whatsapp.com/video/AbC123');
+assert.equal(ok(await beaC('GET', `/api/office/events/${board.id}`)).callLink, mtg.callLink, 'everyone in the meeting gets the Join button');
+assert.equal(ok(await beaC('GET', '/api/office/mine')).events.find((e) => e.id === board.id).callLink, mtg.callLink);
+ok(await leeC('POST', `/api/office/events/${board.id}/send-agenda`));
+assert.ok(ok(await client()('GET', '/api/auth/test-mail')).some((m) => m.to === 'sam@example.com' && m.text.includes('Join the call: https://call.whatsapp.com/video/AbC123')), 'the agenda email has the call link');
+// Who has it open, and what they're writing
+let live = ok(await samC('GET', `/api/office/events/${board.id}/live`));
+assert.deepEqual(live.here.map((p) => p.name), ['Sam']);
+ok(await beaC('GET', `/api/office/events/${board.id}/live?writing=minutes`));
+live = ok(await samC('GET', `/api/office/events/${board.id}/live`));
+assert.deepEqual(live.here.map((p) => [p.name, p.writing]).sort(), [['Bea', 'minutes'], ['Sam', '']]);
+assert.notEqual((await fredC('GET', `/api/office/events/${board.id}/live`)).status, 200, 'only people in the meeting');
+// Any change gives a new version, so open pages reload
+const v1 = live.v;
+ok(await beaC('PUT', `/api/office/events/${board.id}/minutes`, { minutes: 'Opened with prayer. Discussed the roof. Bids reviewed.' }));
+assert.notEqual(ok(await samC('GET', `/api/office/events/${board.id}/live`)).v, v1, 'minutes changed');
+// Now discussing: whoever runs the meeting or takes the minutes moves it along
+const items = mtg.agenda.filter((x) => x.kind === 'item');
+assert.notEqual((await fredC('PUT', `/api/office/events/${board.id}/live`, { item: items[0].id })).status, 200);
+ok(await leeC('PUT', `/api/office/events/${board.id}/live`, { item: '000000000000000000000000' }), 400);
+mtg = ok(await leeC('PUT', `/api/office/events/${board.id}/live`, { item: items[1].id }));
+assert.equal(mtg.liveItem, items[1].id);
+assert.equal(ok(await beaC('GET', `/api/office/events/${board.id}/live`)).liveItem, items[1].id, 'everyone sees which item');
+mtg = ok(await leeC('PUT', `/api/office/events/${board.id}/agenda`, { agenda: mtg.agenda.map((x) => ({ ...x, minutes: x.minutes + 1 })) }));
+assert.equal(mtg.agenda.find((x) => x.id === mtg.liveItem)?.title, 'Roof repair bids', 'editing the agenda keeps the item being discussed');
+assert.equal(ok(await beaC('PUT', `/api/office/events/${board.id}/live`, { item: null })).liveItem, null, 'the minute-taker can move it too');
+const feedText = JSON.stringify(ok(await adminO('GET', '/api/activity/feed?limit=100')));
+assert.ok(!feedText.includes('Roof repair bids'), 'the activity log never names a confidential item');
+step('meetings: a WhatsApp call link with a Join button (and in the agenda email); the live page shows who’s here, what they’re writing and the item being discussed');
+
 // Agenda overview: what needs attention
 let ov = ok(await leeC('GET', '/api/office/overview?zoom=month'));
 assert.ok(ov.attention.overdue.some((a) => a.id === act.id), 'overdue action items');
