@@ -77,35 +77,74 @@ export function Player({ items, fit = 'contain', empty = null, onItem, follow })
 
   const queued = upNext.current ? list.find((x) => x.id === upNext.current) : null;
   const after = queued || (list.length ? list[(at + 1) % list.length] : null);
+  // Moves on only when there's something else to show and the item has a time: on its own, or set
+  // to 0 seconds (stays on), a picture or page just stays; a lone video loops without a gap
+  const alone = list.length === 1;
+  const holds = cur && (alone || (cur.kind !== 'video' && cur.seconds === 0));
   useEffect(() => {
     clearTimeout(timer.current);
     if (!cur) return;
     curId.current = cur.id;
     startedAt.current = Date.now() - offset.current;
-    const length = cur.kind === 'video' ? cur.seconds || 0 : Math.max(2, cur.seconds || 10);
-    tell.current?.(cur, { startedAt: startedAt.current, length, next: after });
+    const length = holds ? 0 : cur.kind === 'video' ? cur.seconds || 0 : Math.max(2, cur.seconds || 10);
+    tell.current?.(cur, { startedAt: startedAt.current, length, next: holds ? null : after });
     // Videos move on when they end, unless they have their own seconds
-    if (cur.kind !== 'video' || cur.seconds > 0) timer.current = setTimeout(next, Math.max(500, length * 1000 - offset.current));
+    if (!holds && (cur.kind !== 'video' || cur.seconds > 0)) timer.current = setTimeout(next, Math.max(500, length * 1000 - offset.current));
     // Get the next picture ready
-    if (after?.kind === 'image') new Image().src = after.url;
+    if (!holds && after?.kind === 'image') new Image().src = after.url;
     return () => clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cur?.id, cycle]);
+  }, [cur?.id, cycle, holds]);
+
+  // Seamless changes: the last item stays up underneath until the new one has loaded, then the new
+  // one fades in over it. An item that stays on is never reloaded.
+  const key = cur ? `${cur.id}:${cur.url}:${cycle}` : ''; // cycle only moves when an item starts over
+  const [shown, setShown] = useState({ key: '', item: null, prev: null, ready: false });
+  if (cur && shown.key !== key) setShown({ key, item: cur, prev: shown.item ? { key: shown.key, item: shown.item } : null, ready: false });
+  const ready = useCallback(() => setShown((x) => (x.key === key && !x.ready ? { ...x, ready: true } : x)), [key]);
+  useEffect(() => {
+    if (!shown.ready && shown.key) {
+      const t = setTimeout(ready, 4000); // never stuck behind something that didn't say it loaded
+      return () => clearTimeout(t);
+    }
+    if (shown.prev) {
+      const t = setTimeout(() => setShown((x) => (x.key === shown.key ? { ...x, prev: null } : x)), 800);
+      return () => clearTimeout(t);
+    }
+  }, [shown.key, shown.ready, shown.prev, ready]);
 
   if (!cur) return <div className="sp sp-empty">{empty}</div>;
-  const key = `${cur.id}:${cycle}`;
   const videoReady = (e) => {
     const v = e.currentTarget;
     if (offset.current > 0 && offset.current / 1000 < (v.duration || 0)) v.currentTime = offset.current / 1000;
-    if (!cur.seconds && v.duration) tell.current?.(cur, { startedAt: startedAt.current, length: Math.round(v.duration), next: after });
+    if (!cur.seconds && v.duration && !holds) tell.current?.(cur, { startedAt: startedAt.current, length: Math.round(v.duration), next: after });
+  };
+  const skip = () => !alone && setTimeout(next, 1500);
+  const layer = (item, k, top) => {
+    const cls = `sp-item ${top ? `sp-top ${shown.ready ? 'sp-on' : ''}` : 'sp-under'}`;
+    if (item.kind === 'image') return <img key={k} className={cls} src={item.url} alt={top ? item.name : ''} onLoad={top ? ready : undefined} onError={top ? skip : undefined} />;
+    if (item.kind === 'video')
+      return (
+        <video
+          key={k}
+          className={cls}
+          src={item.url}
+          autoPlay
+          muted={!top || !item.sound}
+          playsInline
+          loop={top && alone}
+          onLoadedMetadata={top ? videoReady : undefined}
+          onLoadedData={top ? ready : undefined}
+          onEnded={top && !alone ? next : undefined}
+          onError={top ? skip : undefined}
+        />
+      );
+    return <iframe key={k} className={`${cls} sp-web`} src={item.url} title={item.name} onLoad={top ? ready : undefined} sandbox="allow-scripts allow-same-origin allow-forms" referrerPolicy="no-referrer" />;
   };
   return (
     <div className={`sp sp-${fit}`}>
-      {cur.kind === 'image' && <img key={key} className="sp-item" src={cur.url} alt={cur.name} onError={() => setTimeout(next, 1500)} />}
-      {cur.kind === 'video' && (
-        <video key={key} className="sp-item" src={cur.url} autoPlay muted={!cur.sound} playsInline loop={list.length === 1} onLoadedMetadata={videoReady} onEnded={next} onError={() => setTimeout(next, 1500)} />
-      )}
-      {cur.kind === 'web' && <iframe key={key} className="sp-item sp-web" src={cur.url} title={cur.name} sandbox="allow-scripts allow-same-origin allow-forms" referrerPolicy="no-referrer" />}
+      {shown.prev && shown.prev.key !== shown.key && layer(shown.prev.item, shown.prev.key, false)}
+      {layer(cur, key, true)}
     </div>
   );
 }

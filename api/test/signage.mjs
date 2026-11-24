@@ -234,6 +234,11 @@ assert.equal(tv1.size, '1920×1080');
 assert.ok(Math.abs(now.serverNow - 4000 - tv1.startedAt) < 3000, 'when the item started, so the tab can count down and mirror it');
 assert.equal(st.players.find((p) => p.player === 'tv-lobby-2').current, false, 'an old playlist shows as not caught up');
 assert.equal(now.screens.find((x) => x.id === hall.id).online, false, 'other screens stay offline');
+// 0 seconds on a picture: it stays on (the player doesn't move on from it)
+const welcomeSecs = ok(await admin('GET', '/api/signage')).assets.find((a) => a.id === welcome.id).seconds;
+ok(await admin('PATCH', `/api/signage/assets/${welcome.id}`, { seconds: 0 }));
+assert.equal(ok(await anon('GET', `/api/screen/${hallToken}`)).items.find((i) => i.name === 'welcome').seconds, 0, '0 seconds reaches the screen as 0 (stays on), not the default');
+ok(await admin('PATCH', `/api/signage/assets/${welcome.id}`, { seconds: welcomeSecs }));
 step('live-link screens check in with what they’re showing, how far in, what’s next, and whether they have the latest playlist');
 
 // ---------- upload links ----------

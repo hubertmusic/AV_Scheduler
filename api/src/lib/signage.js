@@ -165,7 +165,8 @@ export async function playlistFor(screen, now = new Date()) {
 export function playerItems(list, screen, fileUrl) {
   const out = [];
   for (const a of list) {
-    const seconds = a.seconds > 0 ? a.seconds : screen.seconds || 10;
+    // 0 on a picture, page or web page: it stays on screen (the screen doesn't move on from it)
+    const seconds = a.seconds === 0 ? 0 : a.seconds > 0 ? a.seconds : screen.seconds || 10;
     if (a.kind === 'pdf') a.pages.forEach((p, i) => out.push({ id: `${a._id}:${i}`, kind: 'image', url: fileUrl(a, i), seconds, name: `${a.name} (page ${i + 1})` }));
     else if (a.kind === 'web') out.push({ id: String(a._id), kind: 'web', url: a.uri, seconds, name: a.name });
     else if (a.kind === 'video') out.push({ id: String(a._id), kind: 'video', url: fileUrl(a), seconds: a.seconds > 0 ? a.seconds : 0, sound: !!a.sound, name: a.name });
