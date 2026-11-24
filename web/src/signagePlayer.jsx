@@ -35,10 +35,18 @@ export function Player({ items, fit = 'contain', empty = null, onItem, follow })
   const curId = useRef(null);
   const tell = useRef(onItem);
   tell.current = onItem;
+  const listRef = useRef(list);
+  listRef.current = list;
+  const prevIds = useRef(null);
+  const upNext = useRef(null); // something just added: it plays next, so you see it straight away
 
   // The playlist changed: stay on the same item if it's still there
   useEffect(() => {
     if (!list.length) return;
+    const ids = list.map((x) => x.id);
+    const added = prevIds.current && ids.find((id) => !prevIds.current.includes(id));
+    if (added) upNext.current = added;
+    prevIds.current = ids;
     const i = list.findIndex((x) => x.id === curId.current);
     setAt(i >= 0 ? i : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -59,11 +67,16 @@ export function Player({ items, fit = 'contain', empty = null, onItem, follow })
 
   const next = useCallback(() => {
     offset.current = 0;
-    setAt((n) => (list.length ? (n + 1) % list.length : 0));
+    const l = listRef.current;
+    const jump = upNext.current ? l.findIndex((x) => x.id === upNext.current) : -1;
+    upNext.current = null;
+    if (jump >= 0) setAt(jump);
+    else setAt((n) => (l.length ? (n + 1) % l.length : 0));
     setCycle((c) => c + 1);
-  }, [list.length]);
+  }, []);
 
-  const after = list.length ? list[(at + 1) % list.length] : null;
+  const queued = upNext.current ? list.find((x) => x.id === upNext.current) : null;
+  const after = queued || (list.length ? list[(at + 1) % list.length] : null);
   useEffect(() => {
     clearTimeout(timer.current);
     if (!cur) return;
@@ -97,7 +110,7 @@ export function Player({ items, fit = 'contain', empty = null, onItem, follow })
   );
 }
 
-// /screen/<token>: full screen, checks for a new playlist every minute, keeps playing the last one
+// /screen/<token>: full screen, picks up changes from the Signage tab within about 10 seconds, keeps playing the last one
 // it had if the internet drops (and after a restart), and reloads itself overnight for app updates.
 // Each open copy of a screen link is its own player (two TVs on one link show as two)
 function playerId() {
@@ -118,6 +131,7 @@ export function ScreenPage({ token }) {
   const [data, setData] = useState(saved);
   const [error, setError] = useState('');
   const v = useRef(saved?.v);
+  const refresh = useRef(() => {});
   useEffect(() => {
     document.title = saved?.name ? `${saved.name} · Screen` : 'Screen';
     document.documentElement.classList.add('sp-page');
@@ -146,6 +160,10 @@ export function ScreenPage({ token }) {
         /* offline: keep showing what we have */
       }
       t = setTimeout(load, wait * 1000);
+    };
+    refresh.current = () => {
+      clearTimeout(t);
+      load();
     };
     load();
     // Reload between 3 and 4 in the morning, so the screen picks up Crew Call updates
@@ -178,7 +196,11 @@ export function ScreenPage({ token }) {
         w: window.screen?.width || window.innerWidth,
         h: window.screen?.height || window.innerHeight,
       }),
-    }).catch(() => {});
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      // Something changed in the Signage tab: get the new playlist now, not at the next minute's check
+      .then((r) => r?.v && r.v !== v.current && refresh.current())
+      .catch(() => {});
   }, [token]);
   useEffect(() => {
     report();
