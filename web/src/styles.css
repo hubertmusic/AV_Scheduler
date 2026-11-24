@@ -1039,3 +1039,14 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 .rs-order-time { font-family: var(--mono); font-size: 13px; min-width: 64px; }
 .rs-order-main { min-width: 0; flex: 1; }
 @media print { .oix-crew { border: 1px solid #999; } .oix-link { text-decoration: none; color: #000; } }
+
+/* The second row under a heading like Schedule or Worship planner */
+.subtabs { background: var(--sunk); border-bottom: 1px solid var(--line); padding: 8px 24px; display: flex; flex-wrap: wrap; gap: 6px; }
+.subtab { min-height: 36px; padding: 0 14px; border: 1px solid transparent; border-radius: 999px; background: none; color: var(--muted); font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.subtab:hover { color: var(--ink); background: var(--surface); }
+.subtab-on { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 700; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+@media (max-width: 640px) {
+  .subtabs { padding: 8px 16px; overflow-x: auto; flex-wrap: nowrap; }
+  .subtab { flex: 0 0 auto; }
+}
+@media print { .subtabs { display: none !important; } }
