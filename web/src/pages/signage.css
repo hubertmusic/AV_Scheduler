@@ -106,3 +106,10 @@
 .sg-stage { position: relative; }
 .sg-live-tag { position: absolute; top: 10px; left: 10px; padding: 2px 8px; border-radius: 4px; background: #d92d20; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
 @media (prefers-reduced-motion: reduce) { .sg-dot-on { box-shadow: none; } }
+.sg-ctrls { margin-left: auto; display: inline-flex; flex: none; gap: 14px; align-items: baseline; }
+.sg-ctrls .link-btn { min-height: 0; padding: 0; }
+.sg-turn-on { font-weight: 700; }
+@media (max-width: 640px) {
+  .sg-live-line { flex-wrap: wrap; }
+  .sg-ctrls { margin-left: 17px; width: 100%; }
+}

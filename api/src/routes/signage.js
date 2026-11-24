@@ -11,6 +11,7 @@ import { bad, forbidden, getSettings, HttpError, isId, notFound, str, todayIn, t
 import { filesOf, originalName, removeUploads, storedPath, unavailableReason, uploader } from '../lib/media.js';
 import { assetFile, copyIntoSignage, deleteAssetFiles, isLive, kindOf, managesSignage, nextOrder, NOT_SUPPORTED, onScreen, playerItems, playlistFor, playlistVersion, prepare, screenLink, screensList, toolsReady } from '../lib/signage.js';
 import { forgetInAnthias, syncScreen, syncSoon, testAnthias } from '../lib/anthias.js';
+import { listen, restartScreen, screensChanged } from '../lib/screenBus.js';
 import { seal } from '../lib/secrets.js';
 import { planFor, planRights } from './plans.js';
 import { isArchived, orgToday } from '../lib/archive.js';
@@ -19,6 +20,11 @@ import { logActivity } from '../lib/activity.js';
 
 export const signageRouter = Router();
 signageRouter.use((req, res, next) => (managesSignage(req.user) ? next() : next(forbidden('Signage is for people with the Signage privilege.'))));
+// Any change made here reaches the screens straight away
+signageRouter.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => res.statusCode < 400 && screensChanged());
+  next();
+});
 
 // ---------- views ----------
 const iso = (d) => (d ? new Date(d).toISOString() : null);
@@ -62,6 +68,7 @@ function screenView(s) {
     mode: s.mode,
     fit: s.fit,
     seconds: s.seconds,
+    off: !!s.off,
     anthias: { url: s.anthias?.url || '', auth: s.anthias?.auth || 'none', user: s.anthias?.user || '', hasSecret: !!s.anthias?.secret, insecure: s.anthias?.insecure !== false, lastSyncAt: iso(s.anthias?.lastSyncAt), lastError: s.anthias?.lastError || '', sent: s.anthias?.sent || 0 },
   };
 }
@@ -356,6 +363,7 @@ signageRouter.patch('/screens/:id', wrap(async (req, res) => {
     s.mode = b.mode;
   }
   if (b.fit !== undefined) s.fit = b.fit === 'cover' ? 'cover' : 'contain';
+  if (b.off !== undefined) s.off = !!b.off;
   if (b.seconds !== undefined) s.seconds = Math.max(3, Math.min(600, Math.round(Number(b.seconds) || 10)));
   if (b.anthias && typeof b.anthias === 'object') {
     const x = b.anthias;
@@ -378,6 +386,7 @@ signageRouter.patch('/screens/:id', wrap(async (req, res) => {
   }
   await s.save();
   if (s.mode === 'anthias') syncSoon([s._id], 1000);
+  if (b.off !== undefined) res.locals.activity = `Turned the ${s.name} screen ${s.off ? 'off' : 'back on'}`;
   res.json(await everything(req));
 }));
 
@@ -399,6 +408,18 @@ signageRouter.delete('/screens/:id', wrap(async (req, res) => {
 }));
 
 // A new live link (the old one stops working)
+// POST /api/signage/screens/:id/restart — the screen reloads its page now (like switching it off
+// and on in Anthias); one that's offline does when it's back
+signageRouter.post('/screens/:id/restart', wrap(async (req, res) => {
+  if (!isId(req.params.id)) throw notFound();
+  const s = await Screen.findById(req.params.id);
+  if (!s) throw notFound();
+  s.restartAt = new Date();
+  await s.save();
+  restartScreen(s._id);
+  res.locals.activity = `Restarted the ${s.name} screen`;
+  res.json(await everything(req));
+}));
 signageRouter.post('/screens/:id/new-link', wrap(async (req, res) => {
   if (!isId(req.params.id)) throw notFound();
   const s = await Screen.findById(req.params.id);
@@ -487,7 +508,26 @@ screenRouter.get('/:token', wrap(async (req, res) => {
   const items = await screenItems(s);
   const st = await getSettings();
   res.set('Cache-Control', 'no-store');
-  res.json({ name: s.name, church: st.orgName || '', fit: s.fit, items, v: playlistVersion(items, s), check: 60 });
+  // Turned off: the screen goes black (its playlist is kept for when it's back on)
+  res.json({ name: s.name, church: st.orgName || '', fit: s.fit, off: !!s.off, items: s.off ? [] : items, v: playlistVersion(items, s), check: 60, restartAt: s.restartAt ? s.restartAt.getTime() : 0 });
+}));
+// GET /api/screen/:token/live — stays open; says "change" whenever something changes in the
+// Signage tab, and "restart" when Restart is pressed for this screen.
+screenRouter.get('/:token/live', wrap(async (req, res) => {
+  const s = await screenByToken(req.params.token);
+  const id = String(s._id);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.write('retry: 3000\n\n');
+  const send = (m) => {
+    if (m.screen && m.screen !== id) return;
+    res.write(`data: ${JSON.stringify({ t: m.t })}\n\n`);
+  };
+  const stop = listen(send);
+  const beat = setInterval(() => res.write(': still here\n\n'), 20 * 1000); // keeps proxies from closing it
+  req.on('close', () => {
+    clearInterval(beat);
+    stop();
+  });
 }));
 // What each live-link player last said it was showing: screen id → player id → state. In memory;
 // it's only about the last few seconds. lastSeenAt goes to the database at most once a minute.
@@ -525,7 +565,7 @@ screenRouter.post('/:token/now', wrap(async (req, res) => {
   if (!s.lastSeenAt || now - new Date(s.lastSeenAt).getTime() > 60 * 1000) await Screen.updateOne({ _id: s._id }, { lastSeenAt: new Date(now) });
   // The playlist's version, so a screen with an older one fetches the new one straight away
   res.set('Cache-Control', 'no-store');
-  res.json({ v: latest });
+  res.json({ v: latest, restartAt: s.restartAt ? s.restartAt.getTime() : 0 });
 }));
 const screenItems = async (s) => playerItems(await playlistFor(s), s, (a, page = null) => `/api/screen/${s.token}/file/${a._id}${page !== null ? `/${page}` : ''}`);
 

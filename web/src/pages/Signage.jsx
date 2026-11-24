@@ -3,7 +3,7 @@
 // go on every screen or only some. Things come from uploads, web pages, a service plan's media, or
 // upload links people are sent (those wait under Waiting). Screens get their playlist through a live
 // link added to Anthias once, or Crew Call sends each item into Anthias itself.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, fmtDay, fmtSize, uploadFiles } from '../lib.js';
 import { DropZone, Empty, Modal, useApp } from '../ui.jsx';
 import { Qr } from '../qr.jsx';
@@ -230,7 +230,7 @@ function Playlist({ d, setD, load, act, now, screen, setScreen, onAdd, onEdit, o
           <strong>{waiting}</strong> sent with an upload link {waiting === 1 ? 'is' : 'are'} waiting for a look <span aria-hidden="true">›</span>
         </button>
       )}
-      {d.screens.length > 0 && <LiveStrip d={d} now={now} onMirror={onPreview} />}
+      {d.screens.length > 0 && <LiveStrip d={d} now={now} onMirror={onPreview} act={act} />}
       {!d.screens.length && <p className="sg-tip">No screens yet. Add your screens under <strong>Screens</strong> to get each one’s link for Anthias.</p>}
 
       <section className="card sg-table" aria-label="Active">
@@ -369,14 +369,53 @@ function Row({ a, drag, onToggle, onEdit, act, screenName, onNow = [] }) {
 }
 
 // ---------- live: what each screen shows this second ----------
-function ScreenStatus({ s, st, onMirror, long = false }) {
+// Turn a live-link screen off (it goes black) or on, and restart it (reload its page) — the same
+// as switching it off and on in Anthias, without going to Anthias
+function ScreenControls({ s, act, watch }) {
+  const busy = useRef(false);
+  const go = async (fn, msg) => {
+    if (busy.current) return;
+    busy.current = true;
+    await act(fn, msg);
+    busy.current = false;
+  };
+  const turn = () => go(() => api(`/signage/screens/${s.id}`, { method: 'PATCH', body: { off: !s.off } }), s.off ? `${s.name} is back on` : `${s.name} is off`);
+  const restart = () => go(() => api(`/signage/screens/${s.id}/restart`, { method: 'POST' }), `Restarting ${s.name}…`);
+  return (
+    <span className="sg-ctrls">
+      {watch}
+      <button type="button" className="link-btn small" onClick={restart} title="Reload the screen, like switching it off and on in Anthias">
+        Restart
+      </button>
+      <button type="button" className={`link-btn small ${s.off ? 'sg-turn-on' : ''}`} onClick={turn}>
+        {s.off ? 'Turn on' : 'Turn off'}
+      </button>
+    </span>
+  );
+}
+function ScreenStatus({ s, st, onMirror, act, long = false }) {
+  const name = !long && <strong>{s.name}: </strong>;
   if (s.mode === 'anthias')
     return (
       <span className="sg-live-line">
         <span className="sg-dot" aria-hidden="true" />
         <span>
-          {!long && <strong>{s.name}: </strong>}{long ? 'Played' : 'played'} by Anthias itself{s.anthias.lastSyncAt ? `; last sent ${when(s.anthias.lastSyncAt)}` : ''}
+          {name}
+          {long ? 'Played' : 'played'} by Anthias itself{s.anthias.lastSyncAt ? `; last sent ${when(s.anthias.lastSyncAt)}` : ''}
         </span>
+      </span>
+    );
+  const p = st?.online ? st.p : null;
+  const ctrls = act && <ScreenControls s={s} act={act} watch={onMirror && p?.item && !s.off && <button type="button" className="link-btn small" onClick={() => onMirror(s.id)}>Watch</button>} />;
+  if (s.off)
+    return (
+      <span className="sg-live-line">
+        <span className="sg-dot" aria-hidden="true" />
+        <span>
+          {name}
+          {long ? 'Turned off' : 'turned off'}: the screen is black{!st?.online && st?.lastSeenAt ? ` · last seen ${when(st.lastSeenAt)}` : ''}
+        </span>
+        {ctrls}
       </span>
     );
   if (!st?.online)
@@ -384,16 +423,18 @@ function ScreenStatus({ s, st, onMirror, long = false }) {
       <span className="sg-live-line">
         <span className={`sg-dot ${st?.lastSeenAt ? 'sg-dot-off' : ''}`} aria-hidden="true" />
         <span>
-          {!long && <strong>{s.name}: </strong>}{st?.lastSeenAt ? `${long ? 'Offline' : 'offline'} · last seen ${when(st.lastSeenAt)}` : long ? 'Not connected yet. Once its link is playing in Anthias, it shows here.' : 'not connected yet'}
+          {name}
+          {st?.lastSeenAt ? `${long ? 'Offline' : 'offline'} · last seen ${when(st.lastSeenAt)}` : long ? 'Not connected yet. Once its link is playing in Anthias, it shows here.' : 'not connected yet'}
         </span>
+        {ctrls}
       </span>
     );
-  const p = st.p;
   return (
     <span className="sg-live-line">
       <span className="sg-dot sg-dot-on" aria-hidden="true" />
       <span>
-        {!long && <strong>{s.name}: </strong>}{p?.item ? (
+        {name}
+        {p?.item ? (
           <>
             {long && 'Showing '}
             <q>{p.item.name}</q>
@@ -405,19 +446,20 @@ function ScreenStatus({ s, st, onMirror, long = false }) {
         {p?.current === false && <span className="sg-why"> · picking up your changes…</span>}
         {long && p?.size && <span className="muted"> · {p.size}</span>}
       </span>
-      {onMirror && p?.item && (
-        <button type="button" className="link-btn small sg-watch" onClick={() => onMirror(s.id)}>
-          Watch
-        </button>
-      )}
+      {ctrls ||
+        (onMirror && p?.item && (
+          <button type="button" className="link-btn small sg-watch" onClick={() => onMirror(s.id)}>
+            Watch
+          </button>
+        ))}
     </span>
   );
 }
-function LiveStrip({ d, now, onMirror }) {
+function LiveStrip({ d, now, onMirror, act }) {
   return (
     <section className="sg-live" aria-label="On the screens now" aria-live="off">
       {d.screens.map((s) => (
-        <ScreenStatus key={s.id} s={s} st={playing(now, s.id)} onMirror={onMirror} />
+        <ScreenStatus key={s.id} s={s} st={playing(now, s.id)} onMirror={onMirror} act={act} />
       ))}
     </section>
   );
@@ -819,7 +861,7 @@ function ScreenCard({ s, act, st, onMirror }) {
         </button>
       </div>
       <div className="sg-live sg-live-one">
-        <ScreenStatus s={s} st={st} onMirror={onMirror} long />
+        <ScreenStatus s={s} st={st} onMirror={onMirror} act={act} long />
       </div>
       <div className="row-wrap fields-3">
         <label className="field">

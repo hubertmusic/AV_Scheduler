@@ -983,6 +983,8 @@ const screenSchema = new Schema(
     },
     order: { type: Number, default: 0 },
     lastSeenAt: Date, // the live link last checked in (kept for when Crew Call restarts)
+    off: { type: Boolean, default: false }, // turned off in the Signage tab: the screen shows black
+    restartAt: Date, // Restart pressed: players that started before this reload
   },
   { timestamps: true }
 );
