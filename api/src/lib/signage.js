@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { Screen, SignageAsset } from '../models.js';
 import { newStoredName } from './media.js';
+import { screensChanged } from './screenBus.js';
 
 const run = promisify(execFile);
 
@@ -85,6 +86,7 @@ async function pump() {
     } catch (e) {
       await SignageAsset.updateOne({ _id: id }, { processing: 'failed', processError: String(e.message || e).slice(0, 300) }).catch(() => {});
     }
+    screensChanged(); // ready (or not): screens showing it pick it up now
   }
   busy = false;
   onPrepared?.();
@@ -177,7 +179,7 @@ export function playerItems(list, screen, fileUrl) {
   return out;
 }
 // Changes when the playlist would change, so players only reload when they need to
-export const playlistVersion = (items, screen) => crypto.createHash('sha1').update(JSON.stringify([screen.fit, screen.seconds, items.map((i) => [i.id, i.url, i.seconds, i.sound])])).digest('hex').slice(0, 16);
+export const playlistVersion = (items, screen) => crypto.createHash('sha1').update(JSON.stringify([screen.fit, screen.seconds, !!screen.off, items.map((i) => [i.id, i.url, i.seconds, i.sound])])).digest('hex').slice(0, 16);
 
 export async function nextOrder() {
   const last = await SignageAsset.findOne({}, { order: 1 }).sort({ order: -1 }).lean();

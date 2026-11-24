@@ -264,6 +264,75 @@ assert.equal(ok(await anon('GET', `/api/screen/${hallToken}`)).items.find((i) =>
 ok(await admin('PATCH', `/api/signage/assets/${welcome.id}`, { seconds: welcomeSecs }));
 step('live-link screens check in with what they’re showing, how far in, what’s next, and whether they have the latest playlist');
 
+// ---------- changes reach the screens straight away; Restart and Off ----------
+function liveStream(tok) {
+  const ctl = new AbortController();
+  const got = [];
+  let wake = null;
+  const ready = fetch(`${BASE}/api/screen/${tok}/live`, { signal: ctl.signal }).then(async (r) => {
+    assert.equal(r.headers.get('content-type'), 'text/event-stream');
+    const dec = new TextDecoder();
+    let buf = '';
+    (async () => {
+      try {
+        for await (const chunk of r.body) {
+          buf += dec.decode(chunk, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const line = buf.slice(0, i).split('\n').find((l) => l.startsWith('data: '));
+            buf = buf.slice(i + 2);
+            if (line) got.push(JSON.parse(line.slice(6)).t), wake?.();
+          }
+        }
+      } catch {
+        /* closed */
+      }
+    })();
+  });
+  const next = (ms = 2000) =>
+    new Promise((res) => {
+      if (got.length) return res(got.shift());
+      const t = setTimeout(() => res(null), ms);
+      wake = () => (clearTimeout(t), (wake = null), res(got.shift()));
+    });
+  return { ready, next, close: () => ctl.abort() };
+}
+const lobbyLive = liveStream(lobbyToken);
+const hallLive = liveStream(hallToken);
+await Promise.all([lobbyLive.ready, hallLive.ready]);
+await new Promise((r) => setTimeout(r, 200));
+let t0 = Date.now();
+ok(await admin('PATCH', `/api/signage/assets/${welcome.id}`, { name: 'welcome' }));
+assert.equal(await lobbyLive.next(), 'change', 'a change in the Signage tab reaches the screen');
+assert.ok(Date.now() - t0 < 1500, `…straight away (${Date.now() - t0} ms)`);
+assert.equal(await hallLive.next(), 'change');
+t0 = Date.now();
+ok(await admin('POST', `/api/signage/screens/${lobby.id}/restart`));
+assert.equal(await lobbyLive.next(), 'restart', 'Restart reloads that screen');
+assert.ok(Date.now() - t0 < 1500);
+let other;
+while ((other = await hallLive.next(400)) === 'change');
+assert.equal(other, null, 'and only that screen');
+assert.ok(ok(await anon('GET', `/api/screen/${lobbyToken}`)).restartAt > 0, 'a screen that was away sees Restart when it checks in');
+assert.ok(ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-1', v: 'x' })).restartAt > 0);
+ok(await ben.c('POST', `/api/signage/screens/${lobby.id}/restart`), 403);
+// Off: the screen goes black but keeps its playlist
+const offV = ok(await anon('GET', `/api/screen/${lobbyToken}`)).v;
+assert.equal(ok(await admin('PATCH', `/api/signage/screens/${lobby.id}`, { off: true })).screens.find((x) => x.id === lobby.id).off, true);
+assert.equal(await lobbyLive.next(), 'change');
+let offPlay = ok(await anon('GET', `/api/screen/${lobbyToken}`));
+assert.equal(offPlay.off, true);
+assert.deepEqual(offPlay.items, [], 'turned off: nothing on screen');
+assert.notEqual(offPlay.v, offV, 'and screens see it as a change');
+ok(await admin('PATCH', `/api/signage/screens/${lobby.id}`, { off: false }));
+offPlay = ok(await anon('GET', `/api/screen/${lobbyToken}`));
+assert.equal(offPlay.off, false);
+assert.ok(offPlay.items.length > 0, 'back on: its playlist is back');
+assert.equal(offPlay.v, offV);
+lobbyLive.close();
+hallLive.close();
+step('changes reach the screens the moment they’re made; Restart reloads one screen (even one that was away); Off makes a screen black and keeps its playlist');
+
 // ---------- upload links ----------
 s = ok(await admin('POST', '/api/signage/links', { label: 'Youth group', lasts: 'off' }), 201);
 s = ok(await admin('POST', '/api/signage/links', { label: 'VBS week', lasts: '4h' }), 201);

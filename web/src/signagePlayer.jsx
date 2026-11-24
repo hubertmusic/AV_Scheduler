@@ -152,6 +152,20 @@ export function Player({ items, fit = 'contain', empty = null, onItem, follow })
 // /screen/<token>: full screen, picks up changes from the Signage tab within about 10 seconds, keeps playing the last one
 // it had if the internet drops (and after a restart), and reloads itself overnight for app updates.
 // Each open copy of a screen link is its own player (two TVs on one link show as two)
+const loadedAt = Date.now();
+// Is a newer Crew Call running than the one this page was loaded with? (its main script changes)
+async function newerApp() {
+  try {
+    const mine = document.querySelector('script[type=module][src*="/assets/"]')?.getAttribute('src');
+    if (!mine) return false;
+    const html = await (await fetch('/', { cache: 'no-store' })).text();
+    const theirs = html.match(/<script[^>]+type="module"[^>]+src="([^"]*\/assets\/[^"]+)"/)?.[1];
+    return !!theirs && theirs !== mine;
+  } catch {
+    return false;
+  }
+}
+
 function playerId() {
   try {
     let id = sessionStorage.getItem('cc-player');
@@ -188,6 +202,7 @@ export function ScreenPage({ token }) {
         } else {
           setError('');
           wait = d.check || 60;
+          if (d.restartAt > loadedAt) window.location.reload(); // Restart was pressed while this was away
           if (d.v !== v.current) {
             v.current = d.v;
             setData(d);
@@ -205,14 +220,54 @@ export function ScreenPage({ token }) {
       load();
     };
     load();
-    // Reload between 3 and 4 in the morning, so the screen picks up Crew Call updates
+
+    // Changes come straight from Crew Call over a connection the screen keeps open
+    let live = null;
+    let wasDown = false;
+    let retry;
+    const connect = () => {
+      if (typeof EventSource === 'undefined') return; // very old browser: the 10-second check-ins do it
+      live = new EventSource(`/api/screen/${token}/live`);
+      live.onmessage = (e) => {
+        let m = null;
+        try {
+          m = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (m.t === 'restart') window.location.reload();
+        else if (m.t === 'change') refresh.current();
+      };
+      live.onopen = () => {
+        if (!wasDown) return;
+        // Back after a drop (or Crew Call restarted after an update): catch up, and reload if
+        // Crew Call itself is newer than this page
+        wasDown = false;
+        refresh.current();
+        newerApp().then((yes) => yes && window.location.reload());
+      };
+      live.onerror = () => {
+        wasDown = true;
+        // The browser retries a dropped connection itself, but gives up if it gets an error page
+        // (Crew Call restarting after an update): start again in a few seconds
+        if (live.readyState === 2) {
+          live.close();
+          retry = setTimeout(connect, 4000);
+        }
+      };
+    };
+    connect();
+    // Reload between 3 and 4 in the morning anyway, and whenever Crew Call has been updated
     const nightly = setInterval(() => {
       const h = new Date().getHours();
       if (h === 3 && performance.now() > 2 * 3600e3) window.location.reload();
+      newerApp().then((yes) => yes && window.location.reload());
     }, 15 * 60e3);
     return () => {
       clearTimeout(t);
       clearInterval(nightly);
+      clearTimeout(retry);
+      live?.close();
     };
   }, [token]);
 
@@ -238,7 +293,10 @@ export function ScreenPage({ token }) {
     })
       .then((r) => (r.ok ? r.json() : null))
       // Something changed in the Signage tab: get the new playlist now, not at the next minute's check
-      .then((r) => r?.v && r.v !== v.current && refresh.current())
+      .then((r) => {
+        if (r?.restartAt > loadedAt) window.location.reload();
+        else if (r?.v && r.v !== v.current) refresh.current();
+      })
       .catch(() => {});
   }, [token]);
   useEffect(() => {
@@ -258,7 +316,7 @@ export function ScreenPage({ token }) {
   if (!data) return <div className="sp-screen" />;
   return (
     <div className="sp-screen">
-      <Player items={data.items} fit={data.fit} onItem={onItem} empty={<div className="sp-msg">{data.church || 'Welcome'}</div>} />
+      <Player items={data.items} fit={data.fit} onItem={onItem} empty={data.off ? null : <div className="sp-msg">{data.church || 'Welcome'}</div>} />
     </div>
   );
 }
