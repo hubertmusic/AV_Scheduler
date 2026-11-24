@@ -558,10 +558,77 @@ const gearSchema = new Schema(
     outAt: { type: Date, default: null },
     attention: { type: String, default: '' }, // what's wrong with it, '' = fine
     batteryAt: { type: Date, default: null },
+    // Inventory (Gear → Reports)
+    brand: { type: String, default: '' },
+    model: { type: String, default: '' },
+    serial: { type: String, default: '' },
+    assetTag: { type: String, default: '' },
+    quantity: { type: Number, default: 1, min: 0 },
+    location: { type: String, default: '' },
+    purchasedOn: { type: String, default: '' }, // YYYY-MM-DD
+    cost: { type: Number, default: null }, // what one cost (or is worth), in dollars
+    condition: { type: String, enum: ['', 'new', 'good', 'fair', 'poor', 'broken'], default: '' },
+    missing: { type: Boolean, default: false },
+    auditedAt: { type: Date, default: null }, // last found in an audit
   },
   { timestamps: true }
 );
 export const Gear = model('Gear', gearSchema);
+
+// Equipment the team would like to get (Gear → Reports → Requests)
+const gearRequestSchema = new Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    details: { type: String, default: '' }, // why it's needed
+    category: { type: String, default: '' },
+    quantity: { type: Number, default: 1, min: 1 },
+    unitCost: { type: Number, default: null }, // estimate for one, in dollars
+    links: [{ _id: false, label: String, url: String }], // where it was priced
+    neededBy: { type: String, default: '' }, // YYYY-MM-DD
+    status: { type: String, enum: ['requested', 'approved', 'ordered', 'received', 'declined'], default: 'requested' },
+    note: { type: String, default: '' }, // from whoever decided
+    requestedBy: ref('User'),
+    decidedBy: ref('User'),
+    decidedAt: Date,
+  },
+  { timestamps: true }
+);
+export const GearRequest = model('GearRequest', gearRequestSchema);
+
+// Walking through the inventory to see what's there (Gear → Reports → Audit)
+const gearAuditSchema = new Schema(
+  {
+    startedBy: ref('User'),
+    finishedAt: { type: Date, default: null },
+    finishedBy: ref('User'),
+    results: [
+      {
+        _id: false,
+        gear: ref('Gear'),
+        name: String, // as it was called then
+        status: { type: String, enum: ['found', 'missing', 'damaged'] },
+        note: { type: String, default: '' },
+        by: ref('User'),
+        at: Date,
+      },
+    ],
+  },
+  { timestamps: true }
+);
+export const GearAudit = model('GearAudit', gearAuditSchema);
+
+// Stores to price things at (a search address with {q}) and other useful links
+const gearLinkSchema = new Schema(
+  {
+    label: { type: String, required: true, trim: true },
+    url: { type: String, required: true },
+    note: { type: String, default: '' },
+    store: { type: Boolean, default: false }, // url has {q}: search it for an item
+    order: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+export const GearLink = model('GearLink', gearLinkSchema);
 
 const gearLogSchema = new Schema(
   {
@@ -594,8 +661,9 @@ const issueSchema = new Schema(
     details: { type: String, default: '' },
     event: ref('Event'),
     gear: ref('Gear'),
+    kind: { type: String, enum: ['problem', 'missing', 'other'], default: 'problem' },
     reportedBy: ref('User'),
-    status: { type: String, enum: ['open', 'fixed'], default: 'open' },
+    status: { type: String, enum: ['open', 'fixed'], default: 'open' }, // fixed = found, for something missing
     fixedBy: ref('User'),
     fixedAt: Date,
     fixNote: { type: String, default: '' },

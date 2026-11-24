@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { Router } from 'express';
 import { IANAZone } from 'luxon';
-import { Assignment, Blackout, Committee, Event, EVENT_KINDS, Group, OfficeEvent, Position, Request, Resource, Team, Unavailable, User, SignageAsset } from '../models.js';
+import { Assignment, Blackout, Committee, Event, EVENT_KINDS, Group, Issue, OfficeEvent, Position, Request, Resource, Team, Unavailable, User, SignageAsset } from '../models.js';
 import { managesSignage } from '../lib/signage.js';
 import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
 import { addDays, bad, can, conflict, DATE_RE, forbidden, getSettings, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
@@ -17,7 +17,7 @@ import { calendarClient, dayName, evName, logActivity, posName } from '../lib/ac
 import { isOfficeTeam, officePerms, onServiceTeam, rosterFor, sees as seesOffice, seesRoster } from '../lib/office.js';
 import { teamsShownTo } from '../lib/teams.js';
 import { vaultFor } from './vault.js';
-import { forgetPositions, isAvTeam, positionsList, positionTeams, requireTeamHead, teamsList, teamsOf, teamView } from '../lib/teams.js';
+import { forgetPositions, isAvTeam, isTeamLeader, positionsList, positionTeams, requireTeamHead, teamsList, teamsOf, teamView } from '../lib/teams.js';
 
 const settingsView = (s) => ({
   orgName: s.orgName,
@@ -89,6 +89,8 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     vault: req.previewing ? null : await vaultFor(req.user, team),
     // The church's screens: whether they manage them, and how many uploads wait for a look
     signage: managesSignage(req.user) ? { waiting: await SignageAsset.countDocuments({ status: 'pending' }) } : null,
+    // Gear → Reports: how many problems and missing items are open, for AV's team leaders
+    gearReports: isAvTeam(req.team) && (req.can.plans || isTeamLeader(req)) ? { open: await Issue.countDocuments({ status: 'open' }) } : null,
     office: officeSetup ? { rooms: officeSetup.rooms || [], remindMinutes: officeSetup.remindMinutes ?? 60, remindDays: officeSetup.remindDays ?? 1 } : null,
   });
 }));

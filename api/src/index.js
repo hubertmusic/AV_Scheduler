@@ -20,6 +20,7 @@ import { boardsRouter } from './routes/boards.js';
 import { standingRouter } from './routes/standing.js';
 import { templatesRouter } from './routes/templates.js';
 import { gearRouter } from './routes/gear.js';
+import { reportsRouter } from './routes/reports.js';
 import { checklistsRouter, debriefRouter, issuesRouter, signoffsRouter } from './routes/extras.js';
 import { plannerRouter } from './routes/planner.js';
 import { officeRouter } from './routes/office.js';
@@ -92,6 +93,7 @@ app.use('/api/boards', boardsRouter);
 app.use('/api/standing-links', standingRouter);
 app.use('/api/order-templates', templatesRouter);
 app.use('/api/gear', requireAvTeam, gearRouter); // AV's side
+app.use('/api/reports', requireAvTeam, reportsRouter); // Gear → Reports
 app.use('/api/checklists', checklistsRouter);
 app.use('/api/issues', issuesRouter);
 app.use('/api/debrief', debriefRouter);

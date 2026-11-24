@@ -35,6 +35,7 @@ import { StagePage } from './pages/Live.jsx';
 import { ScreenPage } from './signagePlayer.jsx';
 import SendToScreens from './pages/SendToScreens.jsx';
 const Signage = lazy(() => import('./pages/Signage.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
 
 // Signs out after `minutes` without a click, tap or key press, and tells the server
 // someone's still here while they work on a page without saving.
@@ -227,6 +228,7 @@ const TABS = [
   { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader', side: 'service' },
   { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message, av: true, side: 'service' },
   { id: 'gear', label: 'Gear', show: () => true, av: true, side: 'service' },
+  { id: 'reports', label: 'Reports', show: () => true, av: true, side: 'service' }, // problems and missing gear; inventory, audits and buying for leaders
   { id: 'office-schedule', label: 'Schedule', show: () => true, side: 'office' },
   { id: 'office-overview', label: 'Agenda overview', show: () => true, side: 'office' },
   { id: 'office-mine', label: 'My calendar', show: () => true, side: 'office' },
@@ -310,6 +312,8 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   // The team's look (Team setup → Look); a draft shows while a leader is trying one out
   const [themeDraft, setThemeDraft] = useState(null);
   const [signageWaiting, setSignageWaiting] = useState(boot.signage?.waiting || 0);
+  const [gearOpen, setGearOpen] = useState(boot.gearReports?.open || 0);
+  useEffect(() => setGearOpen(boot.gearReports?.open || 0), [boot.gearReports?.open]);
   useEffect(() => setSignageWaiting(boot.signage?.waiting || 0), [boot.signage?.waiting]);
   const theme = themeDraft || team.theme || { preset: { av: 'console', music: 'sanctuary', office: 'boardroom' }[team.kind] || 'classic' };
   const themeKey = JSON.stringify(theme);
@@ -340,6 +344,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       'office-plan': { n: pending, title: 'Event requests waiting' },
       plans: { n: pendingPlans, title: 'Guest uploads waiting for approval' },
       signage: { n: signageWaiting, title: 'Sent for the screens, waiting for a look' },
+      reports: { n: boot.gearReports ? gearOpen : 0, title: 'Problems and missing gear to look at' },
     })[id] || { n: 0 };
 
   const setTab = (id) => {
@@ -458,6 +463,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       previewTheme: setThemeDraft,
       signage: boot.signage,
       setSignageWaiting,
+      setGearOpen,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot, toast, resFilter, refreshPending, weekend, officeMeeting]);
@@ -571,6 +577,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'requests' && <Requests />}
         {tab === 'plans' && <Plans />}
         {tab === 'gear' && <Gear />}
+        {tab === 'reports' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Reports />
+          </Suspense>
+        )}
         {tab === 'planning' && (
           <Suspense fallback={<div className="loading-inline">Loading…</div>}>
             <Planning />

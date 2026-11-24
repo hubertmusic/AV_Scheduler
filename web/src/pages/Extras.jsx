@@ -8,7 +8,7 @@ export const FEATURE_INFO = [
   ['liveShow', 'Live run-of-show', 'A booth view that follows the order of service during the service (Now, Next, ahead or behind), and a stage clock link for a screen the speaker can see.'],
   ['checklists', 'Pre-service checklists', 'A checklist per position (line check, batteries, test stream…). Crew tick it off in My shifts; leaders see who’s ready.'],
   ['inputList', 'Input list', 'A channel list for each service (who’s on which mic or DI), printable for FOH and the stage, and shown on the rundown.'],
-  ['problems', 'Problem reports', 'Anyone can report a problem (“Mic 3 crackling”). It goes on a fix list in the Gear tab until a leader marks it fixed.'],
+  ['problems', 'Problem reports', 'Anyone can report a problem (“Mic 3 crackling”). It goes to Gear → Reports until a leader marks it fixed.'],
   ['debrief', 'After-service check-in', 'People who served get three quick questions in My shifts. Leaders read the answers on the plan and can send them to a flow chart.'],
   ['signoffs', 'Training sign-offs', 'On the day of a service, a Lead who has a learner shadowing them can sign them off, moving that position from Learning to Capable.'],
 ];

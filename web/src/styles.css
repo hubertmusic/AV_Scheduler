@@ -1050,3 +1050,4 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
   .subtab { flex: 0 0 auto; }
 }
 @media print { .subtabs { display: none !important; } }
+.rp-missing-note { color: #5b2bb5; font-weight: 600; }
