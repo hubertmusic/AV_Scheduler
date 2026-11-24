@@ -72,7 +72,7 @@ say "Saved a copy of .env"
 # ---- uploaded files ----
 if [ "$UPLOADS" = daily ] || { [ "$UPLOADS" = weekly ] && [ "$(date +%u)" = 1 ]; }; then
   say "Backing up uploaded files to $FILES (this can take a while)"
-  "${COMPOSE[@]}" exec -T api tar czf - -C /data/uploads . >"$FILES.part" ||
+  docker run --rm -v crew-call_uploads:/data:ro alpine tar czf - -C /data . >"$FILES.part" ||
     { rm -f "$FILES.part"; fail "Couldn't read the uploaded files."; }
   mv "$FILES.part" "$FILES"
 fi
