@@ -1,6 +1,7 @@
-// Tiles people can rearrange: drag a tile by its handle (mouse, finger or pen), or focus the handle
-// and use the arrow keys. Each person's order is saved to their account, so it follows them to any
-// device. In "View as" the order can be tried but isn't saved.
+// Things people can rearrange: drag by the handle (mouse, finger or pen), or focus the handle and
+// use the arrow keys. Tiles saves each person's order to their account (it follows them to any
+// device; in "View as" it can be tried but isn't saved). Sortable is the dragging on its own, for
+// lists whose order is kept elsewhere (the signage playlist).
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, previewing } from './lib.js';
 import { useApp } from './ui.jsx';
@@ -24,20 +25,147 @@ function arrange(saved, ids) {
 const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-// items: [{ id, title, node }] in their usual order. Put <TileHandle /> inside each node.
-export function Tiles({ page, items, className = '' }) {
-  const app = useApp();
-  const ids = items.map((x) => x.id);
-  const idsKey = ids.join(',');
-  const savedOf = () => app.me.layout?.[page] || [];
-  const [order, setOrder] = useState(() => arrange(savedOf(), ids));
+// The dragging itself, for any list or grid whose order the parent keeps.
+// order: ids in order; onChange(next): show a new order now; onDone(next, id): a move finished
+// (save it). renderItem(id) draws one item; put <TileHandle /> inside it.
+export function Sortable({ order, onChange, onDone, renderItem, titleOf = (id) => id, className = '', itemClass = 'tile', helpId = 'tiles-help' }) {
   const [drag, setDrag] = useState(null);
   const [said, setSaid] = useState('');
   const nodes = useRef(new Map());
   const handles = useRef(new Map());
-  const before = useRef(null); // tile positions just before a move, to slide them into place
+  const before = useRef(null); // positions just before a move, to slide things into place
   const focusAfter = useRef(null);
   const lastSwap = useRef(null);
+  const orderRef = useRef(order);
+  orderRef.current = order;
+
+  const snap = () => {
+    before.current = new Map([...nodes.current].map(([id, el]) => [id, el.getBoundingClientRect()]));
+  };
+  const moveTo = (id, to) => {
+    const o = orderRef.current;
+    const from = o.indexOf(id);
+    const t = Math.max(0, Math.min(o.length - 1, to));
+    if (from < 0 || from === t) return o;
+    snap();
+    const n = [...o];
+    n.splice(from, 1);
+    n.splice(t, 0, id);
+    orderRef.current = n;
+    onChange(n);
+    return n;
+  };
+
+  // Slide items from where they were to where they are now
+  useLayoutEffect(() => {
+    const was = before.current;
+    before.current = null;
+    if (focusAfter.current) {
+      handles.current.get(focusAfter.current)?.focus({ preventScroll: false });
+      focusAfter.current = null;
+    }
+    if (!was || calm()) return;
+    for (const [id, el] of nodes.current) {
+      const a = was.get(id);
+      if (!a) continue;
+      const b = el.getBoundingClientRect();
+      const dx = a.left - b.left;
+      const dy = a.top - b.top;
+      if (!dx && !dy) continue;
+      el.style.transition = 'none';
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      el.getBoundingClientRect(); // apply before animating back
+      el.style.transition = 'transform 180ms ease';
+      el.style.transform = '';
+    }
+  }, [order]);
+
+  const handleProps = (id) => ({
+    ref: (el) => (el ? handles.current.set(id, el) : handles.current.delete(id)),
+    'aria-label': `Move ${titleOf(id)}`,
+    'aria-describedby': helpId,
+    'aria-pressed': drag === id || undefined,
+    title: 'Drag to move, or use the arrow keys',
+    onPointerDown: (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      startDrag(id);
+    },
+    onKeyDown: (e) => {
+      const o = orderRef.current;
+      const i = o.indexOf(id);
+      const to = { ArrowUp: i - 1, ArrowLeft: i - 1, ArrowDown: i + 1, ArrowRight: i + 1, Home: 0, End: o.length - 1 }[e.key];
+      if (to === undefined) return;
+      e.preventDefault();
+      if (to < 0 || to >= o.length || to === i) return;
+      focusAfter.current = id;
+      const next = moveTo(id, to);
+      setSaid(`${titleOf(id)} moved to place ${to + 1} of ${o.length}.`);
+      onDone?.(next, id);
+    },
+  });
+  // While dragging, follow the pointer on the whole window: the item itself moves around the page
+  const startDrag = (id) => {
+    const start = orderRef.current;
+    lastSwap.current = null;
+    setDrag(id);
+    document.body.classList.add('tiles-dragging');
+    const onMove = (e) => {
+      const edge = 70; // scroll the page when dragging near the top or bottom
+      if (e.clientY < edge) window.scrollBy(0, -14);
+      else if (e.clientY > window.innerHeight - edge) window.scrollBy(0, 14);
+      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-tile]')?.dataset.tile;
+      if (!target || !nodes.current.has(target)) return;
+      if (target === id) {
+        lastSwap.current = null;
+        return;
+      }
+      if (target === lastSwap.current) return; // don't flip back and forth over an item of another size
+      lastSwap.current = target;
+      moveTo(id, orderRef.current.indexOf(target));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setDrag(null);
+      document.body.classList.remove('tiles-dragging');
+      requestAnimationFrame(() => {
+        const o = orderRef.current;
+        if (same(o, start)) return;
+        setSaid(`${titleOf(id)} is now in place ${o.indexOf(id) + 1} of ${o.length}.`);
+        onDone?.(o, id);
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+  useEffect(() => () => document.body.classList.remove('tiles-dragging'), []);
+
+  return (
+    <>
+      <div className={className}>
+        {order.map((id) => (
+          <div key={id} data-tile={id} className={`${itemClass}${drag === id ? ' tile-drag' : ''}`} ref={(el) => (el ? nodes.current.set(id, el) : nodes.current.delete(id))}>
+            <TileCtx.Provider value={handleProps(id)}>{renderItem(id)}</TileCtx.Provider>
+          </div>
+        ))}
+      </div>
+      <div className="sr-only" role="status" aria-live="polite">
+        {said}
+      </div>
+    </>
+  );
+}
+
+// items: [{ id, title, node }] in their usual order. Put <TileHandle /> inside each node.
+// Each person's order is saved to their account (page: which page's tiles).
+export function Tiles({ page, items, className = '' }) {
+  const app = useApp();
+  const ids = items.map((x) => x.id);
+  const idsKey = ids.join(',');
+  const [order, setOrder] = useState(() => arrange(app.me.layout?.[page] || [], ids));
   const saveTimer = useRef(null);
   const warned = useRef(false);
 
@@ -67,149 +195,26 @@ export function Tiles({ page, items, className = '' }) {
     },
     [app, page, idsKey]
   );
-
-  const snap = () => {
-    before.current = new Map([...nodes.current].map(([id, el]) => [id, el.getBoundingClientRect()]));
-  };
-  const move = (id, to) => {
-    setOrder((o) => {
-      const from = o.indexOf(id);
-      const t = Math.max(0, Math.min(o.length - 1, to));
-      if (from < 0 || from === t) return o;
-      snap();
-      const n = [...o];
-      n.splice(from, 1);
-      n.splice(t, 0, id);
-      return n;
-    });
-  };
-
-  // Slide tiles from where they were to where they are now
-  useLayoutEffect(() => {
-    const was = before.current;
-    before.current = null;
-    if (focusAfter.current) {
-      handles.current.get(focusAfter.current)?.focus({ preventScroll: false });
-      focusAfter.current = null;
-    }
-    if (!was || calm()) return;
-    for (const [id, el] of nodes.current) {
-      const a = was.get(id);
-      if (!a) continue;
-      const b = el.getBoundingClientRect();
-      const dx = a.left - b.left;
-      const dy = a.top - b.top;
-      if (!dx && !dy) continue;
-      el.style.transition = 'none';
-      el.style.transform = `translate(${dx}px, ${dy}px)`;
-      el.getBoundingClientRect(); // apply before animating back
-      el.style.transition = 'transform 180ms ease';
-      el.style.transform = '';
-    }
-  }, [order]);
-
-  const titleOf = (id) => items.find((x) => x.id === id)?.title || id;
-  const handleProps = (id) => ({
-    ref: (el) => (el ? handles.current.set(id, el) : handles.current.delete(id)),
-    'aria-label': `Move ${titleOf(id)}`,
-    'aria-describedby': 'tiles-help',
-    'aria-pressed': drag === id || undefined,
-    title: 'Drag to move, or use the arrow keys',
-    onPointerDown: (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      startDrag(id);
-    },
-    onKeyDown: (e) => {
-      const i = order.indexOf(id);
-      const to = { ArrowUp: i - 1, ArrowLeft: i - 1, ArrowDown: i + 1, ArrowRight: i + 1, Home: 0, End: order.length - 1 }[e.key];
-      if (to === undefined) return;
-      e.preventDefault();
-      if (to < 0 || to >= order.length || to === i) return;
-      focusAfter.current = id;
-      const next = [...order];
-      next.splice(i, 1);
-      next.splice(to, 0, id);
-      snap();
-      setOrder(next);
-      setSaid(`${titleOf(id)} moved to place ${to + 1} of ${order.length}.`);
-      save(next);
-    },
-  });
-  // While dragging, follow the pointer on the whole window: the tile itself moves around the page
-  const orderRef = useRef(order);
-  orderRef.current = order;
-  const startDrag = (id) => {
-    const start = orderRef.current;
-    lastSwap.current = null;
-    setDrag(id);
-    document.body.classList.add('tiles-dragging');
-    const onMove = (e) => {
-      const edge = 70; // scroll the page when dragging near the top or bottom
-      if (e.clientY < edge) window.scrollBy(0, -14);
-      else if (e.clientY > window.innerHeight - edge) window.scrollBy(0, 14);
-      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-tile]')?.dataset.tile;
-      if (!target || !nodes.current.has(target)) return;
-      if (target === id) {
-        lastSwap.current = null;
-        return;
-      }
-      if (target === lastSwap.current) return; // don't flip back and forth over a tile of another size
-      lastSwap.current = target;
-      move(id, orderRef.current.indexOf(target));
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      setDrag(null);
-      document.body.classList.remove('tiles-dragging');
-      // the order after the last move has rendered
-      requestAnimationFrame(() => {
-        const o = orderRef.current;
-        if (same(o, start)) return;
-        setSaid(`${titleOf(id)} is now in place ${o.indexOf(id) + 1} of ${o.length}.`);
-        save(o);
-      });
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-  };
-  useEffect(() => () => document.body.classList.remove('tiles-dragging'), []);
-
+  const byId = (id) => items.find((x) => x.id === id);
   const custom = !same(order, ids);
-  const reset = () => {
-    snap();
-    setOrder(ids);
-    setSaid('Tiles are back in their usual order.');
-    save(ids);
-  };
-
   return (
     <>
-      <div className={`tiles ${className}`}>
-        {order.map((id) => {
-          const item = items.find((x) => x.id === id);
-          if (!item) return null;
-          return (
-            <div key={id} data-tile={id} className={`tile${drag === id ? ' tile-drag' : ''}`} ref={(el) => (el ? nodes.current.set(id, el) : nodes.current.delete(id))}>
-              <TileCtx.Provider value={handleProps(id)}>{item.node}</TileCtx.Provider>
-            </div>
-          );
-        })}
-      </div>
+      <Sortable order={order.filter(byId)} onChange={setOrder} onDone={save} renderItem={(id) => byId(id).node} titleOf={(id) => byId(id)?.title || id} className={`tiles ${className}`} />
       <p className="tiles-foot muted small">
         <span id="tiles-help">Drag a tile by its <span aria-hidden="true">⠿</span> handle to arrange them your way, or focus the handle and use the arrow keys. Your layout is saved to your account.</span>
         {custom && (
-          <button type="button" className="link-btn small" onClick={reset}>
+          <button
+            type="button"
+            className="link-btn small"
+            onClick={() => {
+              setOrder(ids);
+              save(ids);
+            }}
+          >
             Put them back in the usual order
           </button>
         )}
       </p>
-      <div className="sr-only" role="status" aria-live="polite">
-        {said}
-      </div>
     </>
   );
 }

@@ -24,6 +24,9 @@ import { checklistsRouter, debriefRouter, issuesRouter, signoffsRouter } from '.
 import { plannerRouter } from './routes/planner.js';
 import { officeRouter } from './routes/office.js';
 import { chatRouter } from './routes/chat.js';
+import { screenRouter, sendRouter, signageRouter } from './routes/signage.js';
+import { checkTools, resumePreparing, whenPrepared } from './lib/signage.js';
+import { startAnthiasJob, syncSoon } from './lib/anthias.js';
 import { notesRouter, vaultRouter } from './routes/vault.js';
 import { ensureVaultKey } from './lib/secrets.js';
 import { ensureOffice, onServiceTeam, startOfficeJob } from './lib/office.js';
@@ -51,6 +54,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/guest', guestRouter); // public, token-limited
 app.use('/api/reserve', reserveRouter); // public: the room request link
 app.use('/api/public', publicRouter); // rundown and bulletin links
+app.use('/api/screen', screenRouter); // public: a church screen's live player
+app.use('/api/send', sendRouter); // public: upload links for the screens
 app.use('/cal', calRouter);
 app.use('/api/academy', academyRouter); // checks the session itself and redirects
 
@@ -96,6 +101,7 @@ app.use('/api/office', officeRouter);
 app.use('/api/vault', vaultRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/notes', notesRouter);
+app.use('/api/signage', signageRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
@@ -142,6 +148,11 @@ async function start() {
   startReminderJob();
   startArchiveJob();
   startOfficeJob();
+  // Signage: what the server can convert, finish anything half-prepared, keep Anthias screens current
+  checkTools().then((t) => console.log(`[signage] video ${t.ffmpeg && t.ffprobe ? 'on' : 'off (no ffmpeg)'}, PDFs ${t.pdftoppm ? 'on' : 'off (no pdftoppm)'}`));
+  whenPrepared(() => syncSoon());
+  resumePreparing();
+  startAnthiasJob();
 }
 
 start().catch((e) => {

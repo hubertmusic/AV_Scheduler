@@ -1,0 +1,93 @@
+/* The Signage tab (Signage.jsx), laid out like Anthias's own screen */
+.sg-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; }
+.sg-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.sg-waiting { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); font: inherit; cursor: pointer; }
+.sg-waiting span[aria-hidden] { margin-left: auto; font-size: 20px; }
+.sg-tip { padding: 10px 12px; border-radius: 10px; background: var(--blue-soft); color: var(--blue-ink); }
+
+/* The table */
+.sg-table h2 .muted { font-family: var(--sans); font-weight: 400; }
+.sg-rows { display: flex; flex-direction: column; }
+.sg-row-wrap { min-width: 0; border-top: 1px solid var(--line); background: var(--surface); }
+.sg-row { display: grid; grid-template-columns: 32px 64px minmax(0, 1fr) 130px 130px 110px 56px 76px; align-items: center; gap: 12px; padding: 8px 4px; }
+.sg-row.sg-nodrag { grid-template-columns: 64px minmax(0, 1fr) 130px 130px 110px 56px 76px; }
+.sg-head { padding-top: 0; padding-bottom: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.sg-row .tile-handle { margin: 0; }
+.sg-thumb-btn { padding: 0; border: 0; background: none; cursor: pointer; border-radius: 6px; }
+.sg-thumb { display: block; width: 64px; height: 36px; object-fit: cover; border-radius: 6px; background: #111; }
+.sg-thumb-lg { width: 160px; height: 90px; font-size: 36px; }
+.sg-thumb-icon { display: grid; place-items: center; background: var(--sunk); font-size: 18px; }
+.sg-name { display: flex; flex-direction: column; min-width: 0; }
+.sg-title { min-height: 0; padding: 0; font-weight: 700; text-align: left; color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-title:hover { text-decoration: underline; }
+.sg-meta { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-why { font-size: 12.5px; font-weight: 600; color: #8a5200; }
+.sg-why-bad { color: var(--red); }
+.sg-ok { color: var(--green); font-weight: 600; }
+.sg-failed { background: var(--red-soft); }
+.sg-cell { font-size: 13.5px; }
+.sg-actions { display: flex; gap: 2px; justify-content: flex-end; }
+.sg-when-m { display: none; font-size: 12.5px; color: var(--muted); }
+
+/* An on/off switch like Anthias's */
+.sg-switch { position: relative; display: inline-block; width: 44px; height: 26px; cursor: pointer; }
+.sg-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.sg-switch span { position: absolute; inset: 0; border-radius: 13px; background: #c4c7cc; transition: background 150ms; }
+.sg-switch span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 150ms; }
+.sg-switch input:checked + span { background: var(--green); }
+.sg-switch input:checked + span::after { transform: translateX(18px); }
+.sg-switch input:focus-visible + span { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+/* Add / edit */
+.sg-screens .check-grid { margin-top: 4px; }
+.sg-secs { max-width: 160px; }
+.sg-edit-top { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.sg-big { width: 100%; max-width: 360px; aspect-ratio: 16 / 9; object-fit: contain; background: #111; border-radius: 8px; }
+.sg-uri { word-break: break-all; }
+.sg-plans { display: flex; flex-direction: column; gap: 14px; max-height: 50vh; overflow: auto; }
+.sg-plans h3 { font-size: 15px; margin: 0 0 6px; }
+.sg-plan-media { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.sg-pm { display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; font-size: 12.5px; cursor: pointer; }
+.sg-pm:hover { border-color: var(--primary); }
+.sg-pm img, .sg-pm .sg-thumb-icon { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: #111; }
+.sg-pm span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Waiting */
+.sg-wait { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
+
+/* Screens */
+.sg-link { display: flex; gap: 16px; align-items: flex-start; padding: 12px; border-radius: 10px; background: var(--sunk); }
+.sg-url { display: block; padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-family: var(--mono); font-size: 13px; word-break: break-all; }
+.sg-steps { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+
+/* Upload links */
+.sg-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sg-links li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; border-top: 1px solid var(--line); }
+.sg-link-off { opacity: 0.6; }
+.sg-qr { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+/* Preview */
+.sg-stage { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: #000; }
+.sg-prev-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 2px; }
+.sg-prev-on { font-weight: 700; color: var(--accent-ink); }
+
+@media (max-width: 900px) {
+  .sg-head { display: none; }
+  .sg-row { grid-template-columns: auto 64px minmax(0, 1fr); grid-template-areas: 'drag thumb name' 'drag switch actions'; row-gap: 6px; }
+  .sg-row.sg-nodrag { grid-template-columns: 64px minmax(0, 1fr); grid-template-areas: 'thumb name' 'switch actions'; }
+  .sg-when-m { display: block; }
+  .sg-row .tile-handle { grid-area: drag; }
+  .sg-thumb-btn { grid-area: thumb; }
+  .sg-name { grid-area: name; }
+  .sg-switch { grid-area: switch; }
+  .sg-actions { grid-area: actions; }
+  .sg-cell { display: none; }
+  .sg-wait { grid-template-columns: 1fr; }
+}
+
+/* Fieldsets here are plain groups */
+.sg fieldset.field, .modal fieldset.sg-screens { border: 0; margin: 0; padding: 0; min-width: 0; }
+.sg fieldset.field > legend, .modal fieldset.sg-screens > legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
+.sg-screens > .check { display: inline-flex; margin-right: 18px; }
+.sg-screen .check span { font-weight: 400; }
+.sg-screen .check strong { font-weight: 700; }

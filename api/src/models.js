@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Schema.Types.ObjectId, ref: name });
 
-export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans', 'vault'];
+export const PERMS = ['edit', 'approve', 'message', 'resources', 'people', 'groups', 'plans', 'vault', 'signage'];
 export const EVENT_KINDS = ['service', 'soundcheck', 'rehearsal'];
 // What a team does decides which parts of Crew Call it sees (gear, media, outside groups… are AV's)
 export const TEAM_KINDS = ['av', 'music', 'other', 'office'];
@@ -30,6 +30,7 @@ const userSchema = new Schema(
       groups: { type: Boolean, default: false },
       plans: { type: Boolean, default: false },
       vault: { type: Boolean, default: false },
+      signage: { type: Boolean, default: false },
     },
     positions: { type: [String], default: [] },
     trainee: { type: [String], default: [] }, // positions they're learning (can shadow)
@@ -69,6 +70,7 @@ const userSchema = new Schema(
               groups: { type: Boolean, default: false },
               plans: { type: Boolean, default: false },
               vault: { type: Boolean, default: false }, // open and keep the team's vault (head leaders always can)
+              signage: { type: Boolean, default: false }, // manage the church's screens (Signage tab)
             },
             maxPerMonth: { type: Number, default: 0 }, // 0 = no limit
             // Office teams: the committees they sit on, and offices they hold (Secretary of the
@@ -957,3 +959,81 @@ const chatSeenSchema = new Schema({ room: { ...ref('ChatRoom'), required: true }
 chatSeenSchema.index({ room: 1, user: 1 }, { unique: true });
 chatSeenSchema.index({ user: 1 });
 export const ChatSeen = model('ChatSeen', chatSeenSchema);
+
+// ---------- digital signage ----------
+// A screen in the church (lobby, fellowship hall). It shows its playlist either through its live
+// link (one web-page asset in Anthias), or Crew Call sends each item to Anthias through its API.
+const screenSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    token: { type: String, required: true, unique: true }, // the live link /screen/<token>
+    mode: { type: String, enum: ['link', 'anthias'], default: 'link' },
+    fit: { type: String, enum: ['contain', 'cover'], default: 'contain' }, // letterbox, or fill the screen
+    seconds: { type: Number, default: 10 }, // how long a picture shows unless the item says
+    anthias: {
+      url: { type: String, default: '' }, // https://192.168.1.50
+      auth: { type: String, enum: ['none', 'token', 'basic'], default: 'none' },
+      user: { type: String, default: '' },
+      secret: { type: String, default: '' }, // API token or password, encrypted (lib/secrets.js)
+      insecure: { type: Boolean, default: true }, // Anthias uses its own (self-signed) certificate
+      lastSyncAt: Date,
+      lastError: { type: String, default: '' },
+      sent: { type: Number, default: 0 },
+      trash: { type: [String], default: [] }, // Anthias asset ids to remove on the next send (deleted here)
+    },
+    order: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+export const Screen = model('Screen', screenSchema);
+
+// Something to show: a picture, a video, a PDF (shown page by page) or a web page
+const signageAssetSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    kind: { type: String, enum: ['image', 'video', 'pdf', 'web'], required: true },
+    storedName: { type: String, default: '' }, // in the uploads folder
+    originalName: { type: String, default: '' },
+    mime: { type: String, default: '' },
+    size: { type: Number, default: 0 },
+    pages: { type: [String], default: [] }, // a PDF's pages, as pictures
+    uri: { type: String, default: '' }, // web pages
+    seconds: { type: Number, default: 10 }, // per picture or page; videos: 0 = play to the end
+    videoSeconds: { type: Number, default: 0 }, // a video's length
+    sound: { type: Boolean, default: false },
+    startAt: Date, // shows from (empty = now)
+    endAt: Date, // until (empty = no end)
+    enabled: { type: Boolean, default: true },
+    screens: { type: [{ type: Schema.Types.ObjectId, ref: 'Screen' }], default: [] }, // empty = every screen
+    order: { type: Number, default: 0 },
+    status: { type: String, enum: ['approved', 'pending', 'declined'], default: 'approved' },
+    processing: { type: String, enum: ['ready', 'working', 'failed'], default: 'ready' },
+    processError: { type: String, default: '' },
+    from: { name: { type: String, default: '' }, email: { type: String, default: '' }, note: { type: String, default: '' } }, // sent with the upload link
+    link: ref('SignageLink'),
+    plan: ref('Plan'), // pulled from a service plan
+    createdBy: ref('User'),
+    decidedBy: ref('User'),
+    decidedAt: Date,
+    // What's been sent to each screen's Anthias: its asset id there, and a fingerprint of what was sent
+    anthias: { type: [{ screen: { type: Schema.Types.ObjectId }, part: { type: Number, default: 0 }, id: String, key: String, file: String, _id: false }], default: [] },
+  },
+  { timestamps: true }
+);
+signageAssetSchema.index({ status: 1, order: 1 });
+export const SignageAsset = model('SignageAsset', signageAssetSchema);
+
+// Upload links for the screens: anyone with one can send pictures, videos and PDFs, which wait for
+// approval. They last until turned off, or until a set time.
+const signageLinkSchema = new Schema(
+  {
+    token: { type: String, required: true, unique: true },
+    label: { type: String, default: '' },
+    on: { type: Boolean, default: true },
+    expiresAt: Date, // empty = until turned off
+    uses: { type: Number, default: 0 },
+    createdBy: ref('User'),
+  },
+  { timestamps: true }
+);
+export const SignageLink = model('SignageLink', signageLinkSchema);

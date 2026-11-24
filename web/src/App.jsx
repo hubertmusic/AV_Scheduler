@@ -32,6 +32,9 @@ import OfficeMine from './pages/OfficeMine.jsx';
 import { BulletinPage, RundownPage } from './pages/Share.jsx';
 import { WeeklyRedirect } from './pages/WeeklyLinks.jsx';
 import { StagePage } from './pages/Live.jsx';
+import { ScreenPage } from './signagePlayer.jsx';
+import SendToScreens from './pages/SendToScreens.jsx';
+const Signage = lazy(() => import('./pages/Signage.jsx'));
 
 // Signs out after `minutes` without a click, tap or key press, and tells the server
 // someone's still here while they work on a page without saving.
@@ -70,7 +73,7 @@ export default function App() {
   const reserveToken = useMemo(() => window.location.pathname.match(/^\/reserve\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
   const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
   // Public rundown / bulletin links (no sign-in)
-  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage)\/([A-Za-z0-9_-]+)/), []);
+  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage|screen|send)\/([A-Za-z0-9_-]+)/), []);
   const [phase, setPhase] = useState(inviteToken ? 'invite' : resetToken ? 'reset' : 'loading');
   const [boot, setBoot] = useState(null);
   const [orgName, setOrgName] = useState('');
@@ -172,6 +175,8 @@ export default function App() {
     if (kind === 'rundown') return <RundownPage token={t} />;
     if (kind === 'weekly') return <WeeklyRedirect token={t} />;
     if (kind === 'stage') return <StagePage token={t} />;
+    if (kind === 'screen') return <ScreenPage token={t} />;
+    if (kind === 'send') return <SendToScreens token={t} />;
     return <BulletinPage token={t} />;
   }
   if (phase === 'invite') return <Invite token={inviteToken} onDone={finishInvite} />;
@@ -228,6 +233,7 @@ const TABS = [
   { id: 'office-plan', label: 'Planning', show: () => true, side: 'office' },
   { id: 'vault', label: 'Notes', show: (c, me) => !me.previewing }, // “Notes & vault” for people who see the vault
   { id: 'team', label: 'Team & roles', show: (c) => c.people },
+  { id: 'signage', label: 'Signage', show: (c, me, team, boot) => !!boot?.signage }, // the church screens, on every side
   { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
   { id: 'resources', label: 'Resources & help', show: () => true },
   { id: 'settings', label: 'Settings', show: (c, me) => me.role === 'admin' },
@@ -274,7 +280,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   const isAv = team.kind === 'av';
   const isOffice = team.kind === 'office';
   const can = me.can;
-  const tabs = TABS.filter((t) => t.show(can, me, team) && (!t.av || isAv) && (!t.side || t.side === (isOffice ? 'office' : 'service')));
+  const tabs = TABS.filter((t) => t.show(can, me, team, boot) && (!t.av || isAv) && (!t.side || t.side === (isOffice ? 'office' : 'service')));
   const fromHash = () => {
     const h = window.location.hash.replace('#', '');
     return tabs.some((t) => t.id === h) ? h : tabs[0].id;
@@ -295,6 +301,8 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   const isAdmin = me.role === 'admin';
   // The team's look (Team setup → Look); a draft shows while a leader is trying one out
   const [themeDraft, setThemeDraft] = useState(null);
+  const [signageWaiting, setSignageWaiting] = useState(boot.signage?.waiting || 0);
+  useEffect(() => setSignageWaiting(boot.signage?.waiting || 0), [boot.signage?.waiting]);
   const theme = themeDraft || team.theme || { preset: { av: 'console', music: 'sanctuary', office: 'boardroom' }[team.kind] || 'classic' };
   const themeKey = JSON.stringify(theme);
   useEffect(() => applyTheme(JSON.parse(themeKey)), [themeKey]);
@@ -403,6 +411,8 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       setWeekend,
       noteView,
       previewTheme: setThemeDraft,
+      signage: boot.signage,
+      setSignageWaiting,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot, toast, resFilter, refreshPending, weekend, officeMeeting]);
@@ -485,6 +495,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
             {t.id === 'requests' && pending > 0 && <span className="badge">{pending}</span>}
             {t.id === 'office-plan' && pending > 0 && <span className="badge" title="Event requests waiting">{pending}</span>}
             {t.id === 'plans' && pendingPlans > 0 && <span className="badge" title="Guest uploads waiting for approval">{pendingPlans}</span>}
+            {t.id === 'signage' && signageWaiting > 0 && <span className="badge" title="Sent for the screens, waiting for a look">{signageWaiting}</span>}
           </button>
         ))}
       </nav>
@@ -507,6 +518,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'setup' && <TeamSetup />}
         {tab === 'check' && <WeekendCheck />}
         {tab === 'activity' && <Activity />}
+        {tab === 'signage' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Signage />
+          </Suspense>
+        )}
         {tab === 'vault' && (
           <Suspense fallback={<div className="loading-inline">Loading…</div>}>
             <Vault />

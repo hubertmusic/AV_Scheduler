@@ -13,6 +13,7 @@ const PERMS = [
   { id: 'plans', label: 'Lead service plans', help: 'Set the sermon, speaker, pastor’s notes and order of service; send quick links and approve late changes. (Everyone on the team can add songs, Bible texts, chord notes and slides.)' },
   { id: 'groups', label: 'Manage outside groups', help: 'Add and edit outside groups like a visiting band or choir, with their contacts and WhatsApp group links.', av: true },
   { id: 'vault', label: 'Keep the vault', help: 'See and change the team’s passwords and keys (stream keys, ProPresenter licenses, logins) on Notes & vault, and give others time in it.' },
+  { id: 'signage', label: 'Manage signage', help: 'Decide what the church screens show on the Signage tab: add and schedule pictures, videos and PDFs, approve what people send with upload links, and set up the screens.' },
 ];
 // The same privileges, worded for Church Admin
 const OFFICE_PERMS = [
@@ -23,6 +24,7 @@ const OFFICE_PERMS = [
   { id: 'resources', label: 'Manage documents', help: 'Add and remove documents, policies, forms and resources.' },
   { id: 'people', label: 'Manage people & committees', help: 'Invite people, set committees and offices, and help with sign-in.' },
   { id: 'vault', label: 'Keep the vault', help: 'See and change Church Admin’s passwords and accounts on Notes & vault, and give others time in it. Only people on Church Admin can ever see it, not the Crew Call admin.' },
+  { id: 'signage', label: 'Manage signage', help: 'Decide what the church screens show on the Signage tab: add and schedule pictures, videos and PDFs, approve what people send with upload links, and set up the screens.' },
 ];
 const permsFor = (app) => (app.isOffice ? OFFICE_PERMS : PERMS.filter((p) => !p.av || app.isAv));
 

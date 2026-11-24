@@ -906,6 +906,11 @@ function MediaSection({ plan, canEdit, canLibrary, canPlans, eventId, setPlan, r
                   Save to library
                 </button>
               )}
+              {app.signage && m.status === 'approved' && m.stored === 'hot' && /^(image\/|video\/|application\/pdf)/.test(m.mime) && (
+                <button type="button" className="link-btn small" title="Put a copy on the church screens (Signage tab)" onClick={() => api('/signage/assets/from-media', { method: 'POST', body: { mediaId: m.id } }).then(() => app.toast(`${m.title} is on the screens. Change where and when on the Signage tab.`), (e) => app.toast(e.message))}>
+                  Show on screens
+                </button>
+              )}
               {canRemove(m) && m.status !== 'pending' && m.stored !== 'removed' && (
                 <button type="button" className="icon-btn" aria-label={`Delete ${m.title}`} onClick={() => remove(m)}>
                   <Icon name="close" size={16} />
