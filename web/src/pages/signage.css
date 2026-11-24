@@ -91,3 +91,18 @@
 .sg-screens > .check { display: inline-flex; margin-right: 18px; }
 .sg-screen .check span { font-weight: 400; }
 .sg-screen .check strong { font-weight: 700; }
+
+/* Live: what each screen is showing this second */
+.sg-live { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.sg-live-one { padding: 8px 12px; background: var(--sunk); border-color: transparent; }
+.sg-live-line { display: flex; align-items: baseline; gap: 8px; font-size: 14px; line-height: 1.4; }
+.sg-live-line > span:nth-child(2) { min-width: 0; }
+.sg-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--field); display: inline-block; transform: translateY(-1px); }
+.sg-dot-on { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
+.sg-dot-off { background: #dc2626; }
+.sg-left { font-variant-numeric: tabular-nums; color: var(--accent-ink); font-weight: 600; }
+.sg-watch { margin-left: auto; min-height: 0; padding: 0; flex: none; }
+.sg-onnow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #15803d; }
+.sg-stage { position: relative; }
+.sg-live-tag { position: absolute; top: 10px; left: 10px; padding: 2px 8px; border-radius: 4px; background: #d92d20; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+@media (prefers-reduced-motion: reduce) { .sg-dot-on { box-shadow: none; } }

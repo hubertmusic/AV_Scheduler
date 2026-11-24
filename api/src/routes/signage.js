@@ -318,6 +318,21 @@ signageRouter.get('/preview', wrap(async (req, res) => {
   res.json({ name: s.name, fit: s.fit, items, v: playlistVersion(items, s) });
 }));
 
+// GET /api/signage/now — what each screen is showing right now (live-link screens report in)
+signageRouter.get('/now', wrap(async (req, res) => {
+  const screens = await screensList();
+  const now = Date.now();
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    serverNow: now,
+    screens: screens.map((s) => {
+      const players = [...(nowPlaying.get(String(s._id))?.values() || [])].filter((p) => now - p.at < STALE_MS).sort((a, b) => b.at - a.at);
+      const seen = Math.max(players[0]?.at || 0, s.lastSeenAt ? new Date(s.lastSeenAt).getTime() : 0);
+      return { id: String(s._id), mode: s.mode, online: players.some((p) => now - p.at < ONLINE_MS), lastSeenAt: seen ? new Date(seen).toISOString() : null, players: players.map(({ key, ...p }) => p) };
+    }),
+  });
+}));
+
 // ---------- screens ----------
 signageRouter.post('/screens', wrap(async (req, res) => {
   const name = str(req.body?.name, 60);
@@ -469,11 +484,49 @@ async function screenByToken(t) {
 // GET /api/screen/:token — the playlist right now
 screenRouter.get('/:token', wrap(async (req, res) => {
   const s = await screenByToken(req.params.token);
-  const items = playerItems(await playlistFor(s), s, (a, page = null) => `/api/screen/${s.token}/file/${a._id}${page !== null ? `/${page}` : ''}`);
+  const items = await screenItems(s);
   const st = await getSettings();
   res.set('Cache-Control', 'no-store');
   res.json({ name: s.name, church: st.orgName || '', fit: s.fit, items, v: playlistVersion(items, s), check: 60 });
 }));
+// What each live-link player last said it was showing: screen id → player id → state. In memory;
+// it's only about the last few seconds. lastSeenAt goes to the database at most once a minute.
+const nowPlaying = new Map();
+const ONLINE_MS = 35 * 1000; // players check in every 10 seconds and on every new item
+const STALE_MS = 6 * 3600 * 1000;
+const clip = (v, n = 120) => String(v ?? '').slice(0, n);
+// POST /api/screen/:token/now { player, item: { id, name, kind }, elapsed, length, next: { id, name }, v, w, h }
+screenRouter.post('/:token/now', wrap(async (req, res) => {
+  const s = await screenByToken(req.params.token);
+  const b = req.body || {};
+  const player = clip(b.player, 40);
+  if (!/^[A-Za-z0-9_-]{6,40}$/.test(player)) throw bad('Bad player.');
+  const now = Date.now();
+  const room = nowPlaying.get(String(s._id)) || new Map();
+  if (!room.has(player) && room.size >= 10) {
+    // a screen link open in too many places: forget the oldest
+    const oldest = [...room].sort((x, y) => x[1].at - y[1].at)[0];
+    room.delete(oldest[0]);
+  }
+  const elapsed = Math.max(0, Math.min(86400, Number(b.elapsed) || 0));
+  const latest = b.v === undefined ? null : playlistVersion(await screenItems(s), s);
+  room.set(player, {
+    player,
+    at: now,
+    item: b.item?.id ? { id: clip(b.item.id, 60), name: clip(b.item.name), kind: clip(b.item.kind, 10) } : null,
+    startedAt: now - elapsed * 1000,
+    length: Math.max(0, Math.min(86400, Number(b.length) || 0)),
+    next: b.next?.id ? { id: clip(b.next.id, 60), name: clip(b.next.name) } : null,
+    count: Math.max(0, Math.min(1000, Number(b.count) || 0)),
+    current: latest === null ? null : String(b.v) === latest, // has the latest playlist
+    size: Number(b.w) > 0 ? `${Math.round(b.w)}×${Math.round(b.h)}` : '',
+  });
+  nowPlaying.set(String(s._id), room);
+  if (!s.lastSeenAt || now - new Date(s.lastSeenAt).getTime() > 60 * 1000) await Screen.updateOne({ _id: s._id }, { lastSeenAt: new Date(now) });
+  res.status(204).end();
+}));
+const screenItems = async (s) => playerItems(await playlistFor(s), s, (a, page = null) => `/api/screen/${s.token}/file/${a._id}${page !== null ? `/${page}` : ''}`);
+
 // GET /api/screen/:token/file/:id[/:page]
 screenRouter.get('/:token/file/:id/:page?', wrap(async (req, res) => {
   const s = await screenByToken(req.params.token);

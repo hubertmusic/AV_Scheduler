@@ -982,6 +982,7 @@ const screenSchema = new Schema(
       trash: { type: [String], default: [] }, // Anthias asset ids to remove on the next send (deleted here)
     },
     order: { type: Number, default: 0 },
+    lastSeenAt: Date, // the live link last checked in (kept for when Crew Call restarts)
   },
   { timestamps: true }
 );

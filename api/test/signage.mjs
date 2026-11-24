@@ -210,6 +210,32 @@ const prev = ok(await admin('GET', `/api/signage/preview?screen=${hall.id}`));
 assert.equal(prev.items.length, 5);
 step('the live player shows what’s on, in order, on that screen; switched off, ended or not-yet items drop off');
 
+// ---------- what each screen is showing now ----------
+let now = ok(await admin('GET', '/api/signage/now'));
+let st = now.screens.find((x) => x.id === lobby.id);
+assert.equal(st.online, false, 'not checked in yet');
+assert.equal(st.lastSeenAt, null);
+ok(await ben.c('GET', '/api/signage/now'), 403);
+ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'x y', item: null }), 400);
+ok(await anon('POST', '/api/screen/notarealtokennotarealtoken/now', { player: 'tv-lobby-1' }), 404);
+const [first, second] = play.items;
+ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-1', v: play.v, count: play.items.length, item: first, elapsed: 4, length: 20, next: second, w: 1920, h: 1080 }), 204);
+ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-2', v: 'old', item: second, elapsed: 1, length: 2 }), 204);
+now = ok(await pia.c('GET', '/api/signage/now'));
+st = now.screens.find((x) => x.id === lobby.id);
+assert.equal(st.online, true);
+assert.ok(st.lastSeenAt);
+assert.equal(st.players.length, 2, 'two TVs on one link show as two');
+const tv1 = st.players.find((p) => p.player === 'tv-lobby-1');
+assert.equal(tv1.item.name, 'Events page');
+assert.equal(tv1.next.name, 'clip');
+assert.equal(tv1.current, true, 'on the latest playlist');
+assert.equal(tv1.size, '1920×1080');
+assert.ok(Math.abs(now.serverNow - 4000 - tv1.startedAt) < 3000, 'when the item started, so the tab can count down and mirror it');
+assert.equal(st.players.find((p) => p.player === 'tv-lobby-2').current, false, 'an old playlist shows as not caught up');
+assert.equal(now.screens.find((x) => x.id === hall.id).online, false, 'other screens stay offline');
+step('live-link screens check in with what they’re showing, how far in, what’s next, and whether they have the latest playlist');
+
 // ---------- upload links ----------
 s = ok(await admin('POST', '/api/signage/links', { label: 'Youth group', lasts: 'off' }), 201);
 s = ok(await admin('POST', '/api/signage/links', { label: 'VBS week', lasts: '4h' }), 201);

@@ -60,6 +60,45 @@ function why(a, now = Date.now()) {
   return '';
 }
 
+// ---------- what each screen is showing right now ----------
+// Live-link screens check in every 10 seconds and whenever a new item starts.
+function useNowPlaying() {
+  const [now, setNow] = useState(null);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    let t;
+    let on = true;
+    const load = async () => {
+      if (!document.hidden) {
+        try {
+          const r = await api('/signage/now', { background: true });
+          if (on) setNow({ ...r, skew: r.serverNow - Date.now() });
+        } catch {
+          /* try again */
+        }
+      }
+      if (on) t = setTimeout(load, 3000);
+    };
+    load();
+    const tick = setInterval(() => setTick((x) => x + 1), 1000); // count the seconds down
+    return () => {
+      on = false;
+      clearTimeout(t);
+      clearInterval(tick);
+    };
+  }, []);
+  return now;
+}
+function playing(now, sid) {
+  const st = now?.screens.find((x) => x.id === sid);
+  if (!st) return null;
+  const p = st.players[0];
+  const at = Date.now() + (now.skew || 0);
+  const left = p?.length ? Math.max(0, Math.ceil(p.length - (at - p.startedAt) / 1000)) : null;
+  return { ...st, p, left, players: st.players.filter((x) => at - x.at < 35000).length, follow: st.online && p?.item ? { id: p.item.id, startedAt: p.startedAt - (now.skew || 0) } : null };
+}
+const assetOf = (itemId) => String(itemId || '').split(':')[0];
+
 export default function Signage() {
   const app = useApp();
   const [d, setD] = useState(null);
@@ -69,6 +108,7 @@ export default function Signage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
   const [preview, setPreview] = useState(false);
+  const now = useNowPlaying();
   const setPart = (p) => (setPartRaw(p), store.set('cc-signage-part', p));
   const setScreen = (s) => (setScreenRaw(s), store.set('cc-signage-screen', s));
 
@@ -125,21 +165,21 @@ export default function Signage() {
       </div>
 
       {part === 'playlist' && (
-        <Playlist d={d} setD={setD} load={load} act={act} screen={screen} setScreen={setScreen} onAdd={() => setAdding(true)} onEdit={setEditing} onPreview={() => setPreview(true)} waiting={waiting.length} toWaiting={() => setPart('waiting')} screenName={screenName} />
+        <Playlist d={d} setD={setD} load={load} act={act} now={now} screen={screen} setScreen={setScreen} onAdd={() => setAdding(true)} onEdit={setEditing} onPreview={(sid) => setPreview(sid || screen)} waiting={waiting.length} toWaiting={() => setPart('waiting')} screenName={screenName} />
       )}
       {part === 'waiting' && <Waiting d={d} act={act} list={waiting} />}
-      {part === 'screens' && <Screens d={d} act={act} />}
+      {part === 'screens' && <Screens d={d} act={act} now={now} onMirror={setPreview} />}
       {part === 'links' && <Links d={d} act={act} />}
 
       {adding && <AddAsset d={d} act={act} screen={screen} onClose={() => setAdding(false)} />}
       {editing && d.assets.find((a) => a.id === editing) && <EditAsset d={d} act={act} a={d.assets.find((a) => a.id === editing)} onClose={() => setEditing(null)} />}
-      {preview && <Preview d={d} screen={screen} onClose={() => setPreview(false)} />}
+      {preview && <Preview d={d} screen={preview} now={now} onClose={() => setPreview(false)} />}
     </div>
   );
 }
 
 // ---------- the playlist (Anthias's Active / Inactive lists) ----------
-function Playlist({ d, setD, load, act, screen, setScreen, onAdd, onEdit, onPreview, waiting, toWaiting, screenName }) {
+function Playlist({ d, setD, load, act, now, screen, setScreen, onAdd, onEdit, onPreview, waiting, toWaiting, screenName }) {
   const shown = d.assets.filter((a) => a.status === 'approved' && (screen === 'all' || !a.screens.length || a.screens.includes(screen)));
   const active = shown.filter((a) => a.live);
   const inactive = shown.filter((a) => !a.live);
@@ -147,6 +187,8 @@ function Playlist({ d, setD, load, act, screen, setScreen, onAdd, onEdit, onPrev
   const key = active.map((a) => a.id).join(',');
   useEffect(() => setOrder(key ? key.split(',') : []), [key]);
   const byId = (id) => d.assets.find((a) => a.id === id);
+  // Which screens are showing an item this second
+  const onNowOf = (a) => (a ? d.screens.filter((sc) => { const st = playing(now, sc.id); return st?.online && assetOf(st.p?.item?.id) === a.id; }).map((sc) => sc.name) : []);
   // Moving items in a screen's list keeps everything else where it was
   const reorder = (next) => {
     const all = d.assets.filter((a) => a.status === 'approved').map((a) => a.id);
@@ -174,7 +216,7 @@ function Playlist({ d, setD, load, act, screen, setScreen, onAdd, onEdit, onPrev
           ))}
         </div>
         <div className="row-wrap">
-          <button type="button" className="btn btn-ghost" onClick={onPreview} disabled={!active.length}>
+          <button type="button" className="btn btn-ghost" onClick={() => onPreview()} disabled={!active.length}>
             ▶ Preview
           </button>
           <button type="button" className="btn btn-primary" onClick={onAdd}>
@@ -187,6 +229,7 @@ function Playlist({ d, setD, load, act, screen, setScreen, onAdd, onEdit, onPrev
           <strong>{waiting}</strong> sent with an upload link {waiting === 1 ? 'is' : 'are'} waiting for a look <span aria-hidden="true">›</span>
         </button>
       )}
+      {d.screens.length > 0 && <LiveStrip d={d} now={now} onMirror={onPreview} />}
       {!d.screens.length && <p className="sg-tip">No screens yet. Add your screens under <strong>Screens</strong> to get each one’s link for Anthias.</p>}
 
       <section className="card sg-table" aria-label="Active">
@@ -204,7 +247,7 @@ function Playlist({ d, setD, load, act, screen, setScreen, onAdd, onEdit, onPrev
               className="sg-rows"
               itemClass="sg-row-wrap"
               helpId="sg-drag-help"
-              renderItem={(id) => <Row a={byId(id)} drag onToggle={toggle} onEdit={onEdit} act={act} screenName={screenName} />}
+              renderItem={(id) => <Row a={byId(id)} drag onToggle={toggle} onEdit={onEdit} act={act} screenName={screenName} onNow={onNowOf(byId(id))} />}
             />
             <p className="muted small" id="sg-drag-help">
               Drag ⠿ to change the order, or focus it and use the arrow keys.
@@ -225,7 +268,7 @@ function Playlist({ d, setD, load, act, screen, setScreen, onAdd, onEdit, onPrev
             <div className="sg-rows">
               {inactive.map((a) => (
                 <div key={a.id} className="sg-row-wrap">
-                  <Row a={a} onToggle={toggle} onEdit={onEdit} act={act} screenName={screenName} />
+                  <Row a={a} onToggle={toggle} onEdit={onEdit} act={act} screenName={screenName} onNow={onNowOf(a)} />
                 </div>
               ))}
             </div>
@@ -263,7 +306,7 @@ function Thumb({ a, size = 'sm' }) {
   );
 }
 
-function Row({ a, drag, onToggle, onEdit, act, screenName }) {
+function Row({ a, drag, onToggle, onEdit, act, screenName, onNow = [] }) {
   const note = why(a);
   return (
     <div className={`sg-row ${drag ? '' : 'sg-nodrag'} ${a.processing === 'failed' ? 'sg-failed' : ''}`}>
@@ -284,6 +327,11 @@ function Row({ a, drag, onToggle, onEdit, act, screenName }) {
           {a.fromPlan && ' · from a service plan'}
         </span>
         {note && <span className={`sg-why ${a.processing === 'failed' ? 'sg-why-bad' : ''}`}>{note}</span>}
+        {onNow.length > 0 && (
+          <span className="sg-onnow">
+            <span className="sg-dot sg-dot-on" aria-hidden="true" /> On screen now: {onNow.join(', ')}
+          </span>
+        )}
         <span className="sg-when-m">
           {a.startAt ? when(a.startAt) : 'Now'} → {a.endAt ? when(a.endAt) : 'no end'} · {durationText(a)}
         </span>
@@ -316,6 +364,61 @@ function Row({ a, drag, onToggle, onEdit, act, screenName }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------- live: what each screen shows this second ----------
+function ScreenStatus({ s, st, onMirror, long = false }) {
+  if (s.mode === 'anthias')
+    return (
+      <span className="sg-live-line">
+        <span className="sg-dot" aria-hidden="true" />
+        <span>
+          {!long && <strong>{s.name}: </strong>}{long ? 'Played' : 'played'} by Anthias itself{s.anthias.lastSyncAt ? `; last sent ${when(s.anthias.lastSyncAt)}` : ''}
+        </span>
+      </span>
+    );
+  if (!st?.online)
+    return (
+      <span className="sg-live-line">
+        <span className={`sg-dot ${st?.lastSeenAt ? 'sg-dot-off' : ''}`} aria-hidden="true" />
+        <span>
+          {!long && <strong>{s.name}: </strong>}{st?.lastSeenAt ? `${long ? 'Offline' : 'offline'} · last seen ${when(st.lastSeenAt)}` : long ? 'Not connected yet. Once its link is playing in Anthias, it shows here.' : 'not connected yet'}
+        </span>
+      </span>
+    );
+  const p = st.p;
+  return (
+    <span className="sg-live-line">
+      <span className="sg-dot sg-dot-on" aria-hidden="true" />
+      <span>
+        {!long && <strong>{s.name}: </strong>}{p?.item ? (
+          <>
+            {long && 'Showing '}
+            <q>{p.item.name}</q>
+          </>
+        ) : long ? 'Online, with nothing to show right now' : 'online, nothing to show'}
+        {p?.item && st.left !== null && <span className="sg-left"> · {st.left}s left</span>}
+        {p?.next && p.next.id !== p.item?.id && <span className="muted"> · next: {p.next.name}</span>}
+        {st.players > 1 && <span className="muted"> · on {st.players} TVs</span>}
+        {p?.current === false && <span className="sg-why"> · picking up your changes…</span>}
+        {long && p?.size && <span className="muted"> · {p.size}</span>}
+      </span>
+      {onMirror && p?.item && (
+        <button type="button" className="link-btn small sg-watch" onClick={() => onMirror(s.id)}>
+          Watch
+        </button>
+      )}
+    </span>
+  );
+}
+function LiveStrip({ d, now, onMirror }) {
+  return (
+    <section className="sg-live" aria-label="On the screens now" aria-live="off">
+      {d.screens.map((s) => (
+        <ScreenStatus key={s.id} s={s} st={playing(now, s.id)} onMirror={onMirror} />
+      ))}
+    </section>
   );
 }
 
@@ -659,12 +762,12 @@ function WaitingCard({ d, act, a }) {
 }
 
 // ---------- screens ----------
-function Screens({ d, act }) {
+function Screens({ d, act, now, onMirror }) {
   const [name, setName] = useState('');
   return (
     <div className="stack">
       {d.screens.map((s) => (
-        <ScreenCard key={s.id} s={s} act={act} />
+        <ScreenCard key={s.id} s={s} act={act} st={playing(now, s.id)} onMirror={onMirror} />
       ))}
       <form
         className="card row-wrap"
@@ -682,7 +785,7 @@ function Screens({ d, act }) {
     </div>
   );
 }
-function ScreenCard({ s, act }) {
+function ScreenCard({ s, act, st, onMirror }) {
   const app = useApp();
   const [f, setF] = useState({ name: s.name, url: s.anthias.url, auth: s.anthias.auth, user: s.anthias.user, secret: '', insecure: s.anthias.insecure, seconds: s.seconds, fit: s.fit });
   const [test, setTest] = useState(null);
@@ -712,6 +815,9 @@ function ScreenCard({ s, act }) {
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => window.confirm(`Remove the screen “${s.name}”? Items only for it are switched off.`) && act(() => api(`/signage/screens/${s.id}`, { method: 'DELETE' }), 'Screen removed')}>
           Remove
         </button>
+      </div>
+      <div className="sg-live sg-live-one">
+        <ScreenStatus s={s} st={st} onMirror={onMirror} long />
       </div>
       <div className="row-wrap fields-3">
         <label className="field">
@@ -925,20 +1031,31 @@ function Links({ d, act }) {
 }
 
 // ---------- preview ----------
-function Preview({ d, screen, onClose }) {
+function Preview({ d, screen, now, onClose }) {
   const [p, setP] = useState(null);
   const [cur, setCur] = useState(null);
   const sid = screen === 'all' ? '' : screen;
   useEffect(() => {
     const load = () => api(`/signage/preview${sid ? `?screen=${sid}` : ''}`, { background: true }).then((x) => setP((old) => (old?.v === x.v ? old : x)), () => {});
     load();
-    const t = setInterval(load, 20000);
+    const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, [sid]);
-  const name = sid ? d.screens.find((s) => s.id === sid)?.name : 'All screens';
+  const sc = sid ? d.screens.find((s) => s.id === sid) : null;
+  const st = sid ? playing(now, sid) : null;
+  // A live-link screen that's on: show what it's showing, in step with it
+  const follow = sc?.mode === 'link' ? st?.follow : null;
   return (
-    <Modal title={`Preview: ${name}`} onClose={onClose} wide>
-      <div className="sg-stage">{p && <Player items={p.items} fit={p.fit} onItem={setCur} empty={<div className="sp-msg">Nothing showing</div>} />}</div>
+    <Modal title={follow ? `Live: ${sc.name}` : `Preview: ${sc?.name || 'All screens'}`} onClose={onClose} wide>
+      {sc && (
+        <div className="sg-live sg-live-one">
+          <ScreenStatus s={sc} st={st} long />
+        </div>
+      )}
+      <div className="sg-stage">
+        {p && <Player items={p.items} fit={p.fit} onItem={setCur} follow={follow} empty={<div className="sp-msg">Nothing showing</div>} />}
+        {follow && <span className="sg-live-tag">● LIVE</span>}
+      </div>
       {p && (
         <ol className="sg-prev-list small">
           {p.items.map((i) => (
@@ -948,7 +1065,15 @@ function Preview({ d, screen, onClose }) {
           ))}
         </ol>
       )}
-      <p className="muted small">Videos play without sound here. This is what {sid ? 'this screen’s live link' : 'the screens'} would show now.</p>
+      <p className="muted small">
+        {follow
+          ? `This follows what ${sc.name} is showing right now; it can be a second or two behind. Videos play without sound here.`
+          : sc?.mode === 'anthias'
+            ? 'Anthias plays this screen itself, so this shows its playlist from the start, not the item that’s on right now. Videos play without sound here.'
+            : sc
+              ? `${sc.name} isn’t online, so this plays its playlist from the start. Videos play without sound here.`
+              : 'What the screens would show, from the start. Pick a screen to watch it live. Videos play without sound here.'}
+      </p>
     </Modal>
   );
 }
