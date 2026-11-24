@@ -78,7 +78,7 @@ export async function testAnthias(screen) {
 
 // One Anthias item per picture, video, web page, or PDF page
 function partsOf(a, screen) {
-  const seconds = a.seconds > 0 ? a.seconds : screen.seconds || 10;
+  const seconds = a.seconds === 0 ? 86400 : a.seconds > 0 ? a.seconds : screen.seconds || 10; // 0: stays on (a day at a time in Anthias)
   const common = { start_date: (a.startAt || a.createdAt || new Date()).toISOString(), end_date: (a.endAt || FAR).toISOString(), is_enabled: a.enabled ? 1 : 0 };
   if (a.kind === 'web') return [{ part: 0, file: `uri:${a.uri}`, uri: a.uri, body: { ...common, name: `${PREFIX}${a.name}`, mimetype: 'webpage', duration: seconds } }];
   if (a.kind === 'pdf') return a.pages.map((p, i) => ({ part: i, file: p, path: assetFile(a, i), body: { ...common, name: `${PREFIX}${a.name} (page ${i + 1})`, mimetype: 'image', duration: seconds } }));

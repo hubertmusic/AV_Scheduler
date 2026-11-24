@@ -509,7 +509,7 @@ screenRouter.post('/:token/now', wrap(async (req, res) => {
     room.delete(oldest[0]);
   }
   const elapsed = Math.max(0, Math.min(86400, Number(b.elapsed) || 0));
-  const latest = b.v === undefined ? null : playlistVersion(await screenItems(s), s);
+  const latest = playlistVersion(await screenItems(s), s);
   room.set(player, {
     player,
     at: now,
@@ -518,12 +518,14 @@ screenRouter.post('/:token/now', wrap(async (req, res) => {
     length: Math.max(0, Math.min(86400, Number(b.length) || 0)),
     next: b.next?.id ? { id: clip(b.next.id, 60), name: clip(b.next.name) } : null,
     count: Math.max(0, Math.min(1000, Number(b.count) || 0)),
-    current: latest === null ? null : String(b.v) === latest, // has the latest playlist
+    current: b.v === undefined ? null : String(b.v) === latest, // has the latest playlist
     size: Number(b.w) > 0 ? `${Math.round(b.w)}×${Math.round(b.h)}` : '',
   });
   nowPlaying.set(String(s._id), room);
   if (!s.lastSeenAt || now - new Date(s.lastSeenAt).getTime() > 60 * 1000) await Screen.updateOne({ _id: s._id }, { lastSeenAt: new Date(now) });
-  res.status(204).end();
+  // The playlist's version, so a screen with an older one fetches the new one straight away
+  res.set('Cache-Control', 'no-store');
+  res.json({ v: latest });
 }));
 const screenItems = async (s) => playerItems(await playlistFor(s), s, (a, page = null) => `/api/screen/${s.token}/file/${a._id}${page !== null ? `/${page}` : ''}`);
 

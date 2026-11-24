@@ -48,6 +48,7 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: 's
 const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 function durationText(a) {
   if (a.kind === 'video') return a.seconds > 0 ? `${a.seconds}s` : a.videoSeconds ? `${mmss(a.videoSeconds)} (whole)` : 'Whole video';
+  if (a.seconds === 0) return 'Stays on';
   return `${a.seconds}s${a.kind === 'pdf' && a.pages > 1 ? ` × ${a.pages} pages` : ''}`;
 }
 // Why an item isn't showing right now
@@ -488,7 +489,8 @@ function When({ f, set, kind }) {
       ) : (
         <label className="field sg-secs">
           <span>{kind === 'pdf' ? 'Seconds per page' : kind === 'web' ? 'Seconds on screen' : kind ? 'Seconds on screen' : 'Seconds per picture or page'}</span>
-          <input type="number" min="3" max="86400" value={f.seconds} onChange={(e) => set({ seconds: e.target.value })} />
+          <input type="number" min="0" max="86400" value={f.seconds} onChange={(e) => set({ seconds: e.target.value })} />
+          <span className="muted small">{Number(f.seconds) === 0 && f.seconds !== '' ? 'Stays on: the screen won’t move on from it to anything else until it’s switched off or ends.' : '0 keeps it on screen. Anything that’s the only item on a screen stays on by itself.'}</span>
         </label>
       )}
     </>
@@ -498,7 +500,7 @@ const body = (f, kind) => ({
   screens: f.screens,
   startAt: fromInput(f.start),
   endAt: fromInput(f.end),
-  seconds: kind === 'video' ? (f.whole ? 0 : Number(f.seconds) || 10) : Number(f.seconds) || 10,
+  seconds: kind === 'video' ? (f.whole ? 0 : Number(f.seconds) || 10) : f.seconds === '' || !Number.isFinite(Number(f.seconds)) ? 10 : Math.max(0, Number(f.seconds)),
   ...(kind === 'video' ? { sound: f.sound } : {}),
 });
 
@@ -522,7 +524,7 @@ function AddAsset({ d, act, screen, onClose }) {
   };
   const addWeb = async (e) => {
     e.preventDefault();
-    if (await act(() => api('/signage/assets/web', { method: 'POST', body: { ...web, ...body({ ...f, seconds: f.seconds || 30 }, 'web') } }), 'Web page added')) onClose();
+    if (await act(() => api('/signage/assets/web', { method: 'POST', body: { ...web, ...body({ ...f, seconds: String(f.seconds) === '0' ? 0 : f.seconds || 30 }, 'web') } }), 'Web page added')) onClose();
   };
   const fromPlan = async (m) => {
     if (await act(() => api('/signage/assets/from-media', { method: 'POST', body: { mediaId: m.id, ...body(f, m.kind === 'video' ? 'video' : null) } }), `Added ${m.title}`)) onClose();
@@ -600,7 +602,7 @@ function AddAsset({ d, act, screen, onClose }) {
 
 // ---------- edit ----------
 function EditAsset({ d, act, a, onClose }) {
-  const [f, setF] = useState({ name: a.name, screens: a.screens, start: toInput(a.startAt), end: toInput(a.endAt), seconds: a.seconds || 10, whole: a.kind === 'video' && !a.seconds, sound: a.sound, enabled: a.enabled });
+  const [f, setF] = useState({ name: a.name, screens: a.screens, start: toInput(a.startAt), end: toInput(a.endAt), seconds: a.kind === 'video' ? a.seconds || 10 : (a.seconds ?? 10), whole: a.kind === 'video' && !a.seconds, sound: a.sound, enabled: a.enabled });
   const set = (p) => setF({ ...f, ...p });
   const [toPlan, setToPlan] = useState(null);
   const [eventId, setEventId] = useState('');
@@ -1060,7 +1062,7 @@ function Preview({ d, screen, now, onClose }) {
         <ol className="sg-prev-list small">
           {p.items.map((i) => (
             <li key={i.id} className={cur?.id === i.id ? 'sg-prev-on' : ''}>
-              {i.name} <span className="muted">· {i.kind === 'video' && !i.seconds ? 'whole video' : `${i.seconds}s`}</span>
+              {i.name} <span className="muted">· {i.kind === 'video' && !i.seconds ? 'whole video' : i.seconds === 0 ? 'stays on' : `${i.seconds}s`}</span>
             </li>
           ))}
         </ol>

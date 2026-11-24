@@ -242,8 +242,8 @@ ok(await ben.c('GET', '/api/signage/now'), 403);
 ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'x y', item: null }), 400);
 ok(await anon('POST', '/api/screen/notarealtokennotarealtoken/now', { player: 'tv-lobby-1' }), 404);
 const [first, second] = play.items;
-ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-1', v: play.v, count: play.items.length, item: first, elapsed: 4, length: 20, next: second, w: 1920, h: 1080 }), 204);
-ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-2', v: 'old', item: second, elapsed: 1, length: 2 }), 204);
+assert.equal(ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-1', v: play.v, count: play.items.length, item: first, elapsed: 4, length: 20, next: second, w: 1920, h: 1080 })).v, play.v, 'a check-in answers with the playlist’s version');
+assert.equal(ok(await anon('POST', `/api/screen/${lobbyToken}/now`, { player: 'tv-lobby-2', v: 'old', item: second, elapsed: 1, length: 2 })).v, play.v, 'so a screen on an old one knows to fetch the new one');
 now = ok(await pia.c('GET', '/api/signage/now'));
 st = now.screens.find((x) => x.id === lobby.id);
 assert.equal(st.online, true);
@@ -257,6 +257,11 @@ assert.equal(tv1.size, '1920×1080');
 assert.ok(Math.abs(now.serverNow - 4000 - tv1.startedAt) < 3000, 'when the item started, so the tab can count down and mirror it');
 assert.equal(st.players.find((p) => p.player === 'tv-lobby-2').current, false, 'an old playlist shows as not caught up');
 assert.equal(now.screens.find((x) => x.id === hall.id).online, false, 'other screens stay offline');
+// 0 seconds on a picture: it stays on (the player doesn't move on from it)
+const welcomeSecs = ok(await admin('GET', '/api/signage')).assets.find((a) => a.id === welcome.id).seconds;
+ok(await admin('PATCH', `/api/signage/assets/${welcome.id}`, { seconds: 0 }));
+assert.equal(ok(await anon('GET', `/api/screen/${hallToken}`)).items.find((i) => i.name === 'welcome').seconds, 0, '0 seconds reaches the screen as 0 (stays on), not the default');
+ok(await admin('PATCH', `/api/signage/assets/${welcome.id}`, { seconds: welcomeSecs }));
 step('live-link screens check in with what they’re showing, how far in, what’s next, and whether they have the latest playlist');
 
 // ---------- upload links ----------
