@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# Ship code changes to the live site: save to GitHub, build the images here, send them to the
-# church box, and restart the app there. The source code never leaves this server.
+# Ship the app to the live site: pull from GitHub, save any local edits, build the images here,
+# send them to the church box, and restart the app there. The source code never leaves this server.
 #   scripts/ship.sh "what you changed"     (message is optional)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST=impactchurch@church-signage
 CC='/usr/local/bin/cc docker compose -f /srv/appdata/crew-call/compose.yaml'
+SHIPPED=/srv/stacks/infra/church/state/last-shipped-commit
 say() { printf '%s  %s\n' "$(date '+%T')" "$*"; }
 
+say "Getting the latest code from GitHub"
+git pull --ff-only || { say "STOPPED: this server and GitHub both have different changes. Sort out with git, then re-run."; exit 1; }
 ./save.sh "${1:-}"
+
+# Changes the church box needs by hand
+prev=$(cat "$SHIPPED" 2>/dev/null || git rev-parse HEAD~1)
+changed=$(git diff --name-only "$prev" HEAD -- docker-compose.yml compose.override.yaml .env.example || true)
+if [ -n "$changed" ]; then
+  echo; echo "These changed since the last ship:"; echo "$changed" | sed 's/^/  - /'
+  echo "If there are new services, settings, or .env variables, add them to the church box's"
+  echo "compose.yaml / .env too (and to the home .env). See: git diff $prev HEAD -- $changed"
+  read -rp "Continue shipping? [y/N] " ok; [ "$ok" = y ] || { say "Stopped. Nothing was shipped."; exit 1; }
+fi
 
 say "Building images"
 docker compose build api web
@@ -32,4 +45,5 @@ if [ -f /srv/stacks/infra/church/state/failover-active ]; then
   say "The site is running from home right now, so updating the home copy too"
   docker compose up -d --no-build api web
 fi
-say "Shipped. Live at https://sched-mas.us"
+git rev-parse HEAD > "$SHIPPED"
+say "Shipped $(git log -1 --format='%h %s'). Live at https://sched-mas.us"
