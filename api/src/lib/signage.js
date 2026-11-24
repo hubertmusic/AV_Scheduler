@@ -14,11 +14,13 @@ const run = promisify(execFile);
 
 // ---------- who manages the screens ----------
 // The admin, any team's head leader, and leaders given the Signage privilege on any team.
+// The admin, every team's head leader, team leaders (unless it's been turned off for them), and
+// anyone else the admin or a head leader has given it to, crew members included.
 export function managesSignage(user) {
   if (!user) return false;
   if (user.role === 'admin') return true;
   if (!user.teams?.length) return user.role === 'leader' && !!user.perms?.signage;
-  return user.teams.some((m) => m.head || (m.role === 'leader' && m.perms?.signage));
+  return user.teams.some((m) => m.head || !!m.perms?.signage);
 }
 
 // ---------- tools on the server ----------

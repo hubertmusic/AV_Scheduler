@@ -13,7 +13,7 @@ const PERMS = [
   { id: 'plans', label: 'Lead service plans', help: 'Set the sermon, speaker, pastor’s notes and order of service; send quick links and approve late changes. (Everyone on the team can add songs, Bible texts, chord notes and slides.)' },
   { id: 'groups', label: 'Manage outside groups', help: 'Add and edit outside groups like a visiting band or choir, with their contacts and WhatsApp group links.', av: true },
   { id: 'vault', label: 'Keep the vault', help: 'See and change the team’s passwords and keys (stream keys, ProPresenter licenses, logins) on Notes & vault, and give others time in it.' },
-  { id: 'signage', label: 'Manage signage', help: 'Decide what the church screens show on the Signage tab: add and schedule pictures, videos and PDFs, approve what people send with upload links, and set up the screens.' },
+  { id: 'signage', label: 'Manage signage', help: 'Decide what the church screens show on the Signage tab: add and schedule pictures, videos and PDFs, approve what people send with upload links, and set up the screens. On for every team leader unless you turn it off; you can also give it to a crew member.' },
 ];
 // The same privileges, worded for Church Admin
 const OFFICE_PERMS = [
@@ -24,7 +24,7 @@ const OFFICE_PERMS = [
   { id: 'resources', label: 'Manage documents', help: 'Add and remove documents, policies, forms and resources.' },
   { id: 'people', label: 'Manage people & committees', help: 'Invite people, set committees and offices, and help with sign-in.' },
   { id: 'vault', label: 'Keep the vault', help: 'See and change Church Admin’s passwords and accounts on Notes & vault, and give others time in it. Only people on Church Admin can ever see it, not the Crew Call admin.' },
-  { id: 'signage', label: 'Manage signage', help: 'Decide what the church screens show on the Signage tab: add and schedule pictures, videos and PDFs, approve what people send with upload links, and set up the screens.' },
+  { id: 'signage', label: 'Manage signage', help: 'Decide what the church screens show on the Signage tab: add and schedule pictures, videos and PDFs, approve what people send with upload links, and set up the screens. On for every team leader unless you turn it off; you can also give it to a crew member.' },
 ];
 const permsFor = (app) => (app.isOffice ? OFFICE_PERMS : PERMS.filter((p) => !p.av || app.isAv));
 
@@ -159,6 +159,7 @@ function PersonPanel({ person, me, positions }) {
         body.role = f.role;
         body.leaderTitle = f.leaderTitle;
         if (f.role === 'leader' && person.role === 'leader') body.perms = f.perms;
+        if (f.role === 'crew' && person.role === 'crew') body.perms = { signage: !!f.perms.signage };
       }
       await api(`/people/${person.id}`, { method: 'PATCH', body });
       app.toast(f.role === 'leader' && person.role !== 'leader' ? `${person.name} is now a team leader — set their privileges below` : 'Saved');
@@ -351,6 +352,19 @@ function PersonPanel({ person, me, positions }) {
           ))}
           {person.head && <p className="muted small">The head leader has every privilege on this team. Only the admin picks the head leader (Settings → Teams).</p>}
           {!person.head && !canRoles && <p className="muted small">Only the admin or the head leader can change privileges.</p>}
+        </fieldset>
+      )}
+      {person.role === 'crew' && f.role === 'crew' && (canRoles || f.perms.signage) && (
+        <fieldset className="fieldset">
+          <legend>Church screens</legend>
+          <label className="check check-top">
+            <input type="checkbox" checked={!!f.perms.signage} disabled={!canRoles || person.id === me.id} onChange={() => togglePerm('signage')} />
+            <span className="col">
+              <strong>Manage signage</strong>
+              <span className="muted small">Let {firstName(person.name)} decide what the church screens show on the Signage tab, without making them a team leader. Team leaders have this unless you turn it off.</span>
+            </span>
+          </label>
+          {!canRoles && <p className="muted small">Only the admin or the head leader can change this.</p>}
         </fieldset>
       )}
       {person.role === 'admin' && <p className="muted small">The admin always has every privilege.</p>}

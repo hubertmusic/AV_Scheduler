@@ -13,7 +13,7 @@ import { membershipOf } from '../lib/util.js';
 import { isOfficeTeam, officePerms, rosterFor, seesRoster } from '../lib/office.js';
 import { mailerReady, sendMail } from '../lib/mailer.js';
 
-const LEADER_PERMS = { edit: true, approve: true, message: true, resources: false, people: false, groups: false, plans: true };
+const LEADER_PERMS = { edit: true, approve: true, message: true, resources: false, people: false, groups: false, plans: true, vault: false, signage: true };
 
 export const peopleRouter = Router();
 
@@ -199,12 +199,16 @@ peopleRouter.patch('/:id', requirePerm('people'), wrap(async (req, res) => {
         m.perms = { ...LEADER_PERMS };
         if (!m.title) m.title = 'Team leader';
       }
-      if (b.role === 'crew') m.head = false;
+      if (b.role === 'crew' && m.role !== 'crew') {
+        m.head = false;
+        m.perms = Object.fromEntries(PERMS.map((p) => [p, false])); // a leader's privileges don't carry over (signage can be given again below)
+      }
       m.role = b.role;
     }
     if (b.leaderTitle !== undefined) m.title = str(b.leaderTitle, 60);
     if (b.perms && typeof b.perms === 'object') {
-      for (const p of PERMS) if (b.perms[p] !== undefined) m.perms[p] = !!b.perms[p];
+      // Crew members can be given one thing: managing the church screens
+      for (const p of m.role === 'leader' ? PERMS : ['signage']) if (b.perms[p] !== undefined) m.perms[p] = !!b.perms[p];
     }
     user.markModified('teams');
   }

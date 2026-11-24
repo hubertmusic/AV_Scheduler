@@ -244,7 +244,7 @@ The **Signage** tab decides what the church screens show. It's separate from ser
 - **What it can show:** pictures; videos (made into an H.264 MP4 every screen can play, at most 1080p); PDFs, one page at a time (for PowerPoint, Keynote or Word, save it as a PDF first); and web pages.
 - **Several screens** (Lobby, Fellowship hall…). Each item goes on every screen or only the ones you pick.
 - **Upload links.** Make a link that works until you turn it off, or for 4 hours, a day, a week or 30 days. Anyone with it can send pictures, videos and PDFs with their name and the dates they'd like. Everything waits under **Waiting** until someone approves it (and picks the screens and dates) or turns it down. Each link has a QR code for the bulletin.
-- **Who manages it:** the admin, any team's head leader, and leaders given **Manage signage** in Team & roles (on AV, Praise or Church Admin).
+- **Who manages it:** the admin, every team's head leader, and every team leader on AV, Praise or Church Admin. The admin or a head leader can switch **Manage signage** off for a leader in Team & roles, or turn it on for a crew member (under **Church screens** on their page) without making them a leader. Nobody else can change anything: screen links only play, and what comes in through upload links waits for approval. A leader moved back to crew loses it.
 
 Each screen gets its playlist one of two ways (set under **Screens**):
 

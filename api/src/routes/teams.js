@@ -11,7 +11,7 @@ import { readCallLink } from '../lib/callLink.js';
 
 export const teamsRouter = Router();
 
-const LEADER_PERMS = { edit: true, approve: true, message: true, resources: true, people: true, groups: false, plans: true };
+const LEADER_PERMS = { edit: true, approve: true, message: true, resources: true, people: true, groups: false, plans: true, signage: true };
 
 async function loadTeam(key) {
   const t = await Team.findOne({ key });
