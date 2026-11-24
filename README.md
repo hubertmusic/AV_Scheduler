@@ -236,6 +236,25 @@ Crew Call doesn't write `.pro` files itself. The format is undocumented, and gen
 - **Download for ProPresenter** (a zip): each song as an importable `.txt` plus its stored `.pro`, `Bible texts.txt`, `Service notes.txt`, a `Media` folder with every approved upload exactly as it was uploaded (pictures, videos, PDFs, the pastor's own slide decks), and a PowerPoint of the service.
 - **PowerPoint**: 16:9 slides, white text on black: a title slide (pastor's notes in its speaker notes), each song's title and lyric slides, the Bible texts broken between verses, then each picture full screen. Videos and documents aren't put in the deck; they're in the zip's Media folder. Open it in PowerPoint or Keynote, or bring it into ProPresenter with **File → Import → PowerPoint**.
 
+## 6a. Digital signage (Anthias)
+
+The **Signage** tab decides what the church screens show. It's separate from service plans, but you can pull anything from a plan's media onto the screens (**Show on screens** on a plan's file, or **Add → From a service plan**), and send a screen item into a plan (**Edit → Add to a service plan**). It's laid out like Anthias's own screen:
+
+- **Playlist.** Active items (showing now) and Inactive ones (switched off, scheduled for later, ended, or still getting ready), each with a start, an end, a duration and an on/off switch. Drag ⠿ to change the order. Pick a screen at the top to see just its playlist. **Preview** plays it here.
+- **What it can show:** pictures; videos (made into an H.264 MP4 every screen can play, at most 1080p); PDFs, one page at a time (for PowerPoint, Keynote or Word, save it as a PDF first); and web pages.
+- **Several screens** (Lobby, Fellowship hall…). Each item goes on every screen or only the ones you pick.
+- **Upload links.** Make a link that works until you turn it off, or for 4 hours, a day, a week or 30 days. Anyone with it can send pictures, videos and PDFs with their name and the dates they'd like. Everything waits under **Waiting** until someone approves it (and picks the screens and dates) or turns it down. Each link has a QR code for the bulletin.
+- **Who manages it:** the admin, any team's head leader, and leaders given **Manage signage** in Team & roles (on AV, Praise or Church Admin).
+
+Each screen gets its playlist one of two ways (set under **Screens**):
+
+1. **Live link** (works from any network). In Anthias choose **Add Asset → URL**, paste the screen's link, set the duration to a day (86400 seconds) and the end date far ahead, and switch off Anthias's other items. The link shows whatever is on that screen's playlist and checks for changes every minute. It keeps playing what it has if the internet drops.
+2. **Crew Call sends to Anthias.** Crew Call adds each item to Anthias's own playlist through its API (Anthias's own video player is the smoothest), keeps names, dates, durations, on/off and order in step, and removes what you delete here. It only touches items it added, which show in Anthias as "Crew Call · …". This needs Crew Call to reach the Pi, so Crew Call and the screen must be on the same network (the church server). Enter the Pi's address (like `https://192.168.1.50`) and, if Anthias sign-in is on, an API token from **Anthias → Settings → API tokens**. **Test connection** checks it; changes are sent a few seconds after you make them and every 10 minutes.
+
+**Seeing what's on right now.** Screens on a live link check in every 10 seconds and whenever a new item starts. Above the playlist, each screen shows a green dot and what it's showing (*"welcome" · 6s left · next: countdown*), or a red dot with *offline · last seen 7:42 PM*; the row being shown gets *On screen now: Lobby*. Two TVs on one link show as *on 2 TVs*, and right after you change something, *picking up your changes…* until the screen has the new playlist (within a minute). **Watch** (or **Preview** with a screen picked) shows that screen live, on the same item and at the same point, and keeps in step with it. Screens that Crew Call sends to Anthias are played by Anthias itself, so for those the tab shows when Crew Call last sent the playlist, not the item on screen.
+
+Anthias plays video on a Raspberry Pi 4 (up to 1080p) and Pi 5 (up to 4K); keep Anthias updated, since recent versions play video far more smoothly on a Pi 5. Video conversion and PDF pages need `ffmpeg` and `poppler-utils`, which the API image now installs; the API log says `[signage] video on, PDFs on` at start-up.
+
 ## 7. Accounts and guests
 
 - **Crew and leaders** each have their own account. Add people on **Team & roles**, send each one their invite link, and they set a password. Any number can be signed in at once.

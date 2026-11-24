@@ -4,6 +4,7 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY src ./src
+RUN apk add --no-cache ffmpeg poppler-utils
 RUN mkdir -p /data/uploads && chown node:node /data/uploads
 USER node
 EXPOSE 4000

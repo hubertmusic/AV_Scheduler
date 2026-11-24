@@ -1,7 +1,8 @@
 import { config } from '../config.js';
 import { Router } from 'express';
 import { IANAZone } from 'luxon';
-import { Assignment, Blackout, Committee, Event, EVENT_KINDS, Group, OfficeEvent, Position, Request, Resource, Team, Unavailable, User } from '../models.js';
+import { Assignment, Blackout, Committee, Event, EVENT_KINDS, Group, OfficeEvent, Position, Request, Resource, Team, Unavailable, User, SignageAsset } from '../models.js';
+import { managesSignage } from '../lib/signage.js';
 import { forgetSessionRules, requireAdmin, requirePerm, signOutUsers } from '../auth.js';
 import { addDays, bad, can, conflict, DATE_RE, forbidden, getSettings, isHttpUrl, isId, membershipOf, normalizeUrl, notFound, str, TIME_RE, todayIn, wrap } from '../lib/util.js';
 import { eventView, groupView, meView, personView, requestView } from '../lib/views.js';
@@ -86,6 +87,8 @@ bootstrapRouter.get('/', wrap(async (req, res) => {
     committees: office ? (await Committee.find({ team }).sort({ order: 1, name: 1 }).lean()).map((c) => ({ key: c.key, name: c.name, color: c.color, quorum: c.quorum })) : [],
     // Whether they see this team's vault: they keep it ({ keeper }), or a keeper gave them time ({ until })
     vault: req.previewing ? null : await vaultFor(req.user, team),
+    // The church's screens: whether they manage them, and how many uploads wait for a look
+    signage: managesSignage(req.user) ? { waiting: await SignageAsset.countDocuments({ status: 'pending' }) } : null,
     office: officeSetup ? { rooms: officeSetup.rooms || [], remindMinutes: officeSetup.remindMinutes ?? 60, remindDays: officeSetup.remindDays ?? 1 } : null,
   });
 }));
