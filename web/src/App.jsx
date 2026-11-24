@@ -35,6 +35,7 @@ import { StagePage } from './pages/Live.jsx';
 import { ScreenPage } from './signagePlayer.jsx';
 import SendToScreens from './pages/SendToScreens.jsx';
 const Signage = lazy(() => import('./pages/Signage.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
 
 // Signs out after `minutes` without a click, tap or key press, and tells the server
 // someone's still here while they work on a page without saving.
@@ -222,22 +223,31 @@ const TABS = [
   { id: 'schedule', label: 'Schedule', show: () => true, side: 'service' },
   { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message, side: 'service' },
   { id: 'mine', label: 'My shifts', show: () => true, side: 'service' },
+  { id: 'requests', label: 'Requests', show: (c) => c.approve, side: 'service' }, // swaps, drops and pick-ups to approve
   { id: 'plans', label: 'Service plans', show: () => true, side: 'service' },
   { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader', side: 'service' },
-  { id: 'gear', label: 'Gear', show: () => true, av: true, side: 'service' },
-  { id: 'requests', label: 'Requests', show: (c) => c.approve, side: 'service' },
   { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message, av: true, side: 'service' },
+  { id: 'gear', label: 'Gear', show: () => true, av: true, side: 'service' },
+  { id: 'reports', label: 'Reports', show: () => true, av: true, side: 'service' }, // problems and missing gear; inventory, audits and buying for leaders
   { id: 'office-schedule', label: 'Schedule', show: () => true, side: 'office' },
   { id: 'office-overview', label: 'Agenda overview', show: () => true, side: 'office' },
   { id: 'office-mine', label: 'My calendar', show: () => true, side: 'office' },
   { id: 'office-plan', label: 'Planning', show: () => true, side: 'office' },
   { id: 'vault', label: 'Notes', show: (c, me) => !me.previewing }, // “Notes & vault” for people who see the vault
-  { id: 'team', label: 'Team & roles', show: (c) => c.people },
   { id: 'signage', label: 'Signage', show: (c, me, team, boot) => !!boot?.signage }, // the church screens, on every side
-  { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
   { id: 'resources', label: 'Resources & help', show: () => true },
-  { id: 'settings', label: 'Settings', show: (c, me) => me.role === 'admin' },
+  { id: 'settings', label: 'Settings', sub: 'General', show: (c, me) => me.role === 'admin' },
+  { id: 'team', label: 'Team & roles', show: (c) => c.people },
+  { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
   { id: 'activity', label: 'Activity', show: (c, me) => me.role === 'admin' },
+];
+// Tabs that sit together under one heading. A heading with only one tab someone can see just
+// shows that tab; each tab keeps its own #link, so links in reminder emails still work.
+const GROUPS = [
+  { id: 'g-schedule', label: 'Schedule', tabs: ['schedule', 'check', 'mine', 'requests'] },
+  { id: 'g-worship', label: 'Worship planner', tabs: ['plans', 'planning', 'groups'] },
+  { id: 'g-gear', label: 'Gear', tabs: ['gear', 'reports'] },
+  { id: 'g-settings', label: 'Settings', tabs: ['settings', 'team', 'setup', 'activity'] },
 ];
 
 // A team's leaders asked this person to join (Church Admin): it's on their profile once they accept
@@ -302,22 +312,62 @@ function Shell({ boot, reload, onSignedOut, preview }) {
   // The team's look (Team setup → Look); a draft shows while a leader is trying one out
   const [themeDraft, setThemeDraft] = useState(null);
   const [signageWaiting, setSignageWaiting] = useState(boot.signage?.waiting || 0);
+  const [gearOpen, setGearOpen] = useState(boot.gearReports?.open || 0);
+  useEffect(() => setGearOpen(boot.gearReports?.open || 0), [boot.gearReports?.open]);
   useEffect(() => setSignageWaiting(boot.signage?.waiting || 0), [boot.signage?.waiting]);
   const theme = themeDraft || team.theme || { preset: { av: 'console', music: 'sanctuary', office: 'boardroom' }[team.kind] || 'classic' };
   const themeKey = JSON.stringify(theme);
   useEffect(() => applyTheme(JSON.parse(themeKey)), [themeKey]);
+
+  // The top row: tabs on their own, and headings (Schedule, Worship planner…) for tabs grouped together
+  const topTabs = [];
+  for (const t of tabs) {
+    const g = GROUPS.find((x) => x.tabs.includes(t.id));
+    const members = g ? tabs.filter((x) => g.tabs.includes(x.id)) : [];
+    if (!g || members.length < 2) topTabs.push(t);
+    else if (!topTabs.some((x) => x.id === g.id)) topTabs.push({ ...g, group: true, tabs: members });
+  }
+  const openGroup = topTabs.find((t) => t.group && t.tabs.some((x) => x.id === tab)) || null;
+  const lastIn = (g) => {
+    try {
+      const id = localStorage.getItem(`cc-last-${g.id}`);
+      if (g.tabs.some((x) => x.id === id)) return id;
+    } catch {
+      /* private mode */
+    }
+    return g.tabs[0].id;
+  };
+  const tabLabel = (t) => (t.id === 'vault' && boot.vault ? 'Notes & vault' : t.label);
+  const badgeOf = (id) =>
+    ({
+      requests: { n: pending, title: 'Requests waiting' },
+      'office-plan': { n: pending, title: 'Event requests waiting' },
+      plans: { n: pendingPlans, title: 'Guest uploads waiting for approval' },
+      signage: { n: signageWaiting, title: 'Sent for the screens, waiting for a look' },
+      reports: { n: boot.gearReports ? gearOpen : 0, title: 'Problems and missing gear to look at' },
+    })[id] || { n: 0 };
 
   const setTab = (id) => {
     if (unsaved.size && !window.confirm('You have unsaved changes on this page. Leave without saving?')) return;
     unsaved.clear();
     setTabState(id);
     window.history.replaceState(null, '', `#${id}`);
+
     window.scrollTo(0, 0);
   };
 
   useEffect(() => {
     if (!isAdmin) noteView(tab);
   }, [tab, isAdmin]);
+  // A heading (Schedule, Settings…) opens on the page you were last on under it
+  useEffect(() => {
+    const g = GROUPS.find((x) => x.tabs.includes(tab));
+    try {
+      if (g) localStorage.setItem(`cc-last-${g.id}`, tab);
+    } catch {
+      /* private mode */
+    }
+  }, [tab]);
 
   // Follow #hash links (e.g. from reminder emails) while the app is open.
   useEffect(() => {
@@ -413,6 +463,7 @@ function Shell({ boot, reload, onSignedOut, preview }) {
       previewTheme: setThemeDraft,
       signage: boot.signage,
       setSignageWaiting,
+      setGearOpen,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot, toast, resFilter, refreshPending, weekend, officeMeeting]);
@@ -489,16 +540,36 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         </div>
       )}
       <nav className="tabs" aria-label="Sections">
-        {tabs.map((t) => (
-          <button key={t.id} type="button" className={`tab ${tab === t.id ? 'tab-on' : ''}`} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
-            {t.id === 'vault' && boot.vault ? 'Notes & vault' : t.label}
-            {t.id === 'requests' && pending > 0 && <span className="badge">{pending}</span>}
-            {t.id === 'office-plan' && pending > 0 && <span className="badge" title="Event requests waiting">{pending}</span>}
-            {t.id === 'plans' && pendingPlans > 0 && <span className="badge" title="Guest uploads waiting for approval">{pendingPlans}</span>}
-            {t.id === 'signage' && signageWaiting > 0 && <span className="badge" title="Sent for the screens, waiting for a look">{signageWaiting}</span>}
-          </button>
-        ))}
+        {topTabs.map((t) => {
+          const on = t.group ? t.tabs.some((x) => x.id === tab) : tab === t.id;
+          const count = (t.group ? t.tabs : [t]).reduce((n, x) => n + badgeOf(x.id).n, 0);
+          const b = !t.group && badgeOf(t.id);
+          return (
+            <button key={t.id} type="button" className={`tab ${on ? 'tab-on' : ''}`} aria-current={on ? 'page' : undefined} aria-expanded={t.group ? on : undefined} onClick={() => setTab(t.group ? lastIn(t) : t.id)}>
+              {t.group ? t.label : tabLabel(t)}
+              {count > 0 && (
+                <span className="badge" title={t.group ? undefined : b.title}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </nav>
+      {openGroup && (
+        <nav className="subtabs" aria-label={openGroup.label}>
+          {openGroup.tabs.map((t) => (
+            <button key={t.id} type="button" className={`subtab ${tab === t.id ? 'subtab-on' : ''}`} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
+              {t.sub || tabLabel(t)}
+              {badgeOf(t.id).n > 0 && (
+                <span className="badge" title={badgeOf(t.id).title}>
+                  {badgeOf(t.id).n}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      )}
       {isAdmin && <ActivityTicker onOpen={() => setTab('activity')} />}
       <main id="main" className="main">
         {tab === 'schedule' && <Schedule />}
@@ -506,6 +577,11 @@ function Shell({ boot, reload, onSignedOut, preview }) {
         {tab === 'requests' && <Requests />}
         {tab === 'plans' && <Plans />}
         {tab === 'gear' && <Gear />}
+        {tab === 'reports' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Reports />
+          </Suspense>
+        )}
         {tab === 'planning' && (
           <Suspense fallback={<div className="loading-inline">Loading…</div>}>
             <Planning />

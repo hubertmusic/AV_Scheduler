@@ -3,10 +3,24 @@
 // leaders with plan access add and remove items.
 import { Router } from 'express';
 import { Gear, GearLog, User } from '../models.js';
-import { requirePerm } from '../auth.js';
-import { bad, isId, notFound, str, wrap } from '../lib/util.js';
+import { bad, forbidden, isId, notFound, str, wrap } from '../lib/util.js';
+import { isTeamLeader } from '../lib/teams.js';
 
 export const gearRouter = Router();
+// Adding, editing and removing gear: team leaders (and anyone who can edit service plans)
+export const gearLead = (req, res, next) => (req.can?.plans || isTeamLeader(req) ? next() : next(forbidden('Only a team leader can do that.')));
+
+const CONDITIONS = ['', 'new', 'good', 'fair', 'poor', 'broken'];
+const money = (v) => (v === '' || v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Math.max(0, Math.round(Number(v) * 100) / 100));
+// The inventory details, from a form
+function details(g, b) {
+  for (const k of ['brand', 'model', 'serial', 'assetTag', 'location']) if (b[k] !== undefined) g[k] = str(b[k], 80);
+  if (b.quantity !== undefined) g.quantity = Math.max(0, Math.min(9999, Math.round(Number(b.quantity)) || 0));
+  if (b.cost !== undefined) g.cost = money(b.cost);
+  if (b.purchasedOn !== undefined) g.purchasedOn = /^\d{4}-\d{2}-\d{2}$/.test(b.purchasedOn) ? b.purchasedOn : '';
+  if (b.condition !== undefined && CONDITIONS.includes(b.condition)) g.condition = b.condition;
+  if (b.missing !== undefined) g.missing = !!b.missing;
+}
 
 async function names(ids) {
   const users = await User.find({ _id: { $in: ids.filter(Boolean) } }, { name: 1 }).lean();
@@ -23,6 +37,17 @@ const view = (g, who) => ({
   outAt: g.outAt,
   attention: g.attention,
   batteryAt: g.batteryAt,
+  brand: g.brand || '',
+  model: g.model || '',
+  serial: g.serial || '',
+  assetTag: g.assetTag || '',
+  quantity: g.quantity ?? 1,
+  location: g.location || '',
+  purchasedOn: g.purchasedOn || '',
+  cost: g.cost ?? null,
+  condition: g.condition || '',
+  missing: !!g.missing,
+  auditedAt: g.auditedAt || null,
 });
 
 async function load(id) {
@@ -40,24 +65,27 @@ gearRouter.get('/', wrap(async (req, res) => {
   res.json(list.map((g) => view(g, who)));
 }));
 
-gearRouter.post('/', requirePerm('plans'), wrap(async (req, res) => {
+gearRouter.post('/', gearLead, wrap(async (req, res) => {
   const name = str(req.body?.name, 80);
   if (!name) throw bad('Name the item, e.g. “Wireless mic 3”.');
-  const g = await Gear.create({ name, category: str(req.body.category, 40), notes: str(req.body.notes, 300) });
+  const g = new Gear({ name, category: str(req.body.category, 40), notes: str(req.body.notes, 300) });
+  details(g, req.body);
+  await g.save();
   res.locals.activity = `Added ${name} to the gear list`;
   res.status(201).json(view(g, {}));
 }));
 
-gearRouter.patch('/:id', requirePerm('plans'), wrap(async (req, res) => {
+gearRouter.patch('/:id', gearLead, wrap(async (req, res) => {
   const g = await load(req.params.id);
   if (req.body.name !== undefined) g.name = str(req.body.name, 80) || g.name;
   if (req.body.category !== undefined) g.category = str(req.body.category, 40);
   if (req.body.notes !== undefined) g.notes = str(req.body.notes, 300);
+  details(g, req.body);
   await g.save();
   await reply(res, g);
 }));
 
-gearRouter.delete('/:id', requirePerm('plans'), wrap(async (req, res) => {
+gearRouter.delete('/:id', gearLead, wrap(async (req, res) => {
   const g = await load(req.params.id);
   await GearLog.deleteMany({ gear: g._id });
   await g.deleteOne();

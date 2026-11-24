@@ -67,7 +67,7 @@ checklistsRouter.post('/:eventId', wrap(async (req, res) => {
 export const issuesRouter = Router();
 issuesRouter.use(requireFeature('problems'));
 
-async function issueViews(list) {
+export async function issueViews(list) {
   const who = await names(list.flatMap((i) => [i.reportedBy, i.fixedBy]));
   const evs = Object.fromEntries((await Event.find({ _id: { $in: list.map((i) => i.event).filter(Boolean) } }, { title: 1, date: 1 }).lean()).map((e) => [String(e._id), e]));
   const gear = Object.fromEntries((await Gear.find({ _id: { $in: list.map((i) => i.gear).filter(Boolean) } }, { name: 1 }).lean()).map((g) => [String(g._id), g.name]));
@@ -75,6 +75,7 @@ async function issueViews(list) {
     id: String(i._id),
     title: i.title,
     details: i.details,
+    kind: i.kind || 'problem',
     status: i.status,
     event: i.event && evs[String(i.event)] ? { id: String(i.event), title: evs[String(i.event)].title, date: evs[String(i.event)].date } : null,
     gear: i.gear ? { id: String(i.gear), name: gear[String(i.gear)] || 'Removed item' } : null,
@@ -88,32 +89,57 @@ async function issueViews(list) {
 
 issuesRouter.get('/', wrap(async (req, res) => {
   const status = ['open', 'fixed'].includes(req.query.status) ? req.query.status : null;
-  const list = await Issue.find(status ? { status } : {}).sort({ status: -1, createdAt: -1 }).limit(200).lean();
+  const q = status ? { status } : {};
+  if (!req.can.plans && !isTeamLeader(req)) q.reportedBy = req.user._id; // crew see what they reported
+  const list = await Issue.find(q).sort({ status: -1, createdAt: -1 }).limit(200).lean();
   res.json(await issueViews(list));
 }));
 
-export async function reportIssue({ title, details, eventId, gearId, by }) {
-  const t = str(title, 120);
-  if (!t) throw bad('Say what the problem is.');
+export async function reportIssue({ title, details, eventId, gearId, by, kind = 'problem' }) {
+  const k = ['problem', 'missing', 'other'].includes(kind) ? kind : 'problem';
   const gear = isId(gearId) ? await Gear.findById(gearId) : null;
+  const t = str(title, 120) || (k === 'missing' && gear ? `${gear.name} is missing` : '');
+  if (!t) throw bad(k === 'missing' ? 'Say what’s missing.' : 'Say what the problem is.');
   const ev = isId(eventId) ? await Event.exists({ _id: eventId }) : null;
-  const i = await Issue.create({ title: t, details: str(details, 1000), event: ev ? eventId : undefined, gear: gear?._id, reportedBy: by });
+  const i = await Issue.create({ title: t, details: str(details, 1000), kind: k, event: ev ? eventId : undefined, gear: gear?._id, reportedBy: by });
   if (gear) {
-    gear.attention ||= t;
+    if (k === 'missing') gear.missing = true;
+    else gear.attention ||= t;
     await gear.save();
-    await GearLog.create({ gear: gear._id, action: 'attention', text: t, by });
+    await GearLog.create({ gear: gear._id, action: k === 'missing' ? 'note' : 'attention', text: k === 'missing' ? `Reported missing${details ? `: ${str(details, 200)}` : ''}` : t, by });
+  }
+  return i;
+}
+// Fixed (or found): the item is fine again if this was what was wrong with it
+export async function resolveIssue(i, by, note) {
+  i.status = 'fixed';
+  i.fixedBy = by;
+  i.fixedAt = new Date();
+  i.fixNote = str(note, 300);
+  await i.save();
+  if (i.gear) {
+    const g = await Gear.findById(i.gear);
+    if (g && i.kind === 'missing' && g.missing) {
+      g.missing = false;
+      await g.save();
+      await GearLog.create({ gear: g._id, action: 'note', text: `Found${i.fixNote ? `: ${i.fixNote}` : ''}`, by });
+    } else if (g && g.attention && g.attention === i.title) {
+      g.attention = '';
+      await g.save();
+      await GearLog.create({ gear: g._id, action: 'fixed', text: i.fixNote, by });
+    }
   }
   return i;
 }
 
 issuesRouter.post('/', wrap(async (req, res) => {
   const b = req.body || {};
-  const i = await reportIssue({ title: b.title, details: b.details, eventId: b.eventId, gearId: b.gearId, by: req.user._id });
+  const i = await reportIssue({ title: b.title, details: b.details, eventId: b.eventId, gearId: b.gearId, kind: b.kind, by: req.user._id });
   res.locals.activity = `Reported a problem: ${i.title}`;
   res.status(201).json((await issueViews([i.toObject()]))[0]);
 }));
 
-async function loadIssue(id) {
+export async function loadIssue(id) {
   if (!isId(id)) throw notFound();
   const i = await Issue.findById(id);
   if (!i) throw notFound('That report was deleted.');
@@ -122,19 +148,7 @@ async function loadIssue(id) {
 
 issuesRouter.post('/:id/fix', requirePerm('plans'), wrap(async (req, res) => {
   const i = await loadIssue(req.params.id);
-  i.status = 'fixed';
-  i.fixedBy = req.user._id;
-  i.fixedAt = new Date();
-  i.fixNote = str(req.body?.note, 300);
-  await i.save();
-  if (i.gear) {
-    const g = await Gear.findById(i.gear);
-    if (g && g.attention && g.attention === i.title) {
-      g.attention = '';
-      await g.save();
-      await GearLog.create({ gear: g._id, action: 'fixed', text: i.fixNote, by: req.user._id });
-    }
-  }
+  await resolveIssue(i, req.user._id, req.body?.note);
   res.locals.activity = `Marked fixed: ${i.title}`;
   res.json((await issueViews([i.toObject()]))[0]);
 }));
