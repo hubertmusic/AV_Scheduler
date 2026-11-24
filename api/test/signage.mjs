@@ -133,9 +133,32 @@ ok(await adminP('PATCH', `/api/people/${pia.id}`, { role: 'leader', perms: { sig
 ok(await ben.c('GET', '/api/signage'), 403);
 assert.equal(ok(await ben.c('GET', '/api/bootstrap')).signage, null, 'crew don’t see the Signage tab');
 assert.deepEqual(ok(await pia.c('GET', '/api/bootstrap')).signage, { waiting: 0 }, 'a Praise leader with the Signage privilege does');
+// Team leaders manage it unless it's turned off for them; the admin or a head leader can give it to a crew member
+const hana = await person('Hana', 'hana@example.com', 'av');
+const leo = await person('Leo', 'leo@example.com', 'av');
+ok(await admin('PUT', '/api/teams/av/head', { userId: hana.id }));
+ok(await hana.c('GET', '/api/signage'), 200);
+ok(await hana.c('PATCH', `/api/people/${leo.id}`, { role: 'leader' }));
+ok(await leo.c('GET', '/api/signage'), 200);
+ok(await hana.c('PATCH', `/api/people/${leo.id}`, { perms: { signage: false } }));
+ok(await leo.c('GET', '/api/signage'), 403);
+ok(await leo.c('PATCH', `/api/people/${ben.id}`, { perms: { signage: true } }), 403);
+ok(await ben.c('PATCH', `/api/people/${ben.id}`, { perms: { signage: true } }), 403);
+ok(await ben.c('GET', '/api/signage'), 403);
+ok(await hana.c('PATCH', `/api/people/${ben.id}`, { perms: { signage: true, edit: true, people: true } }));
+ok(await ben.c('GET', '/api/signage'), 200);
+assert.deepEqual(ok(await ben.c('GET', '/api/bootstrap')).signage, { waiting: 0 }, 'a crew member given it sees the Signage tab');
+const benView = ok(await hana.c('GET', '/api/bootstrap')).people.find((x) => x.id === ben.id);
+assert.equal(benView.role, 'crew', 'still a crew member');
+assert.deepEqual(benView.perms, { signage: true }, 'given only signage, not the leader privileges');
+ok(await ben.c('POST', '/api/people', { name: 'Zed', email: 'zed@example.com' }), 403);
+ok(await hana.c('PATCH', `/api/people/${ben.id}`, { role: 'leader' }));
+ok(await hana.c('PATCH', `/api/people/${ben.id}`, { role: 'crew' }));
+ok(await ben.c('GET', '/api/signage'), 403);
+assert.equal(ok(await ben.c('GET', '/api/bootstrap')).signage, null, 'a leader moved back to crew doesn’t keep it');
 let s = ok(await admin('GET', '/api/signage'));
 assert.deepEqual(s.assets, []);
-step('signage is for the admin, head leaders and leaders with the Signage privilege on any team');
+step('signage is for the admin, head leaders and team leaders (unless turned off), plus crew members the admin or a head leader gives it to');
 
 // ---------- screens ----------
 s = ok(await admin('POST', '/api/signage/screens', { name: 'Lobby' }), 201);

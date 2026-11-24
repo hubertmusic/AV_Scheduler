@@ -129,6 +129,18 @@ async function runMigrations() {
     await s.save();
     if (r.modifiedCount) console.log(`Gave ${r.modifiedCount} team leader(s) the "Edit service plans" permission.`);
   }
+  if (!s.migrations.includes('leaders-manage-signage')) {
+    // Every team leader manages the church screens unless the admin or their head leader turns it
+    // off; crew members only when they're given it, so nobody keeps it from before a change of role.
+    for (const u of await User.find({ 'teams.0': { $exists: true } })) {
+      for (const m of u.teams) m.perms.signage = m.role === 'leader';
+      u.markModified('teams');
+      await u.save();
+    }
+    s.migrations.push('leaders-manage-signage');
+    await s.save();
+    console.log('Team leaders can now manage signage.');
+  }
 }
 
 async function start() {

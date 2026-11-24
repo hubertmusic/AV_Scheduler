@@ -139,6 +139,8 @@ authRouter.post('/setup', loginLimiter, wrap(async (req, res) => {
   const s = await getSettings();
   s.orgName = orgName;
   if (!s.weekendTemplate.length) s.weekendTemplate = DEFAULT_TEMPLATE;
+  // A new Crew Call starts with today's signage defaults; the one-time update is for older data
+  if (!s.migrations.includes('leaders-manage-signage')) s.migrations.push('leaders-manage-signage');
   await s.save();
   const user = await User.create({
     name,

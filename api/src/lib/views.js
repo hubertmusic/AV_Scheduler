@@ -50,6 +50,7 @@ export function personView(u, viewer) {
     out.invited = !u.passwordHash;
   }
   if (role === 'leader' || role === 'admin') out.perms = can(u, team);
+  else if (role === 'crew' && (isSelf || vc.people)) out.perms = { signage: !!m?.perms?.signage }; // the one thing crew can be given
   return out;
 }
 
