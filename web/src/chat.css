@@ -92,3 +92,14 @@
 .ch-wa { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: #128c4b; text-decoration: none; }
 .ch-wa:hover { background: #e3f6ea; color: #0b6b37; }
 .ch-wa-h { display: grid; place-items: center; text-decoration: none; color: #fff; }
+
+/* Archive and delete */
+.ch-menu-wrap { position: relative; flex: none; }
+.ch-menu { position: absolute; right: 0; top: 36px; z-index: 5; min-width: 230px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); padding: 4px; display: flex; flex-direction: column; }
+.ch-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 600; color: inherit; cursor: pointer; }
+.ch-menu button span { font-size: 12px; font-weight: 400; color: var(--muted); }
+.ch-menu button:hover, .ch-menu button:focus-visible { background: var(--sunk); }
+.ch-menu button.danger { color: var(--red); }
+.ch-archived-head { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.ch-archived-link { border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; margin-top: 4px; }
+.ch-archive-ic { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--sunk); font-size: 17px; flex: none; }

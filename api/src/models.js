@@ -1010,6 +1010,7 @@ const chatRoomSchema = new Schema(
     members: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [], index: true }, // groups and direct chats
     owner: ref('User'),
     lastMessageAt: { type: Date, index: true },
+    lastChatAt: Date, // last real message (not "Hub renamed the group"): brings an archived chat back
   },
   { timestamps: true }
 );
@@ -1028,8 +1029,10 @@ const chatMessageSchema = new Schema(
 chatMessageSchema.index({ room: 1, createdAt: -1 });
 export const ChatMessage = model('ChatMessage', chatMessageSchema);
 
-// When each person last read each room (for unread counts)
-const chatSeenSchema = new Schema({ room: { ...ref('ChatRoom'), required: true }, user: { ...ref('User'), required: true }, at: Date });
+// Each person's own state in each room: when they last read it (for unread counts), when they
+// archived it (hidden until someone writes again) and when they deleted it for themselves
+// (they don't see anything from before then).
+const chatSeenSchema = new Schema({ room: { ...ref('ChatRoom'), required: true }, user: { ...ref('User'), required: true }, at: Date, archivedAt: Date, clearedAt: Date });
 chatSeenSchema.index({ room: 1, user: 1 }, { unique: true });
 chatSeenSchema.index({ user: 1 });
 export const ChatSeen = model('ChatSeen', chatSeenSchema);

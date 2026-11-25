@@ -164,4 +164,72 @@ peopleSeen = ok(await ben.c('GET', '/api/chat/sync')).people;
 assert.ok(peopleSeen.find((p) => p.name === 'Cam').phone, 'leaders’ numbers are for everyone');
 step('the People list offers WhatsApp only where the number may be seen');
 
+// ---------- archive and delete ----------
+{
+  const say = async (c, room, text) => ok(await c('POST', `/api/chat/rooms/${room}/messages`, { text }), 201);
+  const roomOf = async (c, rid) => ok(await c('GET', '/api/chat/sync')).rooms.find((r) => r.id === rid);
+  const texts = async (c, rid) => ok(await c('GET', `/api/chat/rooms/${rid}/messages`)).messages.filter((m) => !m.system).map((m) => m.text);
+  // One-on-one: Ben and Cam
+  const d = ok(await ben.c('POST', '/api/chat/direct', { userId: cam.id })).id;
+  await say(ben.c, d, 'Mic 3 is fixed');
+  await say(cam.c, d, 'Thanks!');
+  ok(await ben.c('POST', `/api/chat/rooms/${d}/archive`, { archived: true }));
+  assert.equal((await roomOf(ben.c, d)).archived, true, 'archived for Ben');
+  assert.equal((await roomOf(cam.c, d)).archived, false, 'not for Cam');
+  assert.deepEqual(await texts(ben.c, d), ['Mic 3 is fixed', 'Thanks!'], 'archiving keeps the messages');
+  await say(cam.c, d, 'One more thing');
+  assert.equal((await roomOf(ben.c, d)).archived, false, 'a new message brings it back');
+  ok(await ben.c('POST', `/api/chat/rooms/${d}/archive`, { archived: true }));
+  ok(await ben.c('POST', `/api/chat/rooms/${d}/archive`, { archived: false }));
+  assert.equal((await roomOf(ben.c, d)).archived, false, 'or move it back by hand');
+  step('archive: hidden just for you, messages kept, back when someone writes (or by hand)');
+
+  ok(await ben.c('POST', `/api/chat/rooms/${d}/clear`));
+  assert.deepEqual(await texts(ben.c, d), [], 'deleted for Ben: he sees nothing from before');
+  assert.equal((await roomOf(ben.c, d)).archived, true, 'and it leaves his list');
+  assert.equal((await roomOf(ben.c, d)).last, null);
+  assert.deepEqual(await texts(cam.c, d), ['Mic 3 is fixed', 'Thanks!', 'One more thing'], 'Cam still has everything');
+  await say(cam.c, d, 'You there?');
+  assert.deepEqual(await texts(ben.c, d), ['You there?'], 'new messages show for Ben, the old ones don’t');
+  assert.equal((await roomOf(ben.c, d)).archived, false);
+  let sync = ok(await ben.c('GET', `/api/chat/sync?open=${d}&since=${encodeURIComponent(new Date(Date.now() - 3600e3).toISOString())}`));
+  assert.deepEqual(sync.messages.filter((m) => m.room === d).map((m) => m.text), ['You there?'], 'nor in the live check-in');
+  // Both delete it: gone for good
+  ok(await ben.c('POST', `/api/chat/rooms/${d}/clear`));
+  assert.equal(ok(await cam.c('POST', `/api/chat/rooms/${d}/clear`)).removed, true, 'deleted by both: removed for good');
+  ok(await ben.c('GET', `/api/chat/rooms/${d}/messages`), 404);
+  if (process.env.MONGO_URL) {
+    const { MongoClient } = await import('mongodb');
+    const db = new MongoClient(process.env.MONGO_URL);
+    await db.connect();
+    const { ObjectId } = await import('mongodb');
+    assert.equal(await db.db().collection('chatmessages').countDocuments({ room: new ObjectId(d) }), 0, 'its messages are gone from the database');
+    await db.close();
+  }
+  const fresh = ok(await ben.c('POST', '/api/chat/direct', { userId: cam.id })).id;
+  assert.notEqual(fresh, d, 'messaging again starts a new chat');
+  assert.deepEqual(await texts(ben.c, fresh), []);
+  step('delete for me: your copy is gone, the other person keeps theirs; once both delete it, it’s removed for good');
+
+  // Groups
+  const g = ok(await ben.c('POST', '/api/chat/groups', { name: 'Load-out', members: [cam.id, pia.id] }), 201).id;
+  await say(cam.c, g, 'Truck at 9');
+  ok(await cam.c('DELETE', `/api/chat/rooms/${g}`), 403, 'only whoever started it deletes it for everyone');
+  ok(await cam.c('POST', `/api/chat/rooms/${g}/clear`));
+  assert.deepEqual(await texts(cam.c, g), [], 'Cam deleted it for himself');
+  assert.deepEqual(await texts(pia.c, g), ['Truck at 9'], 'Pia still has it');
+  ok(await ben.c('DELETE', `/api/chat/rooms/${g}`), 204);
+  for (const c of [ben.c, cam.c, pia.c]) {
+    ok(await c('GET', `/api/chat/rooms/${g}/messages`), 404);
+    assert.ok(!(await roomOf(c, g)), 'gone from everyone’s list');
+  }
+  // Team rooms can't be deleted, only deleted for yourself
+  const team = ok(await ben.c('GET', '/api/chat/sync')).rooms.find((r) => r.kind === 'team');
+  ok(await ben.c('DELETE', `/api/chat/rooms/${team.id}`), 400);
+  ok(await ben.c('POST', `/api/chat/rooms/${team.id}/clear`));
+  assert.ok(await roomOf(ben.c, team.id), 'the team room stays (archived) for Ben');
+  ok(await pia.c('POST', `/api/chat/rooms/${team.id}/archive`, { archived: true }), 404, 'not her team');
+  step('groups: whoever started one can delete it for everyone; others delete it for themselves or leave. Team rooms can only be deleted for yourself');
+}
+
 console.log('\nAll chat checks passed.');
