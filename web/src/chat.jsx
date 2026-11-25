@@ -64,6 +64,7 @@ export function ChatDock() {
   const [wins, setWins] = useState([]); // [{ id, min }]
   const [msgs, setMsgs] = useState({}); // roomId → { list, more, loaded }
   const [modal, setModal] = useState(null); // { kind: 'new' } | { kind: 'edit', room }
+  const [showArchived, setShowArchived] = useState(false);
   const since = useRef(null);
   const winsRef = useRef(wins);
   winsRef.current = wins;
@@ -114,7 +115,7 @@ export function ChatDock() {
     };
   }, [sync]);
 
-  const unread = (data?.rooms || []).reduce((n, r) => n + r.unread, 0);
+  const unread = (data?.rooms || []).filter((r) => !r.archived).reduce((n, r) => n + r.unread, 0);
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\+?\) /, '');
     document.title = unread ? `(${unread > 9 ? '9+' : unread}) ${base}` : base;
@@ -154,12 +155,71 @@ export function ChatDock() {
     if (phone) setPanel(true); // on a phone, back to the list of chats
   };
   const toggleMin = (id) => setWins((w) => w.map((x) => (x.id === id ? { ...x, min: !x.min } : x)));
+  const forget = (id) => setMsgs((m) => {
+    const next = { ...m };
+    delete next[id];
+    return next;
+  });
+
+  // Archive (just for me; it comes back when someone writes) or bring it back
+  const archive = async (room, archived = true) => {
+    try {
+      await api(`/chat/rooms/${room.id}/archive`, { method: 'POST', body: { archived } });
+      if (archived) close(room.id);
+      app.toast(archived ? 'Archived. It comes back if someone writes.' : 'Back in your chats');
+      sync();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  // Delete for me: the messages so far disappear for me only
+  const clearForMe = async (room) => {
+    const who = room.kind === 'direct' ? `${room.name} still has them, unless they delete it too.` : 'Everyone else still has them.';
+    if (!window.confirm(`Delete “${room.name}” for you? Its messages so far disappear for you. ${who}`)) return;
+    try {
+      await api(`/chat/rooms/${room.id}/clear`, { method: 'POST' });
+      close(room.id);
+      forget(room.id);
+      app.toast('Chat deleted for you');
+      sync();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  // Delete a group for everyone (only whoever started it)
+  const deleteGroup = async (room) => {
+    if (!window.confirm(`Delete “${room.name}” for everyone? All its messages are removed for all ${room.members.length} people. This can’t be undone.`)) return;
+    try {
+      await api(`/chat/rooms/${room.id}`, { method: 'DELETE' });
+      close(room.id);
+      forget(room.id);
+      app.toast('Group deleted');
+      sync();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const leaveGroup = async (room) => {
+    if (!window.confirm(`Leave “${room.name}”? You won’t see its messages any more.`)) return;
+    try {
+      await api(`/chat/rooms/${room.id}/leave`, { method: 'POST' });
+      close(room.id);
+      forget(room.id);
+      sync();
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
 
   if (!data) return null;
   const people = data.people.filter((p) => p.id !== data.me);
   const online = people.filter((p) => p.status !== 'offline').length;
   const s = q.trim().toLowerCase();
-  const rooms = [...data.rooms].sort((a, b) => new Date(b.last?.at || b.lastAt || 0) - new Date(a.last?.at || a.lastAt || 0)).filter((r) => !s || r.name.toLowerCase().includes(s));
+  const sorted = [...data.rooms].sort((a, b) => new Date(b.last?.at || b.lastAt || 0) - new Date(a.last?.at || a.lastAt || 0));
+  const archivedCount = sorted.filter((r) => r.archived).length;
+  // Searching looks through archived chats too
+  const rooms = sorted.filter((r) => (s ? r.name.toLowerCase().includes(s) : showArchived ? r.archived : !r.archived));
+  const viewingArchived = showArchived && !s;
   const order = { online: 0, away: 1, offline: 2 };
   const list = people.filter((p) => !s || p.name.toLowerCase().includes(s)).sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
   const roomOf = (id) => data.rooms.find((r) => r.id === id);
@@ -189,6 +249,10 @@ export function ChatDock() {
                 setMsgs((m) => ({ ...m, [w.id]: { list: [...r.messages, ...(m[w.id]?.list || [])], more: r.more, loaded: true } }));
               }}
               onEdit={() => setModal({ kind: 'edit', room })}
+              onArchive={(on) => archive(room, on)}
+              onClear={() => clearForMe(room)}
+              onDeleteGroup={() => deleteGroup(room)}
+              onLeave={() => leaveGroup(room)}
               onRemoved={(id) => setMsgs((m) => ({ ...m, [w.id]: { ...m[w.id], list: m[w.id].list.map((x) => (x.id === id ? { ...x, deleted: true, text: '' } : x)) } }))}
             />
           );
@@ -217,6 +281,14 @@ export function ChatDock() {
             </button>
           </div>
           <div className="ch-list">
+            {tab === 'chats' && viewingArchived && (
+              <div className="ch-archived-head">
+                <button type="button" className="link-btn small" onClick={() => setShowArchived(false)}>
+                  ‹ Chats
+                </button>
+                <span className="muted small">Archived chats come back when someone writes.</span>
+              </div>
+            )}
             {tab === 'chats' ? (
               rooms.length ? (
                 rooms.map((r) => (
@@ -231,13 +303,24 @@ export function ChatDock() {
                         {r.last ? (r.last.system ? r.last.text : `${r.last.mine ? 'You' : r.kind === 'direct' ? '' : r.last.name}${r.last.mine || r.kind !== 'direct' ? ': ' : ''}${r.last.text}`) : r.kind === 'team' ? 'Everyone on the team' : 'No messages yet'}
                       </span>
                     </span>
+                    {r.archived && s && <span className="tag">Archived</span>}
                     {r.unread > 0 && <span className="ch-badge">{r.unread > 9 ? '9+' : r.unread}</span>}
                   </button>
                 ))
               ) : (
-                <p className="muted small ch-empty">{s ? 'No chats match.' : 'No chats yet. Tap someone on People to start one.'}</p>
+                <p className="muted small ch-empty">{s ? 'No chats match.' : viewingArchived ? 'Nothing archived.' : 'No chats yet. Tap someone on People to start one.'}</p>
               )
-            ) : (
+            ) : null}
+            {tab === 'chats' && !s && !viewingArchived && archivedCount > 0 && (
+              <button type="button" className="ch-item ch-archived-link" onClick={() => setShowArchived(true)}>
+                <span className="ch-archive-ic" aria-hidden="true">🗄</span>
+                <span className="ch-item-main">
+                  <span className="ch-name">Archived</span>
+                  <span className="ch-snip">{archivedCount === 1 ? '1 chat' : `${archivedCount} chats`}</span>
+                </span>
+              </button>
+            )}
+            {tab === 'chats' ? null : (
               list.map((p) => (
                 <div key={p.id} className="ch-person">
                   <button type="button" className="ch-item" onClick={() => openPerson(p.id)} title={`Chat with ${p.name}`}>
@@ -287,8 +370,28 @@ export function ChatDock() {
   );
 }
 
-function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSent, onSeen, onOlder, onEdit, onRemoved }) {
+function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSent, onSeen, onOlder, onEdit, onRemoved, onArchive, onClear, onDeleteGroup, onLeave }) {
   const app = useApp();
+  const [menu, setMenu] = useState(false);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const off = (e) => {
+      if (!menuRef.current?.contains(e.target)) setMenu(false);
+    };
+    const esc = (e) => e.key === 'Escape' && setMenu(false);
+    document.addEventListener('pointerdown', off);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', off);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [menu]);
+  const pick = (fn) => () => {
+    setMenu(false);
+    fn();
+  };
+  const owner = room.kind === 'group' && room.owner === me;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const box = useRef(null);
@@ -355,6 +458,42 @@ function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSen
           <button type="button" className="ch-hbtn" aria-label="Group settings" title="Name, look and people" onClick={onEdit}>
             ⚙
           </button>
+        )}
+        {!min && (
+          <div className="ch-menu-wrap" ref={menuRef}>
+            <button type="button" className="ch-hbtn" aria-label="More: archive or delete" aria-haspopup="menu" aria-expanded={menu} title="Archive or delete" onClick={() => setMenu(!menu)}>
+              ⋯
+            </button>
+            {menu && (
+              <div className="ch-menu" role="menu">
+                {room.archived ? (
+                  <button type="button" role="menuitem" onClick={pick(() => onArchive(false))}>
+                    Move back to chats
+                  </button>
+                ) : (
+                  <button type="button" role="menuitem" onClick={pick(() => onArchive(true))}>
+                    Archive chat
+                    <span>Hides it until someone writes</span>
+                  </button>
+                )}
+                <button type="button" role="menuitem" className="danger" onClick={pick(onClear)}>
+                  Delete for me
+                  <span>{room.kind === 'direct' ? 'Gone for good once you both delete it' : 'Others keep their messages'}</span>
+                </button>
+                {room.kind === 'group' &&
+                  (owner ? (
+                    <button type="button" role="menuitem" className="danger" onClick={pick(onDeleteGroup)}>
+                      Delete group for everyone
+                      <span>You started it, so you can</span>
+                    </button>
+                  ) : (
+                    <button type="button" role="menuitem" className="danger" onClick={pick(onLeave)}>
+                      Leave group
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
         )}
         {!phone && (
           <button type="button" className="ch-hbtn" aria-label={min ? 'Open' : 'Minimize'} onClick={onMin}>

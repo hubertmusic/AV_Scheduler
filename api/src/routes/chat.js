@@ -2,6 +2,9 @@
 //  - a room for each team, for its members only (Church Admin's stays confidential)
 //  - named groups anyone can start with people they pick (rename, emoji, colour, add people)
 //  - one-on-one chats
+//  - anyone can archive a chat (it comes back when someone writes) or delete it for themselves;
+//    a one-on-one chat both people deleted is gone for good, and whoever started a group can
+//    delete it for everyone
 // Open Crew Calls check in every few seconds (GET /sync), which is also how "online" works.
 // Messages are stored encrypted, and nobody (not even the admin) reads chats they aren't in.
 import { Router } from 'express';
@@ -81,6 +84,9 @@ async function ensureTeamRooms(user) {
     }
   }
 }
+// Archived until someone writes again
+const isArchived = (room, mine) => !!mine?.archivedAt && !(room.lastChatAt && room.lastChatAt > mine.archivedAt);
+const afterClear = (mine) => (mine?.clearedAt ? { createdAt: { $gt: mine.clearedAt } } : {});
 const myRoomsQuery = (user) => ({ $or: [{ kind: 'team', team: { $in: myTeams(user) } }, { members: user._id }] });
 
 const messageView = (m, names) => ({
@@ -103,15 +109,15 @@ const messageView = (m, names) => ({
 async function roomViews(user, rooms, teamNames, names) {
   if (!rooms.length) return [];
   const ids = rooms.map((r) => r._id);
-  const [seen, lasts] = await Promise.all([
-    ChatSeen.find({ user: user._id, room: { $in: ids } }).lean(),
-    Promise.all(rooms.map((r) => ChatMessage.findOne({ room: r._id }).sort({ createdAt: -1 }).lean())),
-  ]);
-  const seenAt = Object.fromEntries(seen.map((s) => [id(s.room), s.at]));
+  const seen = await ChatSeen.find({ user: user._id, room: { $in: ids } }).lean();
+  const mineOf = Object.fromEntries(seen.map((s) => [id(s.room), s]));
+  // The latest message each person can still see (not from before they deleted the chat)
+  const lasts = await Promise.all(rooms.map((r) => ChatMessage.findOne({ room: r._id, ...afterClear(mineOf[id(r)]) }).sort({ createdAt: -1 }).lean()));
   return Promise.all(
     rooms.map(async (r, i) => {
       const last = lasts[i];
-      const since = seenAt[id(r)];
+      const mine = mineOf[id(r)] || {};
+      const since = mine.at;
       // Unread: others' messages since I last read it (capped; the badge shows 9+)
       const unread = last && (!since || last.createdAt > since) ? (await ChatMessage.find({ room: r._id, user: { $ne: user._id }, system: false, deletedAt: null, ...(since ? { createdAt: { $gt: since } } : {}) }, { _id: 1 }).limit(10).lean()).length : 0;
       const members = r.kind === 'team' ? [] : r.members.map((m) => ({ id: id(m), name: names[id(m)] || 'Someone' }));
@@ -128,6 +134,7 @@ async function roomViews(user, rooms, teamNames, names) {
         with: other?.id || null, // one-on-one: the other person
         owner: r.owner ? id(r.owner) : null,
         unread,
+        archived: isArchived(r, mine),
         last: lastView && { text: lastView.deleted ? 'Message removed' : lastView.text.slice(0, 80), name: lastView.name, mine: lastView.user === id(user), at: lastView.at, system: lastView.system },
         lastAt: r.lastMessageAt || r.createdAt,
       };
@@ -166,8 +173,12 @@ chatRouter.get('/sync', wrap(async (req, res) => {
   const want = openIds.filter((x) => mine.has(x));
   if (want.length && since && !Number.isNaN(since.getTime())) {
     // updatedAt catches removed messages too
-    const msgs = await ChatMessage.find({ room: { $in: want }, updatedAt: { $gt: since } }).sort({ createdAt: 1 }).limit(300).lean();
-    out.messages = msgs.map((m) => messageView(m, names));
+    const [msgs, seen] = await Promise.all([
+      ChatMessage.find({ room: { $in: want }, updatedAt: { $gt: since } }).sort({ createdAt: 1 }).limit(300).lean(),
+      ChatSeen.find({ user: req.user._id, room: { $in: want }, clearedAt: { $ne: null } }).lean(),
+    ]);
+    const cleared = Object.fromEntries(seen.map((x) => [id(x.room), x.clearedAt]));
+    out.messages = msgs.filter((m) => !cleared[id(m.room)] || m.createdAt > cleared[id(m.room)]).map((m) => messageView(m, names));
   }
   res.json(out);
 }));
@@ -175,10 +186,11 @@ chatRouter.get('/sync', wrap(async (req, res) => {
 // GET /api/chat/rooms/:id/messages?before=<messageId> — the latest 50, or 50 before one
 chatRouter.get('/rooms/:id/messages', wrap(async (req, res) => {
   const room = await loadRoom(req);
-  const q = { room: room._id };
+  const mine = await ChatSeen.findOne({ room: room._id, user: req.user._id }).lean();
+  const q = { room: room._id, ...afterClear(mine) };
   if (isId(req.query.before)) {
     const b = await ChatMessage.findById(req.query.before, { createdAt: 1 }).lean();
-    if (b) q.createdAt = { $lt: b.createdAt };
+    if (b) q.createdAt = { ...(q.createdAt || {}), $lt: b.createdAt };
   }
   const list = (await ChatMessage.find(q).sort({ createdAt: -1 }).limit(PAGE).lean()).reverse();
   const names = Object.fromEntries((await User.find({ _id: { $in: [...new Set(list.map((m) => id(m.user)).filter(isId))] } }, { name: 1 }).lean()).map((u) => [id(u), u.name]));
@@ -192,7 +204,7 @@ chatRouter.post('/rooms/:id/messages', sendLimit, wrap(async (req, res) => {
   if (!text) throw bad('Type a message first.');
   const m = await ChatMessage.create({ room: room._id, user: req.user._id, text: seal(text) });
   await Promise.all([
-    ChatRoom.updateOne({ _id: room._id }, { $set: { lastMessageAt: m.createdAt } }),
+    ChatRoom.updateOne({ _id: room._id }, { $set: { lastMessageAt: m.createdAt, lastChatAt: m.createdAt } }),
     ChatSeen.updateOne({ room: room._id, user: req.user._id }, { $set: { at: m.createdAt } }, { upsert: true }),
   ]);
   res.status(201).json(messageView(m, { [id(req.user)]: req.user.name }));
@@ -308,5 +320,45 @@ chatRouter.post('/rooms/:id/leave', wrap(async (req, res) => {
   if (id(room.owner) === id(req.user)) room.owner = room.members[0]; // someone else can now remove people
   await room.save();
   await systemNote(room, req.user, `${req.user.name} left the group`);
+  res.status(204).end();
+}));
+
+// Removes a room and everything in it
+const wipeRoom = (room) => Promise.all([ChatMessage.deleteMany({ room: room._id }), ChatSeen.deleteMany({ room: room._id }), ChatRoom.deleteOne({ _id: room._id })]);
+
+// POST /api/chat/rooms/:id/archive { archived } — tuck a chat away (just for me). It comes back
+// on its own when someone writes in it, or with archived: false.
+chatRouter.post('/rooms/:id/archive', wrap(async (req, res) => {
+  const room = await loadRoom(req);
+  const archived = req.body?.archived !== false;
+  await ChatSeen.updateOne({ room: room._id, user: req.user._id }, archived ? { $set: { archivedAt: new Date() } } : { $unset: { archivedAt: 1 } }, { upsert: true });
+  res.json({ archived });
+}));
+
+// POST /api/chat/rooms/:id/clear — delete a chat for me: its messages so far disappear for me
+// (not for anyone else) and it leaves my list until someone writes again. When both people in a
+// one-on-one chat have deleted it, it's removed for good.
+chatRouter.post('/rooms/:id/clear', wrap(async (req, res) => {
+  const room = await loadRoom(req);
+  const now = new Date();
+  await ChatSeen.updateOne({ room: room._id, user: req.user._id }, { $set: { clearedAt: now, archivedAt: now, at: now } }, { upsert: true });
+  if (room.kind === 'direct') {
+    const lastAt = (await ChatMessage.findOne({ room: room._id }, { createdAt: 1 }).sort({ createdAt: -1 }).lean())?.createdAt;
+    const cleared = await ChatSeen.find({ room: room._id, clearedAt: { $ne: null } }).lean();
+    const allGone = room.members.every((m) => cleared.some((x) => id(x.user) === id(m) && (!lastAt || x.clearedAt >= lastAt)));
+    if (allGone) {
+      await wipeRoom(room);
+      return res.json({ removed: true });
+    }
+  }
+  res.json({ removed: false });
+}));
+
+// DELETE /api/chat/rooms/:id — delete a group for everyone (only the person who started it)
+chatRouter.delete('/rooms/:id', wrap(async (req, res) => {
+  const room = await loadRoom(req);
+  if (room.kind !== 'group') throw bad(room.kind === 'team' ? 'A team’s chat can’t be deleted, but you can delete it for yourself.' : 'Delete a one-on-one chat for yourself instead.');
+  if (id(room.owner) !== id(req.user)) throw forbidden('Only the person who started the group can delete it. You can leave it instead.');
+  await wipeRoom(room);
   res.status(204).end();
 }));
