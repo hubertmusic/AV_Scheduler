@@ -12,7 +12,7 @@ import { buildCalendar } from '../lib/ics.js';
 import { awayByEvent, baseOf, isShadow, touchAvailability } from '../lib/availability.js';
 import { mailerReady, sendMail } from '../lib/mailer.js';
 import { FEATURES } from '../lib/features.js';
-import { deleteStored, filesOf, removeUploads, uploader } from '../lib/media.js';
+import { deleteStored, filesOf, originalName, removeUploads, sendStored, uploader } from '../lib/media.js';
 import { calendarClient, dayName, evName, logActivity, posName } from '../lib/activity.js';
 import { isOfficeTeam, officePerms, onServiceTeam, rosterFor, sees as seesOffice, seesRoster } from '../lib/office.js';
 import { teamsShownTo } from '../lib/teams.js';
@@ -252,34 +252,128 @@ meRouter.put('/limit', wrap(async (req, res) => {
 
 // ---------- resources ----------
 export const resourcesRouter = Router();
-function readResource(b) {
+// Who sees a resource. Each level sees its own and everything below it.
+const AUDIENCE = { all: 0, leaders: 1, heads: 2, admin: 3 };
+const audienceOf = (r) => (r.audience in AUDIENCE ? r.audience : 'all');
+// The viewer's level on the team they're working in (-1: not on it)
+function resourceLevel(req) {
+  if (req.user.role === 'admin') return AUDIENCE.admin;
+  const m = membershipOf(req.user, req.team.key);
+  if (!m) return -1;
+  if (m.head) return AUDIENCE.heads;
+  return m.role === 'leader' ? AUDIENCE.leaders : AUDIENCE.all;
+}
+const resourceTeamOf = (r) => r.team || 'av'; // older ones, from before teams, are AV's
+const onThisTeam = (r, req) => r.everyTeam || resourceTeamOf(r) === req.team.key;
+const seesResource = (r, req) => onThisTeam(r, req) && resourceLevel(req) >= AUDIENCE[audienceOf(r)];
+// Changing one: the privilege, on its team (every-team ones are the admin's), and able to see it
+const editsResource = (r, req) => can(req.user).resources && seesResource(r, req) && (r.everyTeam ? req.user.role === 'admin' : resourceTeamOf(r) === req.team.key);
+const truthy = (v) => v === true || v === 'true' || v === '1' || v === 'on';
+
+function resourceView(r, req) {
+  return {
+    id: String(r._id),
+    title: r.title,
+    url: r.url,
+    position: r.position,
+    kind: r.kind,
+    minutes: r.minutes,
+    audience: audienceOf(r),
+    everyTeam: !!r.everyTeam,
+    guide: !!r.guide,
+    file: r.file?.stored ? { name: r.file.originalName, size: r.file.size, mime: r.file.mime } : null,
+    updatedAt: r.updatedAt,
+    canEdit: editsResource(r, req),
+  };
+}
+function readResource(b, req, current = {}) {
   const title = str(b.title, 120);
   if (!title) throw bad('Give the resource a title.');
   const url = normalizeUrl(str(b.url, 1000));
   if (url && !isHttpUrl(url)) throw bad('That doesn’t look like a web address. Try something like practiceav.fyi or https://example.com/page');
-  return { title, url, position: str(b.position, 40), kind: str(b.kind, 30) || 'Link', minutes: Math.max(0, Math.min(600, Number(b.minutes) || 0)) };
+  const audience = b.audience === undefined ? audienceOf(current) : String(b.audience);
+  if (!(audience in AUDIENCE)) throw bad('Choose who can see it.');
+  if (AUDIENCE[audience] > resourceLevel(req)) throw forbidden('You can only share a resource with people at your level or below.');
+  const out = { title, url, position: str(b.position, 40), kind: str(b.kind, 30) || 'Link', minutes: Math.max(0, Math.min(600, Number(b.minutes) || 0)), audience };
+  out.guide = b.guide === undefined ? !!current.guide : truthy(b.guide);
+  // Only the admin puts something on every team
+  out.everyTeam = req.user.role === 'admin' ? (b.everyTeam === undefined ? !!current.everyTeam : truthy(b.everyTeam)) : !!current.everyTeam;
+  return out;
 }
+const fileOf = (f) => ({ stored: f.filename, originalName: originalName(f), mime: f.mimetype, size: f.size });
+const AUDIENCE_WORDS = { all: '', leaders: ' for team leaders', heads: ' for head leaders', admin: ' for the admin' };
+
 resourcesRouter.get('/', wrap(async (req, res) => {
-  // This team's resources (older ones, from before teams, are AV's)
-  const list = await Resource.find(req.team.key === 'av' ? { $or: [{ team: 'av' }, { team: { $exists: false } }] } : { team: req.team.key }).sort({ position: 1, title: 1 }).lean();
-  res.json(list.map((r) => ({ id: String(r._id), title: r.title, url: r.url, position: r.position, kind: r.kind, minutes: r.minutes })));
+  const filter = req.team.key === 'av' ? { $or: [{ team: 'av' }, { team: { $exists: false } }, { everyTeam: true }] } : { $or: [{ team: req.team.key }, { everyTeam: true }] };
+  const list = (await Resource.find(filter).sort({ position: 1, title: 1 }).lean()).filter((r) => seesResource(r, req));
+  res.json(list.map((r) => resourceView(r, req)));
 }));
-resourcesRouter.post('/', requirePerm('resources'), wrap(async (req, res) => {
-  const r = await Resource.create({ ...readResource(req.body), team: req.team.key });
-  res.status(201).json({ id: String(r._id), ...readResource(r) });
+// A new resource: a link, or a file sent as form data (field "file")
+resourcesRouter.post('/', requirePerm('resources'), uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
+  const files = filesOf(req);
+  try {
+    const b = { ...(req.body || {}) };
+    if (!str(b.title, 120) && files[0]) b.title = originalName(files[0]).replace(/\.[a-z0-9]+$/i, '');
+    const data = readResource(b, req);
+    const r = await Resource.create({ ...data, url: files[0] ? '' : data.url, team: req.team.key, file: files[0] ? fileOf(files[0]) : undefined });
+    res.locals.activity = `Added a resource${AUDIENCE_WORDS[r.audience]}`;
+    res.status(201).json(resourceView(r, req));
+  } catch (e) {
+    removeUploads(files);
+    throw e;
+  }
 }));
-resourcesRouter.patch('/:id', requirePerm('resources'), wrap(async (req, res) => {
+async function editableResource(req) {
   if (!isId(req.params.id)) throw notFound();
   const r = await Resource.findById(req.params.id);
-  if (!r || (r.team || 'av') !== req.team.key) throw notFound();
-  Object.assign(r, readResource({ ...r.toObject(), ...req.body }));
+  if (!r || !seesResource(r, req)) throw notFound();
+  if (!editsResource(r, req)) throw forbidden(r.everyTeam ? 'Only the admin can change a resource shown on every team.' : 'You can’t change that resource.');
+  return r;
+}
+resourcesRouter.patch('/:id', requirePerm('resources'), wrap(async (req, res) => {
+  const r = await editableResource(req);
+  const b = req.body || {};
+  Object.assign(r, readResource({ ...r.toObject(), ...b }, req, r));
+  if (truthy(b.removeFile) && r.file?.stored) {
+    deleteStored(r.file.stored);
+    r.file = undefined;
+  }
+  if (r.file?.stored) r.url = '';
   await r.save();
-  res.json({ id: String(r._id), ...readResource(r) });
+  res.locals.activity = 'Changed a resource';
+  res.json(resourceView(r, req));
+}));
+// Put a file on a resource (replaces the one it had)
+resourcesRouter.post('/:id/file', requirePerm('resources'), uploader({ field: 'file', maxCount: 1 }), wrap(async (req, res) => {
+  const files = filesOf(req);
+  try {
+    if (!files[0]) throw bad('Choose a file.');
+    const r = await editableResource(req);
+    const old = r.file?.stored;
+    r.file = fileOf(files[0]);
+    r.url = '';
+    await r.save();
+    if (old) deleteStored(old);
+    res.locals.activity = 'Uploaded a new file for a resource';
+    res.json(resourceView(r, req));
+  } catch (e) {
+    removeUploads(files);
+    throw e;
+  }
 }));
 resourcesRouter.delete('/:id', requirePerm('resources'), wrap(async (req, res) => {
-  if (!isId(req.params.id)) throw notFound();
-  await Resource.deleteOne({ _id: req.params.id, team: req.team.key === 'av' ? { $in: ['av', null] } : req.team.key });
+  const r = await editableResource(req);
+  if (r.file?.stored) deleteStored(r.file.stored);
+  await r.deleteOne();
+  res.locals.activity = 'Removed a resource';
   res.status(204).end();
+}));
+// The file itself, only for people the resource is for. ?download=1 saves it instead of opening it.
+resourcesRouter.get('/:id/file', wrap(async (req, res) => {
+  if (!isId(req.params.id)) throw notFound();
+  const r = await Resource.findById(req.params.id).lean();
+  if (!r || !r.file?.stored || !seesResource(r, req)) throw notFound();
+  sendStored(res, { storedName: r.file.stored, originalName: r.file.originalName || 'file', mime: r.file.mime || 'application/octet-stream' }, { download: req.query.download === '1' });
 }));
 
 // ---------- settings + positions (admin) ----------

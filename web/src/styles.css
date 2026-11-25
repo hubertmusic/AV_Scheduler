@@ -468,6 +468,14 @@ a.icon-btn { text-decoration: none; }
 .academy-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; border-left: 4px solid var(--accent, #2563eb); }
 .academy-card h2 { margin: 0; }
 .academy-card .btn { flex: none; }
+.guide-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; background: var(--accent-soft); border-color: transparent; }
+.guide-card h2 { margin: 0; }
+.guide-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--surface); color: var(--accent-ink); flex: none; }
+.tag { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; background: var(--sunk); color: var(--muted); }
+.tag-lock { background: var(--blue-soft); color: var(--blue-ink); }
+.hint { display: block; font-size: 12.5px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.file-chosen { gap: 8px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.file-chosen label.link-btn { display: inline-flex; align-items: center; cursor: pointer; }
 
 /* "View as" preview (admin only) */
 .preview-bar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 24px; background: var(--blue); color: #fff; }
