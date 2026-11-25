@@ -292,6 +292,12 @@ const resourceSchema = new Schema(
     team: { type: String, default: 'av' }, // whose training and help this is
     kind: { type: String, default: 'Link' },
     minutes: { type: Number, default: 0 },
+    // Who can see it: 'all' (everyone on the team), 'leaders' (team leaders and up),
+    // 'heads' (head leaders and the admin) or 'admin'. Checked on the server.
+    audience: { type: String, enum: ['all', 'leaders', 'heads', 'admin'], default: 'all' },
+    everyTeam: { type: Boolean, default: false }, // shown on every team's Resources (set by the admin)
+    guide: { type: Boolean, default: false }, // offered as "Your guide" to the people it's for
+    file: { stored: String, originalName: String, mime: String, size: Number },
   },
   { timestamps: true }
 );
