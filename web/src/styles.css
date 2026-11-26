@@ -1059,3 +1059,17 @@ fieldset.field > .check-grid, .field > .check-grid { flex: none; }
 }
 @media print { .subtabs { display: none !important; } }
 .rp-missing-note { color: #5b2bb5; font-weight: 600; }
+
+/* iPhone and iPad Safari zoom the whole page into any text box smaller than 16px, and the
+   page stays zoomed (too wide, with buttons off screen). On touch screens keep every box at 16px. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+/* Small phones: long button labels wrap instead of running off the screen */
+@media (max-width: 420px) {
+  .btn { white-space: normal; text-align: center; max-width: 100%; line-height: 1.25; padding-top: 6px; padding-bottom: 6px; }
+}

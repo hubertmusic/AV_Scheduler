@@ -251,3 +251,5 @@ export function StatusChip({ status }) {
   const label = { pending: 'Pending', approved: 'Approved', denied: 'Denied', cancelled: 'Cancelled' }[status] || status;
   return <span className={`chip chip-${status}`}>{label}</span>;
 }
+
+export { DateInput } from './dateInput.jsx';

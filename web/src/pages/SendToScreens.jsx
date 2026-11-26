@@ -2,6 +2,7 @@
 // and PDFs. Nothing shows until someone who manages the screens approves it.
 import { useEffect, useRef, useState } from 'react';
 import { api, fmtSize, uploadFiles } from '../lib.js';
+import { DateInput } from '../dateInput.jsx';
 import './sendToScreens.css';
 
 const ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-m4v,video/webm,application/pdf,.pdf,.mov,.mp4,.m4v';
@@ -129,11 +130,11 @@ export default function SendToScreens({ token }) {
           <div className="row-wrap fields-2">
             <label className="field">
               <span>Show from (optional)</span>
-              <input type="date" min={info.today} value={f.startDate} onChange={set('startDate')} />
+              <DateInput type="date" min={info.today} value={f.startDate} onChange={set('startDate')} />
             </label>
             <label className="field">
               <span>Until (optional)</span>
-              <input type="date" min={f.startDate || info.today} value={f.endDate} onChange={set('endDate')} />
+              <DateInput type="date" min={f.startDate || info.today} value={f.endDate} onChange={set('endDate')} />
             </label>
           </div>
           {/* People never see this; bots fill it in */}

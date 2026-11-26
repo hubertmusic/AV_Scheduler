@@ -103,3 +103,25 @@
 .ch-archived-head { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .ch-archived-link { border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; margin-top: 4px; }
 .ch-archive-ic { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--sunk); font-size: 17px; flex: none; }
+
+/* Phones and iPads */
+/* Safari counts the space behind its address bar in 100vh, which pushed the top of the chat
+   (and its close button) out of sight; dvh is the height you can actually see. */
+@supports (height: 100dvh) {
+  .ch-panel { height: min(520px, calc(100dvh - 120px)); }
+  .ch-win { height: min(440px, calc(100dvh - 100px)); }
+}
+.ch-dock { bottom: env(safe-area-inset-bottom, 0); }
+.ch-windows { max-width: calc(100vw - 32px); }
+.ch-dock:has(.ch-panel) .ch-windows { max-width: calc(100vw - 32px - 350px); }
+.ch-list, .ch-msgs { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+html.ch-lock, html.ch-lock body { overflow: hidden; }
+@media (max-width: 640px) {
+  .ch-dock { bottom: 0; }
+  .ch-dock:has(.ch-panel) .ch-windows { max-width: none; }
+  .ch-windows { max-width: none; }
+  .ch-panel, .ch-full { padding-top: env(safe-area-inset-top, 0); padding-bottom: env(safe-area-inset-bottom, 0); height: 100%; }
+  .ch-full .ch-win-head .ch-hbtn, .ch-panel-head .icon-btn { width: 44px; height: 44px; font-size: 18px; }
+  .ch-bar { margin-bottom: env(safe-area-inset-bottom, 0); }
+}
+.ch-back { font-size: 26px; line-height: 1; margin-right: -4px; }

@@ -5,7 +5,7 @@
 // link added to Anthias once, or Crew Call sends each item into Anthias itself.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, fmtDay, fmtSize, uploadFiles } from '../lib.js';
-import { DropZone, Empty, Modal, useApp } from '../ui.jsx';
+import { DateInput, DropZone, Empty, Modal, useApp } from '../ui.jsx';
 import { Qr } from '../qr.jsx';
 import { Sortable, TileHandle } from '../tiles.jsx';
 import { Player } from '../signagePlayer.jsx';
@@ -502,12 +502,12 @@ function When({ f, set, kind }) {
       <div className="row-wrap fields-2">
         <label className="field">
           <span>Start</span>
-          <input type="datetime-local" value={f.start} onChange={(e) => set({ start: e.target.value })} />
+          <DateInput type="datetime-local" value={f.start} onChange={(e) => set({ start: e.target.value })} />
           <span className="muted small">{f.start ? '' : 'Empty: right away'}</span>
         </label>
         <label className="field">
           <span>End</span>
-          <input type="datetime-local" value={f.end} min={f.start || undefined} onChange={(e) => set({ end: e.target.value })} />
+          <DateInput type="datetime-local" value={f.end} min={f.start || undefined} onChange={(e) => set({ end: e.target.value })} />
           <span className="muted small">{f.end ? '' : 'Empty: keeps showing'}</span>
         </label>
       </div>

@@ -3,7 +3,7 @@
 // service, with the deadline a set time before it.
 import { useCallback, useEffect, useState } from 'react';
 import { api, fmtDay, fmtTime, fmtWhen, waLink } from '../lib.js';
-import { Empty, Modal, useApp } from '../ui.jsx';
+import { DateInput, Empty, Modal, useApp } from '../ui.jsx';
 
 const DAYS = [
   [0, 'the same day'],
@@ -174,7 +174,7 @@ function WeeklyModal({ link, titles, onClose, onSaved }) {
           </label>
           <label className="field">
             <span>at</span>
-            <input type="time" value={f.deadlineTime} onChange={set('deadlineTime')} required />
+            <DateInput type="time" value={f.deadlineTime} onChange={set('deadlineTime')} required />
           </label>
         </div>
         <p className="small muted">Before the deadline, what they send goes straight into the plan. After it, it waits for a leader’s approval, the same as quick links.</p>

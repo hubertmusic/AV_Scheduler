@@ -3,7 +3,7 @@
 // detail view with RSVPs and the bulletin request.
 import { useEffect, useMemo, useState } from 'react';
 import { addDays, api, fmtDate, fmtDay, fmtTime, todayISO } from './lib.js';
-import { Icon, Modal, useApp } from './ui.jsx';
+import { DateInput, Icon, Modal, useApp } from './ui.jsx';
 
 export const TYPES = {
   board: { label: 'Board meeting', color: 'blue' },
@@ -175,17 +175,17 @@ export function EventModal({ event, defaults = {}, onClose, onSaved }) {
         <div className="row-wrap fields-4">
           <label className="field">
             <span>Date</span>
-            <input type="date" required value={f.date} onChange={set('date')} disabled={!isNew && event.series && scope === 'future'} />
+            <DateInput type="date" required value={f.date} onChange={set('date')} disabled={!isNew && event.series && scope === 'future'} />
           </label>
           {!f.allDay && (
             <>
               <label className="field">
                 <span>Starts</span>
-                <input type="time" required value={f.start} onChange={set('start')} />
+                <DateInput type="time" required value={f.start} onChange={set('start')} />
               </label>
               <label className="field">
                 <span>Ends</span>
-                <input type="time" value={f.end} onChange={set('end')} />
+                <DateInput type="time" value={f.end} onChange={set('end')} />
               </label>
             </>
           )}
@@ -221,7 +221,7 @@ export function EventModal({ event, defaults = {}, onClose, onSaved }) {
                 </label>
                 <label className="field">
                   <span>Until (optional)</span>
-                  <input type="date" value={repeat.until} min={f.date} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} />
+                  <DateInput type="date" value={repeat.until} min={f.date} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} />
                 </label>
               </>
             )}
@@ -620,15 +620,15 @@ export function RequestEventModal({ mine = [], onClose, onSent }) {
         <div className="row-wrap fields-3">
           <label className="field">
             <span>Date</span>
-            <input type="date" required min={todayISO()} value={f.date} onChange={set('date')} />
+            <DateInput type="date" required min={todayISO()} value={f.date} onChange={set('date')} />
           </label>
           <label className="field">
             <span>From</span>
-            <input type="time" value={f.start} onChange={set('start')} />
+            <DateInput type="time" value={f.start} onChange={set('start')} />
           </label>
           <label className="field">
             <span>To</span>
-            <input type="time" value={f.end} onChange={set('end')} />
+            <DateInput type="time" value={f.end} onChange={set('end')} />
           </label>
         </div>
         <div className="row-wrap fields-2">

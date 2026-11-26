@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { addDays, addMinutes, api, firstName, fmtDay, fmtTime, fridayOf, todayISO, weekendLabel } from '../lib.js';
-import { Avatar, Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { Avatar, DateInput, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { groupRecipients, soundcheckText } from '../outreach.js';
 import { AutoFillModal } from './AutoFill.jsx';
 import { buildFromTemplate } from '../template.js';
@@ -792,19 +792,19 @@ function SoundCheckModal({ service, onClose, onSaved }) {
         <div className="row-wrap fields-4">
           <label className="field">
             <span>Date</span>
-            <input type="date" required value={f.date} onChange={set('date')} />
+            <DateInput type="date" required value={f.date} onChange={set('date')} />
           </label>
           <label className="field">
             <span>AV crew call</span>
-            <input type="time" required value={f.call} onChange={set('call')} />
+            <DateInput type="time" required value={f.call} onChange={set('call')} />
           </label>
           <label className="field">
             <span>Sound check starts</span>
-            <input type="time" required value={f.start} onChange={set('start')} />
+            <DateInput type="time" required value={f.start} onChange={set('start')} />
           </label>
           <label className="field">
             <span>Ends</span>
-            <input type="time" required value={f.end} onChange={set('end')} />
+            <DateInput type="time" required value={f.end} onChange={set('end')} />
           </label>
         </div>
         <fieldset className="fieldset">
@@ -924,19 +924,19 @@ function EventModal({ event, onClose, onSaved }) {
         <div className="row-wrap fields-4">
           <label className="field">
             <span>Date</span>
-            <input type="date" required value={f.date} onChange={set('date')} disabled={locked} />
+            <DateInput type="date" required value={f.date} onChange={set('date')} disabled={locked} />
           </label>
           <label className="field">
             <span>Call time</span>
-            <input type="time" required value={f.call} onChange={set('call')} disabled={locked} />
+            <DateInput type="time" required value={f.call} onChange={set('call')} disabled={locked} />
           </label>
           <label className="field">
             <span>Starts</span>
-            <input type="time" required value={f.start} onChange={set('start')} disabled={locked} />
+            <DateInput type="time" required value={f.start} onChange={set('start')} disabled={locked} />
           </label>
           <label className="field">
             <span>Ends</span>
-            <input type="time" required value={f.end} onChange={set('end')} disabled={locked} />
+            <DateInput type="time" required value={f.end} onChange={set('end')} disabled={locked} />
           </label>
         </div>
         <fieldset className="fieldset">

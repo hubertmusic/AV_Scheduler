@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, unsaved, uploadFiles } from '../lib.js';
-import { Icon, useApp } from '../ui.jsx';
+import { DateInput, Icon, useApp } from '../ui.jsx';
 import { ExtraFeaturesCard } from './Extras.jsx';
 import { TeamsAdmin } from './TeamSetup.jsx';
 import TeamLook from './TeamLook.jsx';
@@ -521,15 +521,15 @@ function Template() {
             </label>
             <label className="field">
               <span>Call</span>
-              <input type="time" value={r.call} onChange={(e) => upd(i, { call: e.target.value })} />
+              <DateInput type="time" value={r.call} onChange={(e) => upd(i, { call: e.target.value })} />
             </label>
             <label className="field">
               <span>Starts</span>
-              <input type="time" value={r.start} onChange={(e) => upd(i, { start: e.target.value })} />
+              <DateInput type="time" value={r.start} onChange={(e) => upd(i, { start: e.target.value })} />
             </label>
             <label className="field">
               <span>Ends</span>
-              <input type="time" value={r.end} onChange={(e) => upd(i, { end: e.target.value })} />
+              <DateInput type="time" value={r.end} onChange={(e) => upd(i, { end: e.target.value })} />
             </label>
           </div>
           <div className="row-wrap spread">

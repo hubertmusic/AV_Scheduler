@@ -5,7 +5,7 @@
 // server when someone taps Show or Copy, and every look is in the vault log.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, copyText, fmtDateTime, unsaved } from '../lib.js';
-import { Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { DateInput, Empty, Icon, Modal, useApp } from '../ui.jsx';
 
 const store = {
   get(k, d) {
@@ -771,7 +771,7 @@ function GrantModal({ v, preset, onClose, onSaved }) {
           {dur === 'custom' && (
             <label className="field">
               <span>Until</span>
-              <input type="datetime-local" required value={custom} min={localInput(new Date())} onChange={(e) => setCustom(e.target.value)} />
+              <DateInput type="datetime-local" required value={custom} min={localInput(new Date())} onChange={(e) => setCustom(e.target.value)} />
             </label>
           )}
           {dur === 'none' && <p className="muted small">They keep access until a leader takes it back here.</p>}

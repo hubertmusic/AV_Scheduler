@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, fmtDay, fmtWhen } from '../lib.js';
-import { Empty, Modal, useApp } from '../ui.jsx';
+import { DateInput, Empty, Modal, useApp } from '../ui.jsx';
 import './reports.css';
 
 const KIND = { problem: 'Problem', missing: 'Missing', other: 'Something else' };
@@ -526,7 +526,7 @@ function ItemForm({ app, item, onClose, onDone }) {
           </label>
           <label className="field">
             <span>Bought</span>
-            <input type="date" value={f.purchasedOn} onChange={set('purchasedOn')} />
+            <DateInput type="date" value={f.purchasedOn} onChange={set('purchasedOn')} />
           </label>
           <label className="field">
             <span>Condition</span>
@@ -974,7 +974,7 @@ function RequestForm({ app, req, stores, onClose, onDone }) {
           </label>
           <label className="field">
             <span>Needed by (optional)</span>
-            <input type="date" value={f.neededBy} onChange={set('neededBy')} />
+            <DateInput type="date" value={f.neededBy} onChange={set('neededBy')} />
           </label>
         </div>
         {total > 0 && <p className="small">Estimate: {usd(total)} in all</p>}

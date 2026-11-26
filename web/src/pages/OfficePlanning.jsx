@@ -2,7 +2,7 @@
 // milestones, action items, votes on record, the yearly calendar, event requests and flow charts.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, api, copyText, fmtDate, fmtDay, fmtTime, todayISO } from '../lib.js';
-import { Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { DateInput, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import { CommitteeChips, CommitteePicker, committeeName, MEETING_TYPES, TYPES, TypeChip, whenText } from '../office.jsx';
 import Boards from './Boards.jsx';
 import { CallBar, HereBar, useLive } from '../live.jsx';
@@ -629,7 +629,7 @@ function MeetingActions({ m, act, reload }) {
           </label>
           <label className="field">
             <span>By</span>
-            <input type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} />
+            <DateInput type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} />
           </label>
           <button className="btn btn-outline self-end">Add</button>
         </form>
@@ -731,7 +731,7 @@ function Actions() {
             </label>
             <label className="field">
               <span>By</span>
-              <input type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} />
+              <DateInput type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} />
             </label>
           </div>
           <CommitteePicker own value={f.committees} onChange={(v) => setF({ ...f, committees: v })} legend="Whose is it? (nothing ticked: the whole team)" />
@@ -876,11 +876,11 @@ function GoalModal({ goal, onClose, onSaved }) {
         <div className="row-wrap fields-4">
           <label className="field">
             <span>Starts</span>
-            <input type="date" value={f.start} onChange={set('start')} />
+            <DateInput type="date" value={f.start} onChange={set('start')} />
           </label>
           <label className="field">
             <span>Due</span>
-            <input type="date" value={f.due} onChange={set('due')} />
+            <DateInput type="date" value={f.due} onChange={set('due')} />
           </label>
           <label className="field">
             <span>Owner</span>
@@ -910,7 +910,7 @@ function GoalModal({ goal, onClose, onSaved }) {
             {f.milestones.map((m, i) => (
               <div key={i} className="ms-edit">
                 <input aria-label="Milestone" placeholder="e.g. Pick a contractor" value={m.title} maxLength={200} onChange={(e) => setMs(i, 'title', e.target.value)} />
-                <input aria-label="Due" type="date" value={m.due} onChange={(e) => setMs(i, 'due', e.target.value)} />
+                <DateInput aria-label="Due" type="date" value={m.due} onChange={(e) => setMs(i, 'due', e.target.value)} />
                 <select aria-label="Owner" value={m.owner} onChange={(e) => setMs(i, 'owner', e.target.value)}>
                   <option value="">Owner</option>
                   {people.map((p) => (
@@ -1063,7 +1063,7 @@ function YearPlan() {
                 ))}
               </select>
             )}
-            <input aria-label="Starts (optional)" type="time" value={r.start} onChange={(e) => setRow(i, 'start', e.target.value)} />
+            <DateInput aria-label="Starts (optional)" type="time" value={r.start} onChange={(e) => setRow(i, 'start', e.target.value)} />
             <label className="check small">
               <input type="checkbox" checked={r.visibility === 'everyone'} onChange={(e) => setRow(i, 'visibility', e.target.checked ? 'everyone' : 'office')} />
               <span>Every team</span>
@@ -1379,7 +1379,7 @@ function PurgeModal({ oldest, onClose, onDone }) {
         <div className="row-wrap fields-2">
           <label className="field">
             <span>Decided before</span>
-            <input type="date" value={before} max={addDays(todayISO(), 1)} onChange={(e) => setBefore(e.target.value)} />
+            <DateInput type="date" value={before} max={addDays(todayISO(), 1)} onChange={(e) => setBefore(e.target.value)} />
           </label>
           <label className="field">
             <span>Which</span>
