@@ -11,6 +11,24 @@ const COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'teal', 'pink', 'gray
 const FAST = 4000; // check-in while Crew Call is in front
 const SLOW = 25000; // …and while it's in a background tab
 const MAX_WINDOWS = 3;
+const PANEL_W = 350; // the list of chats, with its gap
+const WIN_W = 330; // one chat window, with its gap
+const BAR_W = 150; // the Chat button they line up beside
+
+// The window's width, kept up to date when an iPad turns or a window is resized
+function useViewportWidth() {
+  const [w, setW] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
+  useEffect(() => {
+    const on = () => setW(window.innerWidth);
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', on);
+    };
+  }, []);
+  return w;
+}
 
 const ago = (at) => {
   if (!at) return '';
@@ -68,7 +86,27 @@ export function ChatDock() {
   const since = useRef(null);
   const winsRef = useRef(wins);
   winsRef.current = wins;
-  const phone = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches;
+  const vw = useViewportWidth();
+  const phone = vw <= 640;
+  // As many chat windows as fit beside the list (an iPad in portrait has room for one)
+  const roomFor = (withPanel) => Math.floor((vw - 32 - BAR_W - (withPanel ? PANEL_W : 0)) / WIN_W);
+  const fit = phone ? 1 : Math.max(panel ? 0 : 1, Math.min(MAX_WINDOWS, roomFor(panel)));
+  const tight = !phone && roomFor(true) < 1; // an iPad in portrait: a chat and the list don't fit side by side
+  // Esc closes the list of chats
+  useEffect(() => {
+    if (!panel) return undefined;
+    const esc = (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.backdrop [role="dialog"]')) setPanel(false);
+    };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [panel]);
+  // On a phone the chat fills the screen; keep the page behind it from scrolling
+  const fullScreen = phone && (panel || wins.some((w) => !w.min));
+  useEffect(() => {
+    document.documentElement.classList.toggle('ch-lock', fullScreen);
+    return () => document.documentElement.classList.remove('ch-lock');
+  }, [fullScreen]);
 
   const merge = useCallback((roomId, list, prepend = false) => {
     setMsgs((m) => {
@@ -127,7 +165,7 @@ export function ChatDock() {
         const rest = w.filter((x) => x.id !== id);
         return [...rest, { id, min: false }].slice(phone ? -1 : -MAX_WINDOWS);
       });
-      if (phone) setPanel(false);
+      if (phone || tight) setPanel(false);
       if (!msgs[id]?.loaded) {
         try {
           const r = await api(`/chat/rooms/${id}/messages`);
@@ -139,7 +177,7 @@ export function ChatDock() {
       api(`/chat/rooms/${id}/seen`, { method: 'POST', background: true }).catch(() => {});
       sync();
     },
-    [msgs, phone, app, sync]
+    [msgs, phone, tight, app, sync]
   );
   const openPerson = async (personId) => {
     try {
@@ -227,7 +265,7 @@ export function ChatDock() {
   return (
     <div className="ch-dock no-print">
       <div className="ch-windows">
-        {wins.map((w) => {
+        {(fit > 0 ? wins.slice(-fit) : []).map((w) => {
           const room = roomOf(w.id);
           if (!room) return null;
           return (
@@ -241,6 +279,10 @@ export function ChatDock() {
               phone={phone}
               onMin={() => toggleMin(w.id)}
               onClose={() => close(w.id)}
+              onExit={() => {
+                setWins((x) => x.filter((y) => y.id !== w.id));
+                setPanel(false);
+              }}
               onSent={(m) => merge(w.id, [m])}
               onSeen={() => api(`/chat/rooms/${w.id}/seen`, { method: 'POST', background: true }).catch(() => {})}
               onOlder={async () => {
@@ -370,7 +412,7 @@ export function ChatDock() {
   );
 }
 
-function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSent, onSeen, onOlder, onEdit, onRemoved, onArchive, onClear, onDeleteGroup, onLeave }) {
+function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onExit, onSent, onSeen, onOlder, onEdit, onRemoved, onArchive, onClear, onDeleteGroup, onLeave }) {
   const app = useApp();
   const [menu, setMenu] = useState(false);
   const menuRef = useRef(null);
@@ -443,9 +485,23 @@ function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSen
   const sub = other ? lastSeenText(other) : room.kind === 'team' ? 'Everyone on the team' : `${room.members.length} people`;
 
   return (
-    <section className={`ch-win ${min ? 'ch-min' : ''} ${phone ? 'ch-full' : ''}`} aria-label={`Chat: ${room.name}`}>
+    <section
+      className={`ch-win ${min ? 'ch-min' : ''} ${phone ? 'ch-full' : ''}`}
+      aria-label={`Chat: ${room.name}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && !menu) {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+    >
       <header className={`ch-win-head ch-c-${room.kind === 'direct' ? 'gray' : room.color}`}>
-        <button type="button" className="ch-win-title" onClick={onMin} aria-expanded={!min}>
+        {phone && (
+          <button type="button" className="ch-hbtn ch-back" aria-label="Back to your chats" onClick={onClose}>
+            ‹
+          </button>
+        )}
+        <button type="button" className="ch-win-title" onClick={phone ? undefined : onMin} aria-expanded={phone ? undefined : !min}>
           <RoomIcon room={room} people={people} size={28} />
           <span className="ch-win-names">
             <strong>{room.name}</strong>
@@ -500,8 +556,8 @@ function ChatWindow({ room, me, people, state, min, phone, onMin, onClose, onSen
             {min ? '▴' : '–'}
           </button>
         )}
-        <button type="button" className="ch-hbtn" aria-label={phone ? 'Back to chats' : 'Close'} onClick={onClose}>
-          {phone ? '‹' : '✕'}
+        <button type="button" className="ch-hbtn" aria-label={phone ? 'Close chat' : 'Close'} title="Close" onClick={phone ? onExit : onClose}>
+          ✕
         </button>
       </header>
       {!min && (

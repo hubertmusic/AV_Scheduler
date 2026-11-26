@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { addDays, api, fmtDate, fmtSize, todayISO, uploadFiles } from '../lib.js';
-import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { DateInput, DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 
 export const LYRICS_HINT = `Put each section label on its own line, and leave a blank line between slides:
 
@@ -126,11 +126,11 @@ function UsageReport() {
       <div className="row-wrap">
         <label className="field">
           <span>From</span>
-          <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+          <DateInput type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
         </label>
         <label className="field">
           <span>To</span>
-          <input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+          <DateInput type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
         </label>
         <a className="btn btn-primary self-end" href={`/api/songs/usage.csv?from=${from}&to=${to}`} download>
           Download report

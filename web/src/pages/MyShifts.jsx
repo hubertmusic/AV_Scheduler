@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { addDays, api, dayNum, dowShort, fmtDay, fmtTime, TYPE_LABEL, describeRule, todayISO } from '../lib.js';
-import { Empty, Icon, StatusChip, useApp } from '../ui.jsx';
+import { DateInput, Empty, Icon, StatusChip, useApp } from '../ui.jsx';
 import { Notices, noticesFor } from '../notices.jsx';
 import { DebriefPrompt, featureOn, ReportProblem, ShiftChecklist, SignOffButton } from './Extras.jsx';
 import { LiveView } from './Live.jsx';
@@ -439,11 +439,11 @@ function Availability({ data, busy, act, toggleAvail }) {
         <form className="row-wrap fields-4" onSubmit={addAway}>
           <label className="field">
             <span>Away from</span>
-            <input type="date" required value={f.from} onChange={(e) => setF({ ...f, from: e.target.value, to: f.to && f.to < e.target.value ? e.target.value : f.to })} />
+            <DateInput type="date" required value={f.from} onChange={(e) => setF({ ...f, from: e.target.value, to: f.to && f.to < e.target.value ? e.target.value : f.to })} />
           </label>
           <label className="field">
             <span>Until (incl.)</span>
-            <input type="date" value={f.to} min={f.from} onChange={(e) => setF({ ...f, to: e.target.value })} />
+            <DateInput type="date" value={f.to} min={f.from} onChange={(e) => setF({ ...f, to: e.target.value })} />
           </label>
           <label className="field">
             <span>Note (optional)</span>

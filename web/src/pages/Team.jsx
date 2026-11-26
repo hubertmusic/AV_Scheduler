@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, describeRule, firstName, fmtDay, fridayOf, prettyPhone, roleLabel, todayISO, WEEK_OPTIONS } from '../lib.js';
-import { Avatar, Icon, Modal, useApp } from '../ui.jsx';
+import { Avatar, DateInput, Icon, Modal, useApp } from '../ui.jsx';
 import { WhatsAppPerson } from '../live.jsx';
 import { featureOn, SignOffHistory } from './Extras.jsx';
 
@@ -437,7 +437,7 @@ function CommitteesEditor({ f, setF, canEdit }) {
                 </option>
               ))}
             </select>
-            <input aria-label="Term ends" type="date" value={o.termEnds} disabled={!canEdit} onChange={(e) => setOffice(i, 'termEnds', e.target.value)} />
+            <DateInput aria-label="Term ends" type="date" value={o.termEnds} disabled={!canEdit} onChange={(e) => setOffice(i, 'termEnds', e.target.value)} />
             {canEdit && (
               <button type="button" className="icon-btn icon-btn-sm" aria-label="Remove office" onClick={() => setF({ ...f, offices: f.offices.filter((_, j) => j !== i) })}>
                 <Icon name="close" size={16} />
@@ -728,7 +728,7 @@ function Regulars({ person }) {
         {f.week === 'alt' && (
           <label className="field">
             <span>Starting the weekend of</span>
-            <input type="date" value={f.anchor} onChange={(e) => setF({ ...f, anchor: e.target.value ? fridayOf(e.target.value) : f.anchor })} />
+            <DateInput type="date" value={f.anchor} onChange={(e) => setF({ ...f, anchor: e.target.value ? fridayOf(e.target.value) : f.anchor })} />
           </label>
         )}
         <div className="small strong">Job</div>

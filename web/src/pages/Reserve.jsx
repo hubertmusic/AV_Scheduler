@@ -3,6 +3,7 @@
 // when it's decided. It only ever shows the church's name and its room names.
 import { useEffect, useRef, useState } from 'react';
 import { api, fmtDay } from '../lib.js';
+import { DateInput } from '../dateInput.jsx';
 
 const BLANK = { name: '', email: '', phone: '', title: '', date: '', start: '', end: '', room: '', other: '', people: '', needsAv: false, notes: '', website: '' };
 
@@ -120,15 +121,15 @@ export default function Reserve({ token }) {
             <div className="row-wrap fields-3">
               <label className="field">
                 <span>Date</span>
-                <input required type="date" min={info.today} value={f.date} onChange={set('date')} />
+                <DateInput required type="date" min={info.today} value={f.date} onChange={set('date')} />
               </label>
               <label className="field">
                 <span>From</span>
-                <input type="time" value={f.start} onChange={set('start')} />
+                <DateInput type="time" value={f.start} onChange={set('start')} />
               </label>
               <label className="field">
                 <span>To</span>
-                <input type="time" value={f.end} onChange={set('end')} disabled={!f.start} />
+                <DateInput type="time" value={f.end} onChange={set('end')} disabled={!f.start} />
               </label>
             </div>
             {!f.start && <p className="muted small rs-hint">Leave the times empty for all day.</p>}

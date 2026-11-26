@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDays, api, fmtDate, fmtDateTime, fmtDay, fmtSize, fmtTime, fmtWhen, fridayOf, todayISO, uploadFiles, weekendLabel } from '../lib.js';
 import { BibleFields } from '../scripture.jsx';
-import { DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
+import { DateInput, DropZone, Empty, Icon, Modal, useApp } from '../ui.jsx';
 import SongLibrary, { SongFiles, SongModal } from './Songs.jsx';
 import MediaLibrary, { AssetPicker, MediaCard, SaveToLibrary } from './Library.jsx';
 import { LivestreamCard, OrderOfService, ShareCard } from './ServiceOrder.jsx';
@@ -161,7 +161,7 @@ function PlanBrowser({ onOpenArchive }) {
         </div>
         <label className="field field-inline plan-jump">
           <span className="small muted">Jump to</span>
-          <input type="date" value="" aria-label="Jump to a date" onChange={(e) => e.target.value && setFri(fridayOf(e.target.value))} />
+          <DateInput type="date" value="" aria-label="Jump to a date" onChange={(e) => e.target.value && setFri(fridayOf(e.target.value))} />
         </label>
         {rows && rows.length === 0 && <Empty>Nothing scheduled this week. Add a service or program on the Schedule tab, then plan it here.</Empty>}
         {rows && rows.length > 0 && list.length === 0 && <Empty>This week is done and archived.</Empty>}
@@ -1036,11 +1036,11 @@ function Guests({ plan, eventId, reload }) {
           <div className="row-wrap fields-2">
             <label className="field">
               <span>Opens</span>
-              <input type="datetime-local" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} />
+              <DateInput type="datetime-local" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} />
             </label>
             <label className="field">
               <span>Locks at</span>
-              <input type="datetime-local" required value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} />
+              <DateInput type="datetime-local" required value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} />
             </label>
           </div>
         )}
@@ -1156,11 +1156,11 @@ function ScheduleModal({ link, onClose, onSave }) {
       >
         <label className="field">
           <span>Opens</span>
-          <input type="datetime-local" required value={opensAt} onChange={(e) => setOpensAt(e.target.value)} />
+          <DateInput type="datetime-local" required value={opensAt} onChange={(e) => setOpensAt(e.target.value)} />
         </label>
         <label className="field">
           <span>Deadline: locks at</span>
-          <input type="datetime-local" required value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
+          <DateInput type="datetime-local" required value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
         </label>
         <label className="field">
           <span>Note to them</span>
