@@ -19,7 +19,8 @@ git archive HEAD | tar -x -C "$OUT"
 cd "$OUT"
 
 # Our own servers and tools: shipping to the church box, saving from the home server
-rm -rf .github save.sh state.json scripts/ship.sh scripts/clean-copy.sh
+rm -rf .github save.sh scripts/ship.sh scripts/clean-copy.sh
+find . -name state.json -delete # leftover tool files, not part of the app
 
 # Our names and sites in examples
 grep -rIl -e 'practiceav\.fyi' -e 'Hub renamed' -e 'Hub is editing' -e '/srv/stacks/org/crew-call' . | xargs -r sed -i \
