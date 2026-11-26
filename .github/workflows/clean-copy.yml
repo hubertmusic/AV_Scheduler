@@ -1,0 +1,52 @@
+# Keeps the "clean" branch up to date: every push to main makes a fresh clean copy of Crew Call
+# (no church servers or names; see scripts/clean-copy.sh) and saves it there as a new commit.
+# The clean branch has none of main's history. To hand it over: switch to the clean branch on
+# GitHub → Code → Download ZIP.
+name: Clean copy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clean-copy
+  cancel-in-progress: false
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make the clean copy
+        run: scripts/clean-copy.sh "$RUNNER_TEMP/clean"
+
+      - name: Save it on the clean branch
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse --short HEAD)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898281+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin clean > /dev/null; then
+            git fetch -q origin clean
+            git checkout -q -B clean origin/clean
+          else
+            git checkout -q --orphan clean
+          fi
+          git rm -rqf --cached . > /dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$RUNNER_TEMP/clean/." .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The clean copy hasn't changed."
+            exit 0
+          fi
+          git commit -q -m "Clean copy of Crew Call (from main @ $SHA)"
+          git push -q origin clean
+          echo "Updated the clean branch from main @ $SHA"
