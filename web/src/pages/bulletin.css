@@ -1,0 +1,89 @@
+/* The congregation's bulletin (/bulletin/<token>). One colour (--bl, Settings → Bulletin) marks the
+   sections; print keeps to coloured type and rules, since browsers drop background colours. */
+.blp { --bl: #1f3a5f; --bl-ink: #1d2024; --bl-muted: #5d636b; --bl-line: #d9dbe0; background: #fff; min-height: 100vh; color: var(--bl-ink); }
+.bl-serif { --bl-face: 'Source Serif 4', Georgia, 'Times New Roman', serif; }
+.bl-sans { --bl-face: 'IBM Plex Sans', system-ui, sans-serif; }
+.bl-tools { display: flex; justify-content: flex-end; gap: 6px; max-width: 720px; margin: 0 auto; padding: 14px 20px 0; }
+
+.bl { font-family: var(--bl-face); display: flex; flex-direction: column; gap: 24px; font-size: 17px; line-height: 1.45; }
+.bl-screen { max-width: 720px; margin: 0 auto; padding: 18px 20px 64px; }
+
+/* Masthead: logo beside the church name, service and date, over a rule in the bulletin colour */
+.bl-head { display: flex; align-items: center; gap: 18px; padding-bottom: 18px; border-bottom: 3px solid var(--bl); }
+.bl-logo { flex: none; display: block; max-width: 132px; max-height: 92px; object-fit: contain; }
+.bl-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bl-org { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-weight: 600; font-size: 15px; color: var(--bl); }
+.bl h1 { font-family: var(--bl-face); font-size: 38px; line-height: 1.08; font-weight: 700; letter-spacing: -0.01em; color: var(--bl-ink); margin: 0; }
+.bl-date { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; color: var(--bl-muted); margin-top: 4px; }
+
+/* Sermon: set apart with a bar in the bulletin colour */
+.bl-sermon { border-left: 4px solid var(--bl); padding: 4px 0 4px 16px; }
+.bl-sermon-title { font-size: 24px; line-height: 1.2; font-style: italic; color: var(--bl-ink); }
+.bl-speaker { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; color: var(--bl); font-weight: 600; margin-top: 4px; }
+
+/* Section headings: the bulletin colour with a rule running out to the edge */
+.bl-section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.bl-section h2 { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; font-weight: 700; color: var(--bl); display: flex; align-items: center; gap: 12px; margin: 0; }
+.bl-section h2::after { content: ''; flex: 1; border-top: 1px solid var(--bl); opacity: 0.35; }
+
+/* Order of service */
+.bl-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bl-order li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.bl-item { flex: 0 1 auto; }
+.bl-dots { flex: 1 1 24px; min-width: 16px; border-bottom: 1px dotted #a9adb4; transform: translateY(-5px); }
+.bl-who { flex: 0 1 auto; margin-left: auto; text-align: right; color: var(--bl-muted); font-style: italic; }
+.bl-note { flex-basis: 100%; font-size: 0.86em; color: var(--bl-muted); font-style: italic; padding-left: 14px; }
+.bl-k-sermon .bl-item, .bl-k-song .bl-item { font-weight: 600; }
+.bl-order .bl-phase { margin-top: 10px; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; font-weight: 700; color: var(--bl); }
+.bl-order .bl-phase:first-child { margin-top: 0; }
+
+/* Scripture and songs side by side */
+.bl-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 28px; }
+.bl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.bl-muted { color: var(--bl-muted); font-size: 0.86em; }
+
+/* Announcements: separate notices with a bold title, two across when there's room */
+.bl-notices { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 24px; }
+.bl-notice { border-top: 2px solid var(--bl); padding-top: 7px; display: flex; flex-direction: column; gap: 2px; break-inside: avoid; }
+.bl-notice strong { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--bl-ink); }
+.bl-notice p { white-space: pre-wrap; font-size: 15px; line-height: 1.45; margin: 0; }
+
+.bl-foot { display: flex; align-items: center; gap: 12px; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 12px; color: var(--bl-muted); border-top: 1px solid var(--bl-line); padding-top: 10px; }
+.bl-foot img { flex: none; }
+
+@media (max-width: 560px) {
+  .bl { font-size: 16px; gap: 20px; }
+  .bl-head { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .bl h1 { font-size: 31px; }
+  .bl-sermon-title { font-size: 21px; }
+}
+
+/* ---- the printed copy: laid out off screen at paper size (Share.jsx fits it to one page) ---- */
+.bl-sheet { position: absolute; left: -10000px; top: 0; visibility: hidden; pointer-events: none; }
+.bl-sheet-half { display: flex; gap: 0.5in; }
+.bl-paper { box-sizing: border-box; font-size: 12pt; gap: 14pt; background: #fff; }
+.bl-paper h1 { font-size: 26pt; }
+.bl-paper .bl-head { padding-bottom: 10pt; }
+.bl-paper .bl-logo { max-width: 1.3in; max-height: 0.9in; }
+.bl-paper .bl-sermon-title { font-size: 16pt; }
+.bl-paper .bl-order { gap: 3pt; }
+.bl-paper .bl-notices { grid-template-columns: 1fr 1fr; gap: 9pt 18pt; }
+.bl-paper .bl-notice strong, .bl-paper .bl-notice p { font-size: 10.5pt; }
+.bl-paper .bl-pair { grid-template-columns: 1fr 1fr; }
+/* Half sheets: one column of notices, smaller type */
+.bl-half { font-size: 10.5pt; gap: 10pt; }
+.bl-half h1 { font-size: 19pt; }
+.bl-half .bl-head { gap: 12px; padding-bottom: 8pt; }
+.bl-half .bl-logo { max-width: 0.95in; max-height: 0.7in; }
+.bl-half .bl-sermon-title { font-size: 13pt; }
+.bl-half .bl-org, .bl-half .bl-date, .bl-half .bl-speaker, .bl-half .bl-section h2 { font-size: 9.5pt; }
+.bl-half .bl-notices { grid-template-columns: 1fr 1fr; gap: 6pt 12pt; }
+.bl-half .bl-notice strong, .bl-half .bl-notice p { font-size: 9.5pt; }
+.bl-half .bl-pair { gap: 8pt 16pt; }
+
+@media print {
+  .blp { min-height: 0; }
+  .bl-sheet { position: static; visibility: visible; }
+  .bl-sheet-half { justify-content: center; }
+  .bl-paper { break-inside: avoid; }
+}

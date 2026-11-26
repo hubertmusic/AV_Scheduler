@@ -1,0 +1,246 @@
+// Order of service, service rundown and congregation bulletin, against a running API with an
+// EMPTY database:   BASE_URL=http://localhost:4000 node test/order.mjs
+import assert from 'node:assert/strict';
+
+const BASE = process.env.BASE_URL || 'http://localhost:4000';
+
+function client() {
+  let cookie = '';
+  const send = async (method, p, body, isForm) => {
+    const res = await fetch(BASE + p, {
+      method,
+      headers: { ...(body && !isForm ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
+      body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
+    });
+    const set = res.headers.get('set-cookie');
+    if (set) cookie = set.split(';')[0];
+    const type = res.headers.get('content-type') || '';
+    let data;
+    if (type.includes('json')) data = await res.json().catch(() => null);
+    else if (type.startsWith('text/')) data = await res.text();
+    else data = Buffer.from(await res.arrayBuffer());
+    return { status: res.status, data };
+  };
+  const call = (method, p, body) => send(method, p, body, false);
+  call.upload = (p, files, extra = {}, field = 'files') => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+    for (const f of files) fd.append(field, new Blob([f.bytes], { type: f.type }), f.name);
+    return send('POST', p, fd, true);
+  };
+  return call;
+}
+const ok = (r, code = 200) => {
+  assert.equal(r.status, code, JSON.stringify(r.data));
+  return r.data;
+};
+const step = (msg) => console.log('✓', msg);
+const iso = (n) => new Date(Date.now() + n * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+const admin = client();
+const crew = client();
+const anon = client();
+ok(await admin('POST', '/api/auth/setup', { name: 'Hub M.', email: 'admin@example.com', password: 'adminpass1', orgName: 'Grace Church' }), 201);
+const inv = ok(await admin('POST', '/api/people', { name: 'Ava Crew', email: 'ava@example.com', phone: '4235550101', positions: ['foh'] }), 201);
+ok(await crew('POST', `/api/auth/invite/${inv.inviteUrl.split('/invite/')[1]}`, { password: 'avapass12' }));
+
+const svc = ok(await admin('POST', '/api/events', { date: iso(6), title: 'Worship Service', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const song = ok(await admin('POST', '/api/songs', { title: 'Amazing Grace', lyrics: 'Verse 1\nAmazing grace' }), 201);
+ok(await admin('PATCH', `/api/plans/${svc.id}`, { sermonTitle: 'Living Water', speaker: 'Pastor James', scriptures: [{ reference: 'John 4:13-14', version: 'KJV', text: '13 Jesus answered…' }], songs: [{ song: song.id, key: 'G' }] }));
+
+let p = ok(await admin('PATCH', `/api/plans/${svc.id}`, {
+  order: [
+    { kind: 'heading', title: 'Worship', minutes: 9, who: 'x' },
+    { kind: 'item', title: 'Welcome', who: 'Elder Ruth', minutes: 5, notes: 'Handheld mic 2' },
+    { kind: 'song', title: 'Amazing Grace', who: 'Praise team', minutes: 4, notes: 'Lyrics on screen' },
+    { kind: 'bogus', title: 'Offering', minutes: 3, bulletin: true },
+    { kind: 'item', title: '', minutes: 2 },
+    { kind: 'item', title: 'Video check', minutes: 1, notes: 'Mute stage', bulletin: false },
+    { kind: 'sermon', title: 'Sermon', who: 'Pastor James', minutes: 999 },
+  ],
+  announcements: 'Potluck after church.',
+}));
+assert.deepEqual(p.order.map((x) => [x.kind, x.title, x.minutes]), [['heading', 'Worship', 0], ['item', 'Welcome', 5], ['song', 'Amazing Grace', 4], ['item', 'Offering', 3], ['item', 'Video check', 1], ['sermon', 'Sermon', 300]]);
+assert.equal(p.order[0].who, '', 'headings have no who');
+assert.equal(p.announcements, 'Potluck after church.');
+assert.ok(p.share.rundown && p.share.bulletin && p.share.rundown !== p.share.bulletin, 'two separate links');
+
+// ---------- playlist (beta) ----------
+const svcP = ok(await admin('POST', '/api/events', { date: iso(27), title: 'Music Sabbath', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const chk = ok(await crew('GET', `/api/plans/playlist-link?url=${encodeURIComponent('https://open.spotify.com/intl-de/track/4uLU6hMCjMI75M1A2tKUQC?si=abc')}`));
+assert.deepEqual([chk.provider, chk.kind, chk.url], ['spotify', 'track', 'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC']);
+ok(await crew('GET', `/api/plans/playlist-link?url=${encodeURIComponent('https://example.com/song.mp3')}`), 400);
+let pp = ok(await crew('PATCH', `/api/plans/${svcP.id}`, {
+  playlist: [
+    { url: chk.url, title: 'Way Maker', note: 'Special music · Sarah', addedBy: 'Ava Crew' },
+    { url: 'https://music.apple.com/us/album/way-maker-live/1501193566?i=1501193567', title: '' },
+    { url: 'youtu.be/dQw4w9WgXcQ', title: 'Rehearsal video' },
+    { url: 'https://example.com/song.mp3', title: 'Not playable' },
+    { url: 'javascript:alert(1)' },
+  ],
+}));
+assert.deepEqual(pp.playlist.map((x) => [x.provider, x.kind, x.title]), [['spotify', 'track', 'Way Maker'], ['apple', 'song', ''], ['youtube', 'video', 'Rehearsal video']], 'only links the players can play, in order; crew can add');
+assert.equal(pp.playlist[0].embed, 'https://open.spotify.com/embed/track/4uLU6hMCjMI75M1A2tKUQC');
+assert.equal(pp.playlist[1].embed, 'https://embed.music.apple.com/us/album/way-maker-live/1501193566?i=1501193567');
+assert.equal(pp.playlist[2].embed, 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+const rdP = ok(await anon('GET', `/api/public/rundown/${pp.share.rundown}`));
+assert.deepEqual(rdP.playlist.map((x) => x.title), ['Way Maker', '', 'Rehearsal video'], 'the crew rundown lists it');
+assert.ok(!JSON.stringify(ok(await anon('GET', `/api/public/bulletin/${pp.share.bulletin}`))).includes('spotify'), 'the bulletin doesn’t');
+step('playlist: Spotify, Apple Music and YouTube links play in their own players; anyone on the team can add; on the crew rundown, not the bulletin');
+
+ok(await crew('PATCH', `/api/plans/${svc.id}`, { order: [] }), 403);
+assert.equal(ok(await crew('GET', `/api/plans/${svc.id}`)).order.length, 6, 'crew can read it');
+step('order of service saves, cleaned up (kinds, blank lines, minutes)');
+
+const rd = ok(await anon('GET', `/api/public/rundown/${p.share.rundown}`));
+assert.equal(rd.kind, 'rundown');
+assert.equal(rd.event.start, '11:00');
+assert.equal(rd.order.length, 6, 'rundown has everything, including crew-only lines');
+assert.equal(rd.order[1].notes, 'Handheld mic 2');
+assert.equal(rd.order[1].minutes, 5);
+assert.equal(rd.songs[0].key, 'G');
+assert.equal(rd.scriptures[0].text, '13 Jesus answered…');
+assert.equal(rd.crew.length, 1, 'one position');
+assert.equal(rd.crew[0].name, '', 'open position');
+assert.ok(!JSON.stringify(rd).includes('4235550101'), 'no phone numbers on a shared link');
+step('rundown link: times, cues, keys, Bible texts and crew positions, no sign-in');
+
+const bl = ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`));
+assert.equal(bl.kind, 'bulletin');
+assert.equal(bl.orgName, 'Grace Church');
+assert.deepEqual(bl.order.map((x) => x.title), ['Worship', 'Welcome', 'Amazing Grace', 'Offering', 'Sermon'], 'crew-only lines left out');
+assert.ok(bl.order.every((x) => !('notes' in x) && !('minutes' in x)), 'no cues or times');
+assert.deepEqual(bl.songs, [], 'songs already in the order are not listed twice');
+const song2 = ok(await admin('POST', '/api/songs', { title: 'How Great Thou Art' }), 201);
+ok(await admin('PATCH', `/api/plans/${svc.id}`, { songs: [{ song: song.id, key: 'G' }, { song: song2.id }] }));
+assert.deepEqual(ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`)).songs.map((x) => x.title), ['How Great Thou Art'], 'songs not named in the order are listed');
+assert.equal(bl.scriptures[0].reference, 'John 4:13-14');
+assert.ok(!('text' in bl.scriptures[0]));
+assert.equal(bl.announcements, 'Potluck after church.');
+assert.ok(!('crew' in bl));
+ok(await anon('GET', `/api/public/bulletin/${p.share.rundown}`), 404);
+ok(await anon('GET', `/api/public/rundown/${p.share.bulletin}`), 404);
+// The bulletin's colour and type (Settings → Bulletin and livestream)
+assert.deepEqual(bl.style, { color: '', font: 'serif' }, 'navy serif until someone picks');
+ok(await admin('PATCH', '/api/settings', { bulletinColor: 'navy' }), 400);
+ok(await admin('PATCH', '/api/settings', { bulletinFont: 'comic' }), 400);
+ok(await admin('PATCH', '/api/settings', { bulletinColor: '#4A2358', bulletinFont: 'sans' }));
+assert.deepEqual(ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`)).style, { color: '#4a2358', font: 'sans' });
+assert.equal(ok(await admin('GET', '/api/bootstrap')).settings.bulletinColor, '#4a2358');
+ok(await admin('PATCH', '/api/settings', { bulletinColor: '', bulletinFont: 'serif' }));
+ok(await anon('GET', '/api/public/rundown/not-a-real-token-at-all'), 404);
+step('bulletin link: order without times or cues, sermon, Bible texts, announcements');
+
+ok(await crew('POST', `/api/plans/${svc.id}/share/rundown`), 403);
+const renewed = ok(await admin('POST', `/api/plans/${svc.id}/share/rundown`));
+assert.notEqual(renewed.share.rundown, p.share.rundown);
+assert.equal(renewed.share.bulletin, p.share.bulletin, 'only that link changes');
+ok(await anon('GET', `/api/public/rundown/${p.share.rundown}`), 404);
+ok(await anon('GET', `/api/public/rundown/${renewed.share.rundown}`));
+ok(await admin('POST', `/api/plans/${svc.id}/share/flyer`), 404);
+step('a leader can replace a link; the old one stops working');
+
+const nextWeek = ok(await admin('POST', '/api/events', { date: iso(13), title: 'Worship Service', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const other = ok(await admin('POST', '/api/events', { date: iso(12), title: 'Vespers', call: '17:00', start: '18:00', end: '19:00', needs: ['foh'] }), 201);
+ok(await admin('PATCH', `/api/plans/${other.id}`, { order: [{ title: 'Vespers song' }] }));
+const copied = ok(await admin('POST', `/api/plans/${nextWeek.id}/order/copy-last`));
+assert.equal(copied.copiedFrom.date, iso(6), 'prefers the last service with the same name');
+assert.equal(copied.order.length, 6);
+assert.equal(copied.order[1].notes, 'Handheld mic 2');
+assert.equal(copied.announcements, '', 'announcements are weekly, not copied');
+const first = ok(await admin('POST', '/api/events', { date: iso(1), title: 'Prayer Breakfast', call: '07:00', start: '07:30', end: '08:30', needs: ['foh'] }), 201);
+ok(await admin('POST', `/api/plans/${first.id}/order/copy-last`), 400);
+const viaCopy = ok(await admin('POST', '/api/events', { date: iso(20), title: 'Worship Service', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const r = ok(await admin('POST', `/api/plans/${viaCopy.id}/copy`, { from: svc.id, order: true }));
+assert.ok(r.copied.includes('order of service'));
+assert.equal(ok(await admin('GET', `/api/plans/${viaCopy.id}`)).order.length, 6);
+step('copy last week’s order, or copy it from any service');
+
+// Church logo on the bulletin
+const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex');
+ok(await crew.upload('/api/settings/logo', [{ name: 'logo.png', type: 'image/png', bytes: png }], {}, 'file'), 403);
+ok(await admin.upload('/api/settings/logo', [{ name: 'logo.svg', type: 'image/svg+xml', bytes: Buffer.from('<svg/>') }], {}, 'file'), 400);
+const withLogo = ok(await admin.upload('/api/settings/logo', [{ name: 'logo.png', type: 'image/png', bytes: png }], {}, 'file'));
+assert.match(withLogo.logo, /^\/api\/public\/logo\?v=\d+$/);
+const bl2 = ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`));
+assert.equal(bl2.logo, withLogo.logo);
+const img = ok(await anon('GET', bl2.logo));
+assert.equal(Buffer.compare(img, png), 0, 'the logo is served to anyone');
+ok(await admin('DELETE', '/api/settings/logo'));
+ok(await anon('GET', '/api/public/logo'), 404);
+assert.equal(ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`)).logo, '');
+step('church logo: admin uploads it (images only), it shows on the bulletin');
+
+ok(await admin('POST', '/api/plans/archive-weekend', { events: [svc.id], delete: true }));
+ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`), 404);
+ok(await anon('GET', `/api/public/rundown/${renewed.share.rundown}`), 404);
+step('deleting a plan turns its links off');
+
+// ---------- item details: crew cues, bulletin note, links, files ----------
+const svc3 = ok(await admin('POST', '/api/events', { date: iso(20), title: 'Mission Sabbath', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const up = ok(await admin.upload(`/api/plans/${svc3.id}/media`, [{ name: 'mission-story.mp4', type: 'video/mp4', bytes: Buffer.from('fake video bytes') }]), 201);
+const vid = up.media.find((m) => m.originalName === 'mission-story.mp4').id;
+const svc2 = ok(await admin('POST', '/api/events', { date: iso(13), title: 'Worship Service', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+const otherFile = ok(await admin.upload(`/api/plans/${svc2.id}/media`, [{ name: 'other.jpg', type: 'image/jpeg', bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) }]), 201).media[0].id;
+p = ok(await admin('PATCH', `/api/plans/${svc3.id}`, {
+  order: [
+    { kind: 'heading', title: 'Worship', cues: { audio: 'x' }, links: [{ url: 'https://example.com' }], media: [vid] },
+    { kind: 'item', title: 'Welcome', who: 'Elder Ruth', minutes: 5, notes: 'Handheld mic 2\nWalk in from the left', cues: { audio: 'Handheld 2 up', slides: 'Welcome slide', lights: 'House to 50%', camera: 'Wide', bogus: 'no' }, bulletinNote: 'Please stand', bulletin: true },
+    { kind: 'item', title: 'Mission story', minutes: 4, links: [{ url: 'youtu.be/dQw4w9WgXcQ', title: 'Mission video' }, { url: 'https://example.org/script', title: '' }, { url: 'javascript:alert(1)' }, { url: 'not a link' }], media: [vid, otherFile, 'nope'], bulletinNote: 'Hidden from bulletin', bulletin: false },
+  ],
+}));
+const [hd, welcome, mission] = p.order;
+assert.deepEqual([hd.cues, hd.links, hd.media], [{ audio: '', slides: '', lights: '', camera: '' }, [], []], 'headings carry no details');
+assert.deepEqual(welcome.cues, { audio: 'Handheld 2 up', slides: 'Welcome slide', lights: 'House to 50%', camera: 'Wide' });
+assert.equal(welcome.notes, 'Handheld mic 2\nWalk in from the left', 'line breaks are kept');
+assert.equal(welcome.bulletinNote, 'Please stand');
+assert.deepEqual(mission.links, [{ url: 'https://youtu.be/dQw4w9WgXcQ', title: 'Mission video', youtube: 'dQw4w9WgXcQ' }, { url: 'https://example.org/script', title: '', youtube: '' }], 'web links only; YouTube recognised');
+assert.deepEqual(mission.media, [vid], 'only files from this service');
+step('order items keep crew cues, a bulletin note, links (YouTube recognised) and files from this service; line breaks kept');
+
+// The rundown shows every cue, links and file names; the bulletin shows only the bulletin note
+const rdD = ok(await anon('GET', `/api/public/rundown/${p.share.rundown}`));
+const rdW = rdD.order.find((x) => x.title === 'Welcome');
+assert.deepEqual(rdW.cues, welcome.cues);
+assert.deepEqual(rdD.order.find((x) => x.title === 'Mission story').files, ['mission-story.mp4']);
+assert.equal(rdD.order.find((x) => x.title === 'Mission story').links[0].youtube, 'dQw4w9WgXcQ');
+assert.ok(!('media' in rdW) && !('id' in rdW), 'no ids on the public page');
+assert.equal(rdD.crews.slides, 'Slides & ProPresenter');
+const blD = ok(await anon('GET', `/api/public/bulletin/${p.share.bulletin}`));
+assert.deepEqual(blD.order.map((x) => [x.title, x.note]), [['Worship', ''], ['Welcome', 'Please stand']], 'items left off the bulletin stay off, note too');
+assert.ok(!JSON.stringify(blD).includes('Handheld') && !JSON.stringify(blD).includes('youtu'), 'no cues or links in the bulletin');
+// The run sheet has the order with cues
+const rsD = ok(await crew('GET', `/api/weekend/runsheet/${svc3.id}`));
+assert.deepEqual(rsD.plan.order.find((x) => x.title === 'Welcome').cues.lights, 'House to 50%');
+assert.deepEqual(rsD.plan.order.find((x) => x.title === 'Mission story').files, ['mission-story.mp4']);
+// The ProPresenter download names the file after its item and lists the links
+const zipD = ok(await admin('GET', `/api/plans/${svc3.id}/propresenter.zip`));
+const zipNames = zipD.toString('latin1');
+assert.ok(zipNames.includes('Media/03 Mission story - mission-story.mp4'), 'attached files are numbered by item');
+assert.ok(zipNames.includes('Links.txt'));
+// Templates keep cues and links, not files
+ok(await admin('POST', '/api/order-templates', { name: 'Detailed', order: p.order }), 201);
+const tplD = ok(await admin('GET', '/api/order-templates')).find((t) => t.name === 'Detailed');
+assert.equal(tplD.order.find((x) => x.title === 'Welcome').cues.audio, 'Handheld 2 up');
+assert.deepEqual(tplD.order.find((x) => x.title === 'Mission story').media, []);
+step('the rundown and run sheet show each crew’s cues, links and files; the bulletin only its notes; the ProPresenter download numbers files by item and lists links');
+
+// ---------- planning a service together ----------
+const svcT = ok(await admin('POST', '/api/events', { date: iso(9), title: 'Planning test', call: '10:15', start: '11:00', end: '12:30', needs: ['foh'] }), 201);
+ok(await admin('PATCH', `/api/plans/${svcT.id}`, { callLink: 'https://evil.example/join' }), 400);
+ok(await crew('PATCH', `/api/plans/${svcT.id}`, { callLink: 'https://call.whatsapp.com/voice/Plan123' }), 403);
+let pt = ok(await admin('PATCH', `/api/plans/${svcT.id}`, { callLink: 'https://call.whatsapp.com/voice/Plan123' }));
+assert.equal(pt.callLink, 'https://call.whatsapp.com/voice/Plan123');
+assert.equal(ok(await crew('GET', `/api/plans/${svcT.id}`)).callLink, pt.callLink, 'everyone who sees the plan gets the Join button');
+// Who has it open, and a version that changes with every edit
+let h = ok(await admin('GET', `/api/plans/${svcT.id}/here?writing=order`));
+assert.equal(h.v, pt.v);
+h = ok(await crew('GET', `/api/plans/${svcT.id}/here`));
+assert.deepEqual(h.here.map((x) => [x.name, x.writing]).sort(), [['Ava Crew', ''], ['Hub M.', 'order']]);
+ok(await crew('PATCH', `/api/plans/${svcT.id}`, { scriptures: [{ reference: 'Psalm 23', version: 'KJV' }] }));
+assert.notEqual(ok(await admin('GET', `/api/plans/${svcT.id}/here`)).v, h.v, 'someone else’s change gives a new version');
+pt = ok(await admin('PATCH', `/api/plans/${svcT.id}`, { callLink: '' }));
+assert.equal(pt.callLink, '');
+step('planning together: a WhatsApp call link on the plan, who has it open and what they’re editing, a version so open pages reload');
+
+console.log('\nAll order-of-service checks passed.');

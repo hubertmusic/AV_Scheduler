@@ -1,0 +1,61 @@
+/* Run sheet and rundown colours. Each kind of section has its own colour on its heading and top
+   rule; order-of-service items carry their kind's colour down the left. On the day, the item that's
+   on now is marked like a red tally light and the next one in green, as on a camera. Print keeps
+   to coloured type and rules (browsers drop background colours). */
+.rs { --c-crew: #3d5070; --c-order: #0b5394; --c-related: #6b7280; --c-songs: #6b3fa0; --c-scripture: #1f7a4d; --c-notes: #a1361c; --c-media: #8a5a00; --c-inputs: #8a5a00; --c-playlist: #6b3fa0; }
+.rs .rs-block { --sec: var(--ink); border-top: 3px solid var(--sec); padding-top: 10px; }
+.rs .rs-block h2 { color: var(--sec); display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.rs .rs-sec-crew { --sec: var(--c-crew); }
+.rs .rs-sec-order { --sec: var(--c-order); }
+.rs .rs-sec-related { --sec: var(--c-related); }
+.rs .rs-sec-songs { --sec: var(--c-songs); }
+.rs .rs-sec-scripture { --sec: var(--c-scripture); }
+.rs .rs-sec-notes { --sec: var(--c-notes); }
+.rs .rs-sec-media { --sec: var(--c-media); }
+.rs .rs-sec-inputs { --sec: var(--c-inputs); }
+.rs .rs-sec-playlist { --sec: var(--c-playlist); }
+.rs .rs-block .rd-heading th { color: var(--sec); border-bottom-color: var(--sec); }
+.rs .rs-songs li::marker { color: var(--sec); font-weight: 700; }
+.rs .rs-sec-songs .rs-key { border-color: var(--sec); color: var(--sec); }
+.rs .rs-sec-scripture .rs-scripture strong { color: var(--sec); }
+.rs .rs-sec-notes .rs-pre { border-left: 3px solid var(--sec); padding-left: 12px; }
+.rs .rs-sec-crew .rs-crew th { color: var(--c-crew); }
+.rs-runs { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); }
+.rs .rs-notice { border-color: #b26b00; }
+.rs .rs-notice strong { color: #8a5200; }
+
+/* Order of service: numbered, each item's kind down the left */
+.rs .rs-order { counter-reset: none; }
+.rs .rs-order li { --k: #9aa0a8; align-items: flex-start; gap: 10px; padding: 7px 8px 7px 10px; border-bottom: 1px solid #e3e4e8; border-left: 4px solid var(--k); }
+.rs .rs-order .rs-k-song { --k: var(--c-songs); }
+.rs .rs-order .rs-k-scripture { --k: var(--c-scripture); }
+.rs .rs-order .rs-k-prayer { --k: #0f6e7a; }
+.rs .rs-order .rs-k-sermon { --k: var(--c-notes); }
+.rs .rs-order .rs-order-heading { border-left: 0; border-bottom: 2px solid var(--sec); color: var(--sec); padding: 16px 0 4px !important; font-size: 13px; letter-spacing: 0.08em; }
+.rs .rs-order .rs-order-heading:first-child { padding-top: 4px !important; }
+.rs-num { flex: none; width: 26px; height: 26px; letter-spacing: -0.04em; border-radius: 50%; border: 1.5px solid var(--k); color: var(--k); display: grid; place-items: center; font-size: 11.5px; font-weight: 700; font-family: var(--mono); line-height: 1; margin-top: 0; }
+.rs .rs-order-time { padding-top: 3px; min-width: 66px; font-weight: 500; }
+.rs .rs-order-main { padding-top: 2px; }
+.rs-kind { display: inline-block; margin-right: 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--k); border: 1px solid var(--k); border-radius: 4px; padding: 0 5px; vertical-align: 1px; }
+
+/* On the day: now and next */
+.rs .rs-order .rs-now { --k: #c4281c; background: #fff1ee; }
+.rs .rs-order .rs-next { background: #effaf2; border-left-color: #1f8a46; }
+.rs-live { display: inline-block; margin-right: 8px; font-size: 11px; font-weight: 700; border-radius: 4px; padding: 1px 7px; color: #fff; vertical-align: 1px; }
+.rs-live-now { background: #c4281c; }
+.rs-live-next { background: #1f8a46; }
+
+@media print {
+  .rs-live { display: none; }
+  .rs .rs-order li { padding: 4px 6px 4px 8px; }
+  .rs .rs-order .rs-now, .rs .rs-order .rs-next { background: none; }
+  .rs .rs-order .rs-now { --k: #9aa0a8; }
+}
+
+/* Rundown table rows carry the same kind colours */
+.rs .rd-k { --k: #9aa0a8; }
+.rs .rd-k.rs-k-song { --k: var(--c-songs); }
+.rs .rd-k.rs-k-scripture { --k: var(--c-scripture); }
+.rs .rd-k.rs-k-prayer { --k: #0f6e7a; }
+.rs .rd-k.rs-k-sermon { --k: var(--c-notes); }
+.rs .rd-k > td:first-child { border-left: 4px solid var(--k); padding-left: 8px; }

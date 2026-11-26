@@ -1,0 +1,645 @@
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
+import { api, currentTeam, fridayOf, roleLabel, setTeam, setViewAs, signalSignedOut, todayISO, unsaved } from './lib.js';
+import { AppCtx, Avatar, WaSheet } from './ui.jsx';
+import { PreviewBanner, PreviewPicker } from './pages/Preview.jsx';
+import SyncDialog from './pages/SyncDialog.jsx';
+import { Invite, Login, ResetPassword, Setup } from './pages/Auth.jsx';
+import Schedule from './pages/Schedule.jsx';
+import MyShifts from './pages/MyShifts.jsx';
+import Requests from './pages/Requests.jsx';
+import Team from './pages/Team.jsx';
+import Resources from './pages/Resources.jsx';
+import Settings from './pages/Settings.jsx';
+import Groups from './pages/Groups.jsx';
+import Plans from './pages/Plans.jsx';
+import Guest from './pages/Guest.jsx';
+import Reserve from './pages/Reserve.jsx';
+import { ChatDock, ChatPreview } from './chat.jsx';
+import Account from './pages/Account.jsx';
+import WeekendCheck from './pages/WeekendCheck.jsx';
+import Activity, { ActivityTicker } from './pages/Activity.jsx';
+import RunSheet from './pages/RunSheet.jsx';
+import Gear from './pages/Gear.jsx';
+import TeamSetup from './pages/TeamSetup.jsx';
+import { applyTheme } from './theme.js';
+// The flow-chart library is big, so the Planning tab loads only when opened
+const Planning = lazy(() => import('./pages/Planning.jsx'));
+const OfficePlanning = lazy(() => import('./pages/OfficePlanning.jsx'));
+const Vault = lazy(() => import('./pages/Vault.jsx'));
+import OfficeSchedule from './pages/OfficeSchedule.jsx';
+import OfficeOverview from './pages/OfficeOverview.jsx';
+import OfficeMine from './pages/OfficeMine.jsx';
+import { BulletinPage, RundownPage } from './pages/Share.jsx';
+import { WeeklyRedirect } from './pages/WeeklyLinks.jsx';
+import { StagePage } from './pages/Live.jsx';
+import { ScreenPage } from './signagePlayer.jsx';
+import SendToScreens from './pages/SendToScreens.jsx';
+const Signage = lazy(() => import('./pages/Signage.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+
+// Signs out after `minutes` without a click, tap or key press, and tells the server
+// someone's still here while they work on a page without saving.
+function useIdleSignOut(minutes) {
+  useEffect(() => {
+    if (!minutes) return undefined;
+    let last = Date.now();
+    let lastPing = Date.now();
+    const mark = () => {
+      last = Date.now();
+    };
+    // cc:active: a live meeting someone is following with others counts as activity
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'cc:active'];
+    events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    const id = setInterval(() => {
+      const t = Date.now();
+      if (t - last > minutes * 60000) {
+        api('/auth/logout', { method: 'POST' }).catch(() => {});
+        signalSignedOut(`You were signed out after ${minutes} minutes without activity. Please sign in again.`);
+      } else if (t - last < 5 * 60000 && t - lastPing > 5 * 60000) {
+        lastPing = t;
+        api('/account/ping').catch(() => {});
+      }
+    }, 30000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, mark));
+      clearInterval(id);
+    };
+  }, [minutes]);
+}
+
+export default function App() {
+  const inviteToken = useMemo(() => window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const resetToken = useMemo(() => window.location.pathname.match(/^\/reset\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const guestToken = useMemo(() => window.location.pathname.match(/^\/(?:add|guest)\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const reserveToken = useMemo(() => window.location.pathname.match(/^\/reserve\/([A-Za-z0-9_-]+)/)?.[1] || null, []);
+  const runsheetId = useMemo(() => window.location.pathname.match(/^\/runsheet\/([a-f0-9]{24})/)?.[1] || null, []);
+  // Public rundown / bulletin links (no sign-in)
+  const shared = useMemo(() => window.location.pathname.match(/^\/(rundown|bulletin|weekly|stage|screen|send)\/([A-Za-z0-9_-]+)/), []);
+  const [phase, setPhase] = useState(inviteToken ? 'invite' : resetToken ? 'reset' : 'loading');
+  const [boot, setBoot] = useState(null);
+  const [orgName, setOrgName] = useState('');
+  const [notice, setNotice] = useState(''); // why they were signed out
+  // "View as": who the admin is previewing, and the admin's own roster to pick from.
+  const [viewAs, setViewAsState] = useState(null);
+  const [roster, setRoster] = useState([]);
+
+  const load = useCallback(async () => {
+    try {
+      const b = await api('/bootstrap');
+      // Came from a Booth Crew Academy link while signed out: carry on there now.
+      const academyTo = new URLSearchParams(window.location.search).get('academy');
+      if (academyTo !== null) {
+        window.history.replaceState(null, '', '/');
+        if (b.academy) {
+          window.location.replace(`/api/academy/go?to=${encodeURIComponent(academyTo)}`);
+          return;
+        }
+      }
+      if (!b.me.previewing && b.me.role === 'admin') setRoster(b.everyone.map((p) => ({ active: true, ...p, ...(b.people.find((x) => x.id === p.id) || {}), teams: p.teams })));
+      // The server picked a different team (the saved one isn't theirs any more): remember its choice
+      if (!b.me.previewing && b.team && b.team.key !== currentTeam()) setTeam(b.team.key);
+      setBoot(b);
+      setPhase('app');
+    } catch (e) {
+      if (e.status === 404 && isPreviewing()) {
+        exitPreview();
+        return;
+      }
+      if (e.status !== 401) {
+        setPhase('error');
+        return;
+      }
+      try {
+        const st = await api('/auth/status');
+        setOrgName(st.orgName);
+        setPhase(st.needsSetup ? 'setup' : 'login');
+      } catch {
+        setPhase('error');
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!inviteToken && !resetToken && !guestToken && !reserveToken && !shared) load();
+  }, [inviteToken, resetToken, guestToken, reserveToken, shared, load]);
+
+  // The server ended this session (idle timeout, signed out everywhere, …): back to sign-in.
+  useEffect(() => {
+    const onOut = (e) => {
+      unsaved.clear();
+      viewAsRef.current = null;
+      setViewAs(null);
+      setViewAsState(null);
+      setBoot(null);
+      setNotice(e.detail || '');
+      setPhase('login');
+      api('/auth/status').then((st) => setOrgName(st.orgName), () => {});
+    };
+    window.addEventListener('cc:signed-out', onOut);
+    return () => window.removeEventListener('cc:signed-out', onOut);
+  }, []);
+
+  useIdleSignOut(phase === 'app' ? boot?.settings?.idleMinutes || 0 : 0);
+
+  function isPreviewing() {
+    return Boolean(viewAsRef.current);
+  }
+  const viewAsRef = useRef(null);
+  const ownTeam = useRef(null); // the admin's own team, to go back to after a preview
+  const startPreview = (person) => {
+    unsaved.clear();
+    if (!viewAsRef.current) ownTeam.current = currentTeam();
+    viewAsRef.current = person;
+    setViewAs(person.id);
+    setViewAsState(person);
+    setBoot(null);
+    load();
+  };
+  const exitPreview = () => {
+    viewAsRef.current = null;
+    if (ownTeam.current) setTeam(ownTeam.current);
+    setViewAs(null);
+    setViewAsState(null);
+    setBoot(null);
+    load();
+  };
+
+  const finishInvite = () => {
+    window.history.replaceState(null, '', '/');
+    load();
+  };
+
+  if (guestToken) return <Guest token={guestToken} />;
+  if (reserveToken) return <Reserve token={reserveToken} />;
+  if (shared) {
+    const [, kind, t] = shared;
+    if (kind === 'rundown') return <RundownPage token={t} />;
+    if (kind === 'weekly') return <WeeklyRedirect token={t} />;
+    if (kind === 'stage') return <StagePage token={t} />;
+    if (kind === 'screen') return <ScreenPage token={t} />;
+    if (kind === 'send') return <SendToScreens token={t} />;
+    return <BulletinPage token={t} />;
+  }
+  if (phase === 'invite') return <Invite token={inviteToken} onDone={finishInvite} />;
+  if (phase === 'reset') return <ResetPassword token={resetToken} onDone={finishInvite} />;
+  if (phase === 'setup') return <Setup onDone={load} />;
+  if (phase === 'login')
+    return (
+      <Login
+        orgName={orgName}
+        notice={notice}
+        onDone={() => {
+          setNotice('');
+          load();
+        }}
+      />
+    );
+  if (phase === 'error')
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <h1>Can’t reach the server</h1>
+          <p className="muted">Check that Crew Call is running, then try again.</p>
+          <button className="btn btn-primary" onClick={load}>Try again</button>
+        </div>
+      </div>
+    );
+  if (phase === 'loading' || !boot) return <div className="loading">Loading…</div>;
+  if (runsheetId) return <RunSheet id={runsheetId} />;
+  return (
+    <Shell
+      key={`${viewAs?.id || 'me'}|${boot.team?.key || ''}`}
+      boot={boot}
+      reload={load}
+      onSignedOut={() => setPhase('login')}
+      preview={viewAs ? { person: viewAs, roster, start: startPreview, exit: exitPreview } : roster.length ? { person: null, roster, start: startPreview, exit: exitPreview } : null}
+    />
+  );
+}
+
+// av: this tab belongs to the AV team's side (gear, outside groups), hidden on other teams.
+// side: 'service' tabs are for AV, Praise and other service teams; 'office' tabs for Church Admin.
+const TABS = [
+  { id: 'schedule', label: 'Schedule', show: () => true, side: 'service' },
+  { id: 'check', label: 'Weekend check', show: (c) => c.edit || c.approve || c.plans || c.message, side: 'service' },
+  { id: 'mine', label: 'My shifts', show: () => true, side: 'service' },
+  { id: 'requests', label: 'Requests', show: (c) => c.approve, side: 'service' }, // swaps, drops and pick-ups to approve
+  { id: 'plans', label: 'Service plans', show: () => true, side: 'service' },
+  { id: 'planning', label: 'Planning', show: (c, me) => me.role === 'admin' || me.role === 'leader', side: 'service' },
+  { id: 'groups', label: 'Groups', show: (c) => c.groups || c.message, av: true, side: 'service' },
+  { id: 'gear', label: 'Gear', show: () => true, av: true, side: 'service' },
+  { id: 'reports', label: 'Reports', show: () => true, av: true, side: 'service' }, // problems and missing gear; inventory, audits and buying for leaders
+  { id: 'office-schedule', label: 'Schedule', show: () => true, side: 'office' },
+  { id: 'office-overview', label: 'Agenda overview', show: () => true, side: 'office' },
+  { id: 'office-mine', label: 'My calendar', show: () => true, side: 'office' },
+  { id: 'office-plan', label: 'Planning', show: () => true, side: 'office' },
+  { id: 'vault', label: 'Notes', show: (c, me) => !me.previewing }, // “Notes & vault” for people who see the vault
+  { id: 'signage', label: 'Signage', show: (c, me, team, boot) => !!boot?.signage }, // the church screens, on every side
+  { id: 'resources', label: 'Resources & help', show: () => true },
+  { id: 'settings', label: 'Settings', sub: 'General', show: (c, me) => me.role === 'admin' },
+  { id: 'team', label: 'Team & roles', show: (c) => c.people },
+  { id: 'setup', label: 'Team setup', show: (c, me, team) => me.head && (me.role !== 'admin' || team.kind === 'office') },
+  { id: 'activity', label: 'Activity', show: (c, me) => me.role === 'admin' },
+];
+// Tabs that sit together under one heading. A heading with only one tab someone can see just
+// shows that tab; each tab keeps its own #link, so links in reminder emails still work.
+const GROUPS = [
+  { id: 'g-schedule', label: 'Schedule', tabs: ['schedule', 'check', 'mine', 'requests'] },
+  { id: 'g-worship', label: 'Worship planner', tabs: ['plans', 'planning', 'groups'] },
+  { id: 'g-gear', label: 'Gear', tabs: ['gear', 'reports'] },
+  { id: 'g-settings', label: 'Settings', tabs: ['settings', 'team', 'setup', 'activity'] },
+];
+
+// A team's leaders asked this person to join (Church Admin): it's on their profile once they accept
+function JoinBanner({ invite, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const answer = async (action) => {
+    setBusy(true);
+    try {
+      const r = await api(`/account/invites/${invite.team}/${action}`, { method: 'POST' });
+      onDone(r.joined);
+    } catch {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="join-bar" role="region" aria-label={`Request to join ${invite.teamName}`}>
+      <span>
+        <strong>{invite.from}</strong> asked you to join <strong>{invite.teamName}</strong>.
+      </span>
+      <span className="row-wrap tight">
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => answer('accept')}>
+          Join
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => answer('decline')}>
+          No thanks
+        </button>
+      </span>
+    </div>
+  );
+}
+
+// Lets the admin see who's keeping up. The server ignores the admin's own views.
+function noteView(page, detail) {
+  api('/activity/view', { method: 'POST', body: { page, detail } }).catch(() => {});
+}
+
+function Shell({ boot, reload, onSignedOut, preview }) {
+  const { me, settings, positions, people, groups, announcements, academy } = boot;
+  const team = boot.team || { key: 'av', name: 'AV Team', kind: 'av' };
+  const isAv = team.kind === 'av';
+  const isOffice = team.kind === 'office';
+  const can = me.can;
+  const tabs = TABS.filter((t) => t.show(can, me, team, boot) && (!t.av || isAv) && (!t.side || t.side === (isOffice ? 'office' : 'service')));
+  const fromHash = () => {
+    const h = window.location.hash.replace('#', '');
+    return tabs.some((t) => t.id === h) ? h : tabs[0].id;
+  };
+  const [tab, setTabState] = useState(fromHash);
+  const [toastMsg, setToastMsg] = useState('');
+  const [wa, setWa] = useState(null);
+  const [account, setAccount] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [syncAsk, setSyncAsk] = useState(null);
+  const previewingAs = preview?.person || null;
+  const [pending, setPending] = useState(0);
+  const [pendingPlans, setPendingPlans] = useState(0);
+  const [resFilter, setResFilter] = useState('all');
+  const [weekend, setWeekend] = useState(() => fridayOf(todayISO()));
+  const [officeMeeting, setOfficeMeeting] = useState(null); // a meeting to open on Planning
+  const timer = useRef(null);
+  const isAdmin = me.role === 'admin';
+  // The team's look (Team setup → Look); a draft shows while a leader is trying one out
+  const [themeDraft, setThemeDraft] = useState(null);
+  const [signageWaiting, setSignageWaiting] = useState(boot.signage?.waiting || 0);
+  const [gearOpen, setGearOpen] = useState(boot.gearReports?.open || 0);
+  useEffect(() => setGearOpen(boot.gearReports?.open || 0), [boot.gearReports?.open]);
+  useEffect(() => setSignageWaiting(boot.signage?.waiting || 0), [boot.signage?.waiting]);
+  const theme = themeDraft || team.theme || { preset: { av: 'console', music: 'sanctuary', office: 'boardroom' }[team.kind] || 'classic' };
+  const themeKey = JSON.stringify(theme);
+  useEffect(() => applyTheme(JSON.parse(themeKey)), [themeKey]);
+
+  // The top row: tabs on their own, and headings (Schedule, Worship planner…) for tabs grouped together
+  const topTabs = [];
+  for (const t of tabs) {
+    const g = GROUPS.find((x) => x.tabs.includes(t.id));
+    const members = g ? tabs.filter((x) => g.tabs.includes(x.id)) : [];
+    if (!g || members.length < 2) topTabs.push(t);
+    else if (!topTabs.some((x) => x.id === g.id)) topTabs.push({ ...g, group: true, tabs: members });
+  }
+  const openGroup = topTabs.find((t) => t.group && t.tabs.some((x) => x.id === tab)) || null;
+  const lastIn = (g) => {
+    try {
+      const id = localStorage.getItem(`cc-last-${g.id}`);
+      if (g.tabs.some((x) => x.id === id)) return id;
+    } catch {
+      /* private mode */
+    }
+    return g.tabs[0].id;
+  };
+  const tabLabel = (t) => (t.id === 'vault' && boot.vault ? 'Notes & vault' : t.label);
+  const badgeOf = (id) =>
+    ({
+      requests: { n: pending, title: 'Requests waiting' },
+      'office-plan': { n: pending, title: 'Event requests waiting' },
+      plans: { n: pendingPlans, title: 'Guest uploads waiting for approval' },
+      signage: { n: signageWaiting, title: 'Sent for the screens, waiting for a look' },
+      reports: { n: boot.gearReports ? gearOpen : 0, title: 'Problems and missing gear to look at' },
+    })[id] || { n: 0 };
+
+  const setTab = (id) => {
+    if (unsaved.size && !window.confirm('You have unsaved changes on this page. Leave without saving?')) return;
+    unsaved.clear();
+    setTabState(id);
+    window.history.replaceState(null, '', `#${id}`);
+
+    window.scrollTo(0, 0);
+  };
+
+  useEffect(() => {
+    if (!isAdmin) noteView(tab);
+  }, [tab, isAdmin]);
+  // A heading (Schedule, Settings…) opens on the page you were last on under it
+  useEffect(() => {
+    const g = GROUPS.find((x) => x.tabs.includes(tab));
+    try {
+      if (g) localStorage.setItem(`cc-last-${g.id}`, tab);
+    } catch {
+      /* private mode */
+    }
+  }, [tab]);
+
+  // Follow #hash links (e.g. from reminder emails) while the app is open.
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace('#', '');
+      if (tabs.some((t) => t.id === h)) setTabState(h);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toast = useCallback((msg) => {
+    setToastMsg(msg);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setToastMsg(''), 3500);
+  }, []);
+
+  const refreshPending = useCallback(async () => {
+    try {
+      if (isOffice) {
+        if (can.approve) setPending((await api('/office/requests', { background: true })).filter((r) => r.status === 'pending').length);
+        return;
+      }
+      if (can.approve) {
+        const list = await api('/requests', { background: true });
+        setPending(list.filter((r) => r.status === 'pending').length);
+      }
+      if (can.plans) setPendingPlans((await api('/plans/pending', { background: true })).count);
+    } catch {
+      /* badges are best-effort */
+    }
+  }, [can.approve, can.plans, isOffice]);
+
+  useEffect(() => {
+    refreshPending();
+    const id = setInterval(refreshPending, 60000);
+    return () => clearInterval(id);
+  }, [refreshPending]);
+
+  const ctx = useMemo(() => {
+    // Labels for every team's positions, so shifts and line-ups from other teams read right
+    const posMap = Object.fromEntries((boot.allPositions || positions).map((p) => [p.key, p.label]));
+    const byId = Object.fromEntries([...(boot.everyone || []), ...people].map((p) => [p.id, p]));
+    const groupById = Object.fromEntries(groups.map((g) => [g.id, g]));
+    const teamByKey = Object.fromEntries((boot.allTeams || []).map((t) => [t.key, t]));
+    return {
+      me,
+      can,
+      settings,
+      positions,
+      allPositions: boot.allPositions || positions,
+      people,
+      everyone: boot.everyone || people,
+      team,
+      isAv,
+      isOffice,
+      serviceSide: boot.serviceSide !== false,
+      committees: boot.committees || [],
+      office: boot.office || null,
+      vault: boot.vault || null, // { keeper } or { until } when they see this team's vault
+      officeCan: boot.officeAccess?.can || can,
+      officeMember: boot.officeAccess ? boot.officeAccess.member : true,
+      addTo: boot.addTo || [], // teams they can bring someone onto (Team & roles)
+      seesRoster: boot.seesRoster !== false,
+      officeMeeting,
+      openMeeting: (id) => {
+        setOfficeMeeting(id);
+        setTab('office-plan');
+      },
+      clearMeeting: () => setOfficeMeeting(null),
+      teams: boot.teams || [],
+      allTeams: boot.allTeams || [],
+      teamName: (k) => teamByKey[k]?.name || 'AV Team',
+      posTeam: (k) => (boot.allPositions || []).find((p) => p.key === String(k).replace(/\+shadow$/, ''))?.team || 'av',
+      groups,
+      announcements,
+      academy,
+      group: (id) => groupById[id],
+      posLabel: (k) => posMap[k] || k,
+      person: (id) => byId[id],
+      reload,
+      toast,
+      openWa: (opts) => setWa(opts),
+      openSync: (data) => new Promise((resolve) => setSyncAsk({ ...data, resolve })),
+      goTab: setTab,
+      resFilter,
+      setResFilter,
+      refreshPending,
+      weekend,
+      setWeekend,
+      noteView,
+      previewTheme: setThemeDraft,
+      signage: boot.signage,
+      setSignageWaiting,
+      setGearOpen,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boot, toast, resFilter, refreshPending, weekend, officeMeeting]);
+
+  const switchTeam = (key) => {
+    if (key === team.key) return;
+    if (unsaved.size && !window.confirm('You have unsaved changes on this page. Switch teams without saving?')) return;
+    unsaved.clear();
+    setTeam(key);
+    reload();
+  };
+
+  const signOut = async () => {
+    await api('/auth/logout', { method: 'POST' }).catch(() => {});
+    onSignedOut();
+  };
+
+  return (
+    <AppCtx.Provider value={ctx}>
+      <a className="skip" href="#main">Skip to content</a>
+      <header className="topbar">
+        <div className="brand">
+          <img src="/icon.svg" width="32" height="32" alt="" />
+          <span>
+            <strong>Crew Call</strong>
+            <span className="topbar-sub">{settings.orgName}</span>
+          </span>
+        </div>
+        <div className="topbar-user">
+          {(boot.teams || []).length > 1 && (
+            <label className="team-switch">
+              <span className="sr-only">Team</span>
+              <select value={team.key} onChange={(e) => switchTeam(e.target.value)} title={previewingAs ? `Switch between ${previewingAs.name}’s teams` : 'Switch between your teams'}>
+                {boot.teams.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {team.callLink && (
+            <a className="btn btn-dark team-call" href={team.callLink} target="_blank" rel="noopener noreferrer" title={`Join the ${team.name} call in WhatsApp`}>
+              <span aria-hidden="true">📞</span> Team call
+            </a>
+          )}
+          <button type="button" className="user-btn" onClick={() => setAccount(true)} aria-label="Your account">
+            <Avatar name={me.name} size={32} tone="accent" />
+            <span>
+              <span className="user-name">{me.name}</span>
+              <span className="topbar-sub">
+                {roleLabel(me)}
+                {(boot.teams || []).length <= 1 && team.key !== 'av' ? ` · ${team.name}` : ''}
+              </span>
+            </span>
+          </button>
+          {preview && !previewingAs && (
+            <button type="button" className="btn btn-dark" onClick={() => setPicking(true)} title="See the app exactly as one person sees it">
+              View as…
+            </button>
+          )}
+          {!previewingAs && (
+            <button type="button" className="btn btn-dark" onClick={signOut}>
+              Sign out
+            </button>
+          )}
+        </div>
+      </header>
+      {previewingAs && <PreviewBanner me={me} onSwitch={() => setPicking(true)} onExit={preview.exit} />}
+      {!previewingAs && (boot.invites || []).map((i) => <JoinBanner key={i.team} invite={i} onDone={(joined) => { if (joined) setTeam(i.team); reload(); }} />)}
+      {isOffice && boot.officeAccess && !boot.officeAccess.member && (
+        <div className="confidential-bar" role="note">
+          <strong>Church Admin is confidential.</strong> You can manage its people, committees, rooms and event requests. You only see its items shared with every team — or a committee’s items if its leaders ask you to join it.
+        </div>
+      )}
+      <nav className="tabs" aria-label="Sections">
+        {topTabs.map((t) => {
+          const on = t.group ? t.tabs.some((x) => x.id === tab) : tab === t.id;
+          const count = (t.group ? t.tabs : [t]).reduce((n, x) => n + badgeOf(x.id).n, 0);
+          const b = !t.group && badgeOf(t.id);
+          return (
+            <button key={t.id} type="button" className={`tab ${on ? 'tab-on' : ''}`} aria-current={on ? 'page' : undefined} aria-expanded={t.group ? on : undefined} onClick={() => setTab(t.group ? lastIn(t) : t.id)}>
+              {t.group ? t.label : tabLabel(t)}
+              {count > 0 && (
+                <span className="badge" title={t.group ? undefined : b.title}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+      {openGroup && (
+        <nav className="subtabs" aria-label={openGroup.label}>
+          {openGroup.tabs.map((t) => (
+            <button key={t.id} type="button" className={`subtab ${tab === t.id ? 'subtab-on' : ''}`} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
+              {t.sub || tabLabel(t)}
+              {badgeOf(t.id).n > 0 && (
+                <span className="badge" title={badgeOf(t.id).title}>
+                  {badgeOf(t.id).n}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      )}
+      {isAdmin && <ActivityTicker onOpen={() => setTab('activity')} />}
+      <main id="main" className="main">
+        {tab === 'schedule' && <Schedule />}
+        {tab === 'mine' && <MyShifts />}
+        {tab === 'requests' && <Requests />}
+        {tab === 'plans' && <Plans />}
+        {tab === 'gear' && <Gear />}
+        {tab === 'reports' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Reports />
+          </Suspense>
+        )}
+        {tab === 'planning' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Planning />
+          </Suspense>
+        )}
+        {tab === 'groups' && <Groups />}
+        {tab === 'team' && <Team />}
+        {tab === 'resources' && <Resources />}
+        {tab === 'settings' && <Settings />}
+        {tab === 'setup' && <TeamSetup />}
+        {tab === 'check' && <WeekendCheck />}
+        {tab === 'activity' && <Activity />}
+        {tab === 'signage' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Signage />
+          </Suspense>
+        )}
+        {tab === 'vault' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <Vault />
+          </Suspense>
+        )}
+        {tab === 'office-schedule' && <OfficeSchedule />}
+        {tab === 'office-overview' && <OfficeOverview />}
+        {tab === 'office-mine' && <OfficeMine />}
+        {tab === 'office-plan' && (
+          <Suspense fallback={<div className="loading-inline">Loading…</div>}>
+            <OfficePlanning />
+          </Suspense>
+        )}
+      </main>
+      {wa && <WaSheet {...wa} groupLink={wa.groupLink ?? settings.groupLink} onClose={() => setWa(null)} />}
+      {account && <Account preview={!!previewingAs} onClose={() => setAccount(false)} />}
+      {syncAsk && (
+        <SyncDialog
+          differs={syncAsk.differs}
+          extra={syncAsk.extra}
+          onClose={(choice) => {
+            syncAsk.resolve(choice);
+            setSyncAsk(null);
+          }}
+        />
+      )}
+      {picking && preview && (
+        <PreviewPicker
+          roster={preview.roster}
+          current={previewingAs}
+          onClose={() => setPicking(false)}
+          onPick={(p) => {
+            setPicking(false);
+            preview.start(p);
+          }}
+        />
+      )}
+      {previewingAs ? <ChatPreview /> : <ChatDock />}
+      <div className="toast-region" role="status" aria-live="polite">
+        {toastMsg && <div className="toast">{toastMsg}</div>}
+      </div>
+    </AppCtx.Provider>
+  );
+}

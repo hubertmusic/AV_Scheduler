@@ -1,0 +1,16 @@
+/* A church screen's player (signagePlayer.jsx) */
+.sp { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
+.sp-item { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+/* The new item fades in over the last one once it has loaded, so there's never a black flash */
+.sp-top { opacity: 0; transition: opacity 600ms ease; }
+.sp-top.sp-on { opacity: 1; }
+.sp-contain .sp-item { object-fit: contain; }
+.sp-cover .sp-item { object-fit: cover; }
+.sp-web { background: #fff; }
+.sp-empty { display: grid; place-items: center; }
+.sp-msg { color: #e8e8e8; font: 600 clamp(18px, 3.2vw, 56px)/1.25 var(--sans, system-ui, sans-serif); text-align: center; padding: 5vw; display: grid; place-items: center; height: 100%; }
+@media (prefers-reduced-motion: reduce) { .sp-top { transition: none; } }
+
+/* Full screen at /screen/<token> */
+html.sp-page, html.sp-page body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; zoom: 1; }
+.sp-screen { position: fixed; inset: 0; background: #000; }

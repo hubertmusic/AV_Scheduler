@@ -1,0 +1,80 @@
+import { useState } from 'react';
+import { api, prettyPhone, signalSignedOut } from '../lib.js';
+import { Modal, useApp } from '../ui.jsx';
+
+// Your account. In “View as” it shows the person’s own account window, read-only.
+export default function Account({ onClose, preview = false }) {
+  const app = useApp();
+  const [f, setF] = useState({ name: app.me.name, phone: prettyPhone(app.me.phone || '') });
+  const [pw, setPw] = useState({ current: '', password: '' });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const run = async (fn, msg) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      app.toast(msg);
+      await app.reload();
+      onClose();
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Your account" onClose={onClose}>
+      {preview && <p className="preview-note small">This is {app.me.name}’s account window, as they see it. Nothing here can be changed in a preview.</p>}
+      <fieldset className="plain-fieldset stack" disabled={preview}>
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); run(() => api('/account', { method: 'PATCH', body: f }), 'Saved'); }}>
+        <label className="field">
+          <span>Name</span>
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Mobile (so leaders can reach you on WhatsApp)</span>
+          <input type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+        </label>
+        <div className="muted small">Signed in as {app.me.email}</div>
+        <button className="btn btn-primary self-start" disabled={busy}>Save</button>
+      </form>
+      <form className="stack divider-top" onSubmit={(e) => { e.preventDefault(); run(() => api('/account/password', { method: 'POST', body: pw }), 'Password changed'); }}>
+        <h3>Change password</h3>
+        <input type="email" value={app.me.email} autoComplete="username" readOnly hidden />
+        <label className="field">
+          <span>Current password</span>
+          <input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required />
+        </label>
+        <label className="field">
+          <span>New password (8+ characters)</span>
+          <input type="password" autoComplete="new-password" minLength={8} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} required />
+        </label>
+        <button className="btn btn-outline self-start" disabled={busy}>Change password</button>
+      </form>
+      <div className="stack-sm divider-top">
+        <h3>Sign out on all devices</h3>
+        <p className="muted small">Signs you out everywhere you’re signed in: phones, tablets, the booth computer and this browser. Use it if you signed in somewhere you shouldn’t stay signed in.</p>
+        <button
+          type="button"
+          className="btn btn-outline self-start"
+          disabled={busy}
+          onClick={async () => {
+            if (!window.confirm('Sign out on every device, including this one?')) return;
+            try {
+              await api('/account/sign-out-everywhere', { method: 'POST' });
+              signalSignedOut('You’ve been signed out on all your devices.');
+            } catch (e) {
+              setError(e.message);
+            }
+          }}
+        >
+          Sign out everywhere
+        </button>
+      </div>
+      </fieldset>
+      {error && <div className="error" role="alert">{error}</div>}
+    </Modal>
+  );
+}

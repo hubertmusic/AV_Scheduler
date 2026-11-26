@@ -1,0 +1,506 @@
+# Crew Call — AV volunteer scheduler
+
+A self-hosted scheduler for an AV crew of 20–50 people (and more). It runs as three containers: React front end behind nginx, a Node/Express API, and MongoDB.
+
+What it does:
+
+- **Teams.** The AV team and the Praise team (and any team you add, like a choir) each have their own side: their own positions, people, schedule spots, leaders, weekend check, requests and month planner. Services, service plans, songs and the calendar are shared, so everyone sees who's doing what.
+  - **One login per person.** Someone on two teams keeps one account and switches teams at the top of the app. Adding someone with an email that already has a login puts them on your team too.
+  - **Head leaders.** Only the admin picks each team's head leader (Settings → Teams), for example after an election; the old head stays a leader. The head leader names the team's other leaders and their privileges, sets up the team (Team setup: name, WhatsApp group, positions, and which positions each weekend service needs), and runs the month planner for the team.
+  - **AV-only parts:** gear, outside groups, the media library, sound checks, the input list, ProPresenter `.pro` files, livestream details, archiving a weekend, and burnout watch. A shared service's name, day and times are set by the AV side; other teams choose which of their positions it needs.
+  - **Rehearsals** belong to a team and show to every team on the schedule and in calendars.
+  - **Who's serving.** Every service has a line-up of every team, with call and WhatsApp buttons for each person and each team's head leader, and the team's WhatsApp group. It's on the Schedule (👥), My shifts and the service plan. The rundown and run sheet list every team's crew, by team.
+- **Chat.** A chat dock sits in the bottom-right corner on every team and every page, like Facebook chat used to.
+  - **Who's online:** **People** lists everyone on Crew Call with a green dot (online now), amber (Crew Call open in a background tab) or "last seen…". Church Admin membership isn't shown to people outside it.
+  - **Chats:** one-on-one with anyone; a room for each team, for its members only (Church Admin's is closed even to the Crew Call admin); and **named groups** anyone can start with the people they pick, with an icon and a colour. Anyone in a group can rename it, change its look or add people; the person who started it can remove people; anyone can leave.
+  - Chat windows open beside the dock (up to three side by side; full screen on a phone). There are unread badges on the dock, each chat and the browser tab. **Enter** sends and **Shift+Enter** starts a new line. Links are tappable, and you can take back your own message.
+  - Messages arrive within a few seconds: open copies of Crew Call check in every 4 seconds (every 25 in a background tab). Messages are stored encrypted with the `VAULT_KEY`, nobody (not even the admin) reads chats they aren't in, and chat never appears in the Activity log or in "View as".
+- **Notes & vault.** A tab on every team, AV, Praise and Church Admin alike. Everyone gets **Notes**; people who keep a team's vault, or were given time in it, see **Notes & vault**.
+  - **Notes** belong to each account and are the same on every team's side. They're private, even from the admin, until the writer shares one with **everyone on a team they're on** or with **chosen people** on any team. People it's shared with find it under **Shared with you**. They can read it and save their own copy; only the writer can change it, and the writer can make it private again at any time. Notes save as you type, can be pinned and are searchable.
+  - **The team vault** keeps the team's passwords and keys: stream keys, ProPresenter licenses, logins, Wi-Fi. Each team has its own, so the Church Admin vault is theirs alone. It's kept by the team's **head leader** and the leaders the admin or head leader give the **Keep the vault** privilege on Team & roles. Being the Crew Call admin isn't enough without that place on the team. Nobody else sees the vault at all.
+  - **Time in the vault.** A keeper can give someone else on the team time in the vault: 30 minutes, 1 hour, 4 hours, 1 day, 2 days or 1 week, until a date and time they pick, or with no end. That covers the whole vault or only chosen entries, and keepers can take it back at any time. Entries marked **Leaders only** are never shared.
+  - **Kept out of sight.** Passwords appear only when someone taps **Show** or **Copy**, and hide again after 45 seconds. Every look, change and grant is in the vault log, which the keepers see. Vault entries and notes are stored scrambled (AES-256-GCM) with the `VAULT_KEY` from `.env`, and they never appear in "View as" or the Activity log.
+- **Each team's look.** AV, Praise and Church Admin each have their own colours, fonts and text size, and everyone sees that look while they're on that team's side. **Team setup → Look** (the head leader) or **Settings → Look** (the admin, for the team they're viewing) has six colour themes — Console (navy and teal, AV's default), Sanctuary (plum and gold, Praise's), Boardroom (forest green, Church Admin's), Crimson, Classic (the original charcoal and orange) and High contrast — plus your own top-bar and highlight colours, a text font (including Atkinson Hyperlegible, made to be easy to read), a headings font and four text sizes. Choices show across the app straight away as a preview, for you only, until you save. Fonts are served by Crew Call itself, so nothing loads from Google and they work on the church network without the internet.
+- **Tabs are grouped.** **Schedule** (Schedule, Weekend check, My shifts, Requests), **Worship planner** (Service plans, Planning, Groups), **Gear** (Gear, Reports) and **Settings** (General, Team & roles, Team setup, Activity) open a second row with their pages; a heading reopens the page you were last on. Someone who can see only one page under a heading gets that page on its own. Every page keeps its own link (for example `#requests`), so links in emails still work.
+- **Church Admin.** A team for the church office, board and committees, with its own tabs: **Schedule** (a month, week or list calendar), **Agenda overview**, **My calendar**, **Planning**, **Team & roles**, **Team setup** and **Resources & help**. They don't see services, service plans, line-ups, gear, requests or groups unless they're also on the AV or Praise team, or Booth Crew Academy unless they're also on the AV team.
+  - **Confidential, even from the admin.** What anyone sees on Church Admin comes only from their own place on it. The Crew Call admin manages its people, roles, committees, rooms and event requests, but sees only items shared with every team — or a committee's items once its leaders ask the admin to join and put them on that committee. The admin can't add themselves to Church Admin or to a committee, Church Admin isn't shown in the admin's "View as" preview, and the Activity log never names a confidential item.
+  - **Joining is by request.** After the admin picks the head leader, only Church Admin's own leaders add people. To bring in someone who's already on Crew Call (for example the pastor on the AV team), a leader picks them by name under **Team & roles → Ask someone to join → Already on Crew Call**. On any team, that dialog also lists every team the leader can add people to (**Which teams**), so one person can be added to the Praise Team and asked to join Church Admin in one go. They get a request, on a banner when they sign in and by email, and Church Admin appears on their profile only once they accept. On the AV or Praise side, picking someone from another team adds them straight away. Leaders see who hasn't answered and can take a request back.
+  - **Who's on it is private.** The admin and Church Admin's leaders see the whole roster and every committee's members. Others on Church Admin see the people on their own committees and the leaders; nobody else (AV, Praise) sees who is on Church Admin.
+  - **Committees.** Church Board, Finance Committee and Nominating Committee to start (the head leader adds more). Each committee's meetings, minutes, goals and documents are private to it. Tick several committees for a joint meeting, or **pass an item down** so other committees can read it. The head leader sees everything.
+  - **The calendar.** Board and business meetings, committees, deadlines and church events, with rooms, notes, repeats (e.g. *2nd Tuesday of every month*), and "this date or every later date" when changing a repeat. People say whether they'll be there, and the quorum shows. **Share with every team** puts an item on the AV and Praise schedules and calendars; otherwise they never see it. **Needs AV** adds it to the AV schedule (crew arrive 30 minutes early) and follows changes. A **room check** warns when a room is booked, or when services use it.
+  - **Meetings.** An agenda builder (sections, items, who presents, minutes), sent by email, WhatsApp or printed. The **Secretary** (or Clerk) of the committee takes the minutes: who's here, notes, motions with who moved and seconded and the vote, and action items. A leader can **open the minutes to anyone in the meeting** when the secretary is away. Approving the minutes locks them and lists them in the document library.
+  - **Meeting by phone or video.** Paste a **WhatsApp call link** on a meeting (in WhatsApp: **Calls → Create call link**, voice or video, up to 32 people). Everyone in the meeting gets a **Join the call** button on the meeting and on My calendar that day, and the link goes in the agenda email, the WhatsApp agenda message and the calendar entry. The church WhatsApp group's invite link, or a Zoom, Google Meet, Teams or FaceTime link, works too. The call happens in WhatsApp; nothing goes through Crew Call or needs router changes.
+  - **The live meeting page.** Keep the meeting open in Crew Call during the call. Everyone with it open sees who else is there, which agenda item is being discussed (whoever runs the meeting or takes the minutes taps **Start**, **Next item** or **Discuss now**), and the minutes, attendance, motions and action items as they're written. Minutes save as they're typed. If two people change the minutes at once, the one typing is warned. Following a live meeting with others doesn't count as idle, so nobody is signed out mid-meeting.
+  - **Planning.** Goals with milestones, owners and progress; action items (owners get an email when something is due); **votes on record** (search every motion); the **yearly calendar** (set the church year once — Week of Prayer, budget due, nominating — and fill in any year); **requests** for rooms and church events; and flow-chart boards.
+  - **Room requests go straight to the board.** Members ask from the Schedule. Anyone else uses the **room request link**, which needs no account and is made, copied, turned off or replaced under **Planning → Requests**. The form asks for their name, email, optional phone, what it's for, the date, times, room, head count, whether they need AV, and notes. It shows only the church's name and its room names, gently says if the room looks taken then (without saying by what), ignores bots, and accepts at most 8 requests an hour from one place.
+  - **On the next board meeting's agenda.** Every request (link or member) is added to the agenda of the next board meeting that hasn't started yet: a Board-type meeting, or a business or committee meeting for the Church Board. It goes ahead of a closing item like "Adjourn", with who asked and how to reach them. If no board meeting is on the calendar, it waits and goes on as soon as one is added.
+  - **Deciding.** Approvers see each request with its contact details, its agenda meeting (flagged if the board meets after the requested date) and anything already in that room then. Approving puts it on the calendar (and the AV schedule if it needs AV); declining asks why. Either way the agenda item is marked and the person gets an email, including people who used the link, who also get a "we got your request" email straight away.
+  - **Every decision is archived.** Approved and declined requests move to the **Archive** under Requests and stay there, with who asked, their contact details, the decision, who made it, the note back and the agenda meeting, until someone purges them. Nothing ages out on its own. Search by name, email, request, room or note; filter by decision or year; download the archive (or just what's filtered) as a CSV spreadsheet.
+  - **Purging is deliberate.** Only Church Admin's head leader or the admin can purge, from **Archive → Purge…**. Pick a cut-off date (or "Older than 1 year", "Everything"…) and approved, declined or both. It shows how many will go before anything is deleted, offers a download first, and never touches requests still waiting. The meeting agendas keep their record.
+  - **Agenda overview.** Zoom from a week to a month, quarter, year or three years. Week and month list everything; quarter and year show the key dates with goals and milestones; three years is a timeline of the goals. **Needs attention** sits on top: overdue action items, meetings soon without an agenda, minutes to approve, goals behind, and officers' terms ending within 60 days. Printable.
+  - **Announcements.** A church event shared with every team can be sent to a service's bulletin; a service plan leader adds it or declines.
+  - **Documents** on Resources & help: bylaws, policies, forms and reports as files or links, committee-only when needed, plus approved minutes.
+- **Weekend schedule grid.** Services down the side, positions across the top. Click a cell to see who's trained and free, ranked by how many shifts they already have this weekend. Optionally jump straight to the next open spot after each placement. Double-booked or unavailable people get flagged.
+- **Weekend template.** One click builds Friday Vespers and the Sabbath services, with their call times and the positions each needs. You can still add one-off services.
+- **Sound checks.**
+  - Add one from the 🎙 button on any service. It fills in times just before the crew call and can place the service's FOH and stream crew on it automatically.
+  - Sound checks can also live in the weekend template, so they're built along with the services every week.
+- **Outside groups.**
+  - The Groups page holds the praise team, choir, guest musicians and anyone else you coordinate with. Each group can have a contact person, a WhatsApp group link, tech notes and members.
+  - Groups don't need accounts.
+  - Attach groups to sound checks or services. One 💬 tap then gets you the message for the group contact, the group chat and the assigned crew.
+- **Service plans.** Shown a week at a time (Monday–Sunday), so weekday programs have plans too. Use **Jump to** to open any week, for example to start December's program now. A plan saves as you go, and nothing changes it on its own: syncing a weekend with the template only updates service times and positions (and only when someone confirms), services added by hand are never touched, and a plan goes only if its service is deleted. Each service has:
+  - a sermon title and speaker
+  - the pastor's notes
+  - Bible texts. KJV, BSB (Berean Standard), WEB, ASV, YLT, Darby, BBE and Douay-Rheims look up automatically. **More translations…** searches 1,000+ more by language from the free bible.helloao.org service (for example, Spanish Reina-Valera 1909); the ones you pick are remembered on that device. Copyrighted versions (NKJV, NIV, ESV, NLT and others) are pasted. References like `1 Cor 13:4-7`, `Psalm 23` and `John 3:16-4:2` work; book names must be in English.
+  - an ordered song list with keys, a note per song for this service, and chord / arrangement notes on each song
+  - media (photos, videos, audio, slides, documents, up to 80 MB each)
+
+  Everyone signed in can read and download a plan. Anyone on a team can add Bible texts, songs (with keys and chord notes), slides and announcements, and remove slides they added. The sermon title and speaker, pastor's notes, order of service, quick links and approvals are for leaders with the **Lead service plans** privilege.
+- **Weekly links** (Service plans → Weekly links): one permanent link and 6-digit code for people who send things every week, like the pastor or worship leader. Each time they open it, it goes to the next matching service's quick-link page, with the deadline a set number of days before it (e.g. 2 days before at 6 PM). New code or turn off any time.
+- **Order-of-service templates:** save an order as a template; with "Start every new … plan from this", new plans for services of that name start pre-filled. Any template can also be added to a plan by hand.
+- **Announcement slides:** the bulletin's announcements download as a PowerPoint for ProPresenter's pre-service loop (one slide per announcement; separate them with a blank line).
+- **Playlist (beta):** each service plan has a playlist for special music, songs the praise team is learning, or rehearsal tracks. Paste a Spotify, Apple Music or YouTube (or YouTube Music) link, a song, album, playlist or video, and it plays right there in that service's own player; **Open in…** opens it in the app. Anyone signed in to that service in their browser hears full songs; others hear a preview. Anyone on a team can add, rename, reorder or remove items, with an optional note ("Special music · Sarah · offertory"). The crew rundown lists it; the bulletin doesn't. Only links the players recognise are accepted, and each player is built from the song's ID on the service's own site.
+- **Livestream details:** each plan has a YouTube/Facebook title and description written from the plan, with chapter markers from the order of service's minutes, plus a standard ending set in Settings.
+- **Who can cover?** In the schedule's place panel, each free, trained person has an **Ask** button (a WhatsApp message asking them to cover), and **Ask all who are free** messages them together.
+- **Gear tab:** wireless mics, camera bag, batteries and anything else people borrow. Take it, give it to someone (or a guest), return it, log battery swaps and notes, and report problems; filters for checked out, needs fixing and with me.
+- **Gear → Reports (AV team).**
+  - **Crew** report something that isn't working or is missing (picked from the gear list or described), and see their own reports and what the leaders did about them.
+  - **Team leaders and the admin** get the whole page:
+    - **Problems:** every report, marked fixed or found with a note; the item on the gear list follows. The tab shows a count of open reports.
+    - **Inventory:** brand, model, serial number, asset tag, how many, where it's kept, value, purchase date and condition for each item; totals; search; download as a spreadsheet (CSV).
+    - **Audit:** walk through the gear, on a phone in the booth, marking each item found, missing or needs repair. Finishing puts missing and damaged items on the problem list and closes reports of things that turned up. Past audits keep their results.
+    - **Requests:** equipment the team would like, with why, how many, a price estimate, where it was priced and a needed-by date; approve, mark ordered, received or declined. Totals of what's waiting and what's approved.
+    - **Prices & links:** search several stores at once for an item (Google Shopping, Sweetwater, B&H, Guitar Center, Amazon, Reverb, eBay to start; leaders can fix, remove or add stores) and keep other links such as a sales rep, a repair shop or the purchasing form.
+    - **Full report:** totals, open problems, requests with costs, the last audit and the whole inventory on one page, to print or save as a PDF.
+- **Burnout watch (AV team):** anyone serving several weekends in a row (default 4, set in Settings) is flagged on Team & roles and in the month planner.
+- **Extra features (off until the admin turns them on in Settings → Extra features).** Turning one off hides it again; nothing saved is lost.
+  - **Live run-of-show:** "Run it live" on a service plan opens a booth view that follows the order of service: Now, Next, time left on this item, and how far ahead or behind the service is. Everyone with it open sees it move. **Open stage clock** gives a full-screen countdown for a screen the speaker can see (no sign-in; same private link family as the rundown). The real start times are kept and feed the livestream chapters.
+  - **Pre-service checklists:** a checklist per position (set in Settings). From the day before a service, the person on that spot ticks it off in My shifts; the live view shows who's ready.
+  - **Input list:** channel, source, mic/DI, stand and notes per service, printable, copyable from last week, and shown on the rundown link.
+  - **Problem reports:** anyone reports a problem (optionally tied to a gear item) from My shifts or Gear. It goes to Gear → Reports until a leader marks it fixed.
+  - **After-service check-in:** after a service ends, people who served get three quick questions in My shifts. Leaders read the answers on the plan and can send them to a flow chart.
+  - **Training sign-offs:** on the day of a service, a Lead with a learner shadowing them can sign the learner off, moving that position from Learning to Capable. Sign-offs show on the person in Team & roles.
+- **Planning tab** (admin and team leaders):
+  - **Flow charts:** shared boards of boxes, sticky notes, decisions, text and team members joined by lines, for sketching the week. Drag from the dots on a box to connect it; double-click to edit text. Boards save on their own, and if two people edit at once, the second is shown the newer version instead of overwriting it. **Week kickoff** starts with a ready-made outline.
+  - **Month planner (admin only):** every service in a month against every position, with who's available, who's unavailable and how many shifts each person has. Tiles show open spots, services without a Lead and people with room for more; select a person to see the open spots they could fill. **Fill open spots** drafts placements for the whole month, weekday services included (respecting monthly limits and unavailability, spreading shifts, preferring a Lead on each service). Nothing reaches the schedule until **Apply**. After Apply, **Let people know** lists everyone whose shifts changed, with a WhatsApp button that opens a message listing their new and removed shifts.
+- **Skill levels.** On Team & roles, each position is Learning (can shadow), Capable (trained) or Lead. Auto-fill prefers a Lead on any service that doesn't have one yet.
+- **Order of service (optional).** On each service plan: items in order with who and, if you want times, minutes. Crew Call works out each start time and warns when the service runs past its scheduled end. Start from a basic order, copy last week's, or add the plan's songs, Bible texts and sermon. Each line can be left out of the bulletin, and carries:
+  - **Cues and notes for the team:** a box that grows as you type and keeps line breaks.
+  - **Cues for each crew** (Audio, Slides & ProPresenter, Lights, Camera & stream), each colour-labelled on the rundown, the run sheet and the live view.
+  - **A note for the bulletin** that the congregation sees under the item ("Hymn 100 · Please stand").
+  - **Links** (up to 6): YouTube videos show with their thumbnail and a ▶ on the rundown; scripts or pages work too. The ProPresenter download includes a **Links.txt** listing them in service order.
+  - **Files** (up to 10) from the service's media, or uploaded right there. They're in the service's media and the ProPresenter download, named with the item's number and title ("03 Mission story - video.mp4") so they sort in service order.
+
+  The **run sheet** now shows the order of service with times and every crew's cues. Templates keep cues, notes and links (not files).
+- **Rundown and bulletin (beta).** Two separate links, each with a QR code, a printable page and a phone-friendly page, no sign-in needed:
+  - **Service rundown — platform & crew only:** the order with times, cues and who, songs with keys, Bible texts and AV positions (names only, no phone numbers). For speakers, worship leaders and the AV team.
+  - **Congregation bulletin:** the order without times or cues, sermon and speaker, Bible references, songs and the week's announcements, under your church logo. Each announcement gets a bold title: write a short title on its first line and leave a blank line between announcements (one-line announcements use the part before a dash or colon, or the first sentence). Print it full page (announcements two across), or as **half sheets**: two copies side by side on a landscape page, to cut in half. Either way it's shrunk just enough to fit on one page. **Settings → Bulletin and livestream** sets the logo, the bulletin's colour (section headings, rules and the sermon bar) and its type (classic serif or clean sans). Printed copies use coloured type and lines, not filled backgrounds, so they print well in black and white too.
+  - **New link…** replaces either one; the old link and any printed QR code stop working.
+- **Planning a service together.** A service plan can have a **WhatsApp call link** (in WhatsApp: **Calls → Create call link**). Everyone who opens the plan gets a **Join the call** button that opens WhatsApp. While the plan is open, a **Live** bar shows who else has it open and what they're editing ("Sam is editing the order of service"), and their saved changes appear within a few seconds. If you have unsaved edits when someone else saves, your page waits so nothing you typed is lost: their changes appear as soon as you save or undo, or tap **Load their changes**.
+- **Team call.** Each team can keep a standing WhatsApp call link (**Team setup**, or the admin's **Settings → Teams**). Everyone on that team gets a **Team call** button in the top bar for quick huddles.
+- **Calling one person.** In Chat's **People** list, and at the top of a one-on-one chat, a WhatsApp button opens your WhatsApp chat with that person; tap the phone or video button there (WhatsApp doesn't let other apps start the call itself). **Team & roles** has the same button. It only shows where you're allowed to see the number: leaders' and the admin's numbers for everyone, anyone else's for people who message the crew or manage people.
+- **Run sheet colours.** Each kind of section has its own colour on the run sheet and the rundown (crew, order of service, songs, Bible texts, pastor's notes, media). Order-of-service items are numbered and carry their kind down the left: songs purple, Scripture green, prayer teal, sermon red. On the day of the service, when the order has minutes, the item that's on now is marked **Now** in red (like a camera's tally light) and the next one **Up next** in green; they move with the clock.
+- **Archive.** Each weekend moves to the archive on Monday morning (the org's time zone). Archived services leave the planning page and become read-only, so last week's slides never get mixed into this week, but nothing is deleted.
+  - **Archive this weekend…** at the bottom of the planning page does it right away, so the page is a clean slate for next weekend. Pick the services, then **Save to the archive** or, for the admin only, **Delete** (removes the plans, uploaded files and quick links; songs, media library items and the schedule of who served stay). Late quick-link items still waiting for approval are turned down and quick links close.
+  - A service saved early can be **put back on the planning page** from the Archive until its Monday.
+  - The **Archive** view lists past services, newest first. Search by sermon title, speaker, song, Bible text or service name.
+  - **Copy to this week** on any archived service copies its songs (with keys), Bible texts, notes, sermon title, media library items or individual files into an upcoming service. Things already there aren't added twice.
+  - Deleting a file from an archived service frees the space but keeps it listed, so you can still see what was used.
+- **Media library.** Backgrounds, countdowns, logo loops and announcement loops you use every week.
+  - Services link to library items instead of holding their own copy. Pick them under **Media → From the media library** on a plan.
+  - **Save to library** on any file in a plan moves it into the library (from an archived service it's copied).
+  - Upload a file that's already in the library and the plan links to the library copy instead of storing it again.
+  - Library items are in **Download for ProPresenter** and the PowerPoint, and are never archived or moved.
+- **Song history.** Each song shows when it was last sung and how many times in the past year. **CCLI usage report** downloads a spreadsheet of every song sung between two dates.
+  - Deleting a song that past services used *retires* it: it's hidden from the library and pickers, but archived plans still list it. **Show retired songs** → **Bring back** undoes it.
+- **Cold storage (optional).** Files from services older than 90 days can move to a NAS folder. They still open from the plan, a little slower. See [Archive and cold storage](#12-archive-and-cold-storage).
+- **Song library and ProPresenter.**
+  - Each song's lyrics download as a `.txt` that ProPresenter 7 imports. Section labels such as Verse 1 or Chorus become groups.
+  - You can store the song's real `.pro` file with it so anyone can download it. If the lyrics are edited after the `.pro` was uploaded, the app flags it.
+  - **Download for ProPresenter** on a plan gives one zip with every song (`.txt`, plus `.pro` where stored), the Bible texts and the notes.
+- **Quick links.** For anyone who needs to get slides, videos, notes, Bible texts or lyrics in for a service without an account: a guest speaker, the worship leader, a visiting group, someone with a last-minute announcement. A leader who leads service plans makes one on the service plan (Quick links) and sends it on WhatsApp.
+  - **Link + 6-digit code.** They open the link (`/add/…`) and enter the code that came with it. Eight wrong codes lock it until a leader makes a new code. Older `/guest/…` links keep working.
+  - **How long it's open.** Pick 1, 2, 4, 12, 24 or 48 hours from now, pick the times yourself, or leave the default (open now, locks at 6 PM the evening before the service). They see the service's date and times and when it locks.
+  - **Before the deadline**, what they submit goes straight into the plan. They can save drafts (private until submitted), edit what they submitted, or take it back out. Their edits update the plan in place.
+  - **After the deadline** it locks. New items and changes go to the leaders for approval. Or reopen the link for 30 minutes up to 48 hours.
+  - People using a quick link only ever see what they sent. No team files, no downloads, nothing else from the plan.
+- **Announcements.** Three levels, shown at the top of every shift (My shifts, the schedule, Weekend check, run sheets), in reminder emails and in everyone's calendar entries:
+  - **Permanent:** stays until you change or clear it.
+  - **Weekly:** only on that weekend's shifts, then drops off on its own.
+  - **For this shift:** the important note on an individual service.
+
+  Only the admin and leaders who edit the schedule can change announcements. **Share on WhatsApp** posts them to your crew group.
+- **Regular schedules.** On **Team & roles**, give someone a pattern, such as the 2nd Sabbath of the month, the last Sabbath, every weekend or every other weekend. Set which service it's for (or any) and which jobs (or any of their trained positions, so their job can change). Regulars are placed **automatically** as soon as a matching weekend is built, and on weekends already built when you save their schedule, so the shift reaches their calendar early. A regular you take off by hand stays off, and anyone away or at their monthly limit is skipped (Auto-fill lists them with the reason). Crew see their regular schedule on My shifts, and their shifts are tagged Regular.
+- **Build weekends ahead.** In **Settings → Weekend template**, choose how far ahead weekends are built from the template automatically (default 4 weeks; Off to build by hand). Regulars are placed as each one is built. Skipped weekends and services stay skipped.
+- **Sync with template.** After you edit the weekend template in Settings, **Sync with template** on the Schedule adds missing services to a weekend that's already built. It lists services whose times or positions changed and offers to update them, and lists services you removed or turned off in the template and offers to take them off that weekend. Services you added by hand with **Add service** are never offered for removal.
+- **Skip a week.** To skip one service for one weekend (no Vespers this week), open it with the pencil and remove it. To skip a whole weekend, use **No services this weekend**. Skipped services show under **Not happening this weekend** with a **Bring back** button, and Sync with template won't put them back. Other weekends aren't affected.
+- **Turn template services on or off.** Each template service has an On/Off switch. An Off service keeps its settings but isn't built until you turn it back on.
+- **Auto-fill.** One button fills every open spot. It only uses people trained for the spot, free that day and under their monthly limit, and spreads shifts evenly. You see the full list first and can untick anyone before it places them. A sound check gets the same person as its service.
+- **Availability.**
+  - Crew add the date ranges they'll be away and the most shifts they can do in a month.
+  - Away people never appear as options. Auto-fill skips them, and the schedule flags them if they're already placed.
+  - **Weekend check** shows who hasn't updated their availability in 30 days, with a button to ask them on WhatsApp.
+- **Confirmations.** Crew tap **Confirm** on each shift. If the spot changes hands, the new person has to confirm again.
+- **Weekend check.** One screen listing what's left for the weekend:
+  - open spots, with Auto-fill
+  - unconfirmed people, with a WhatsApp nudge
+  - anyone away or double-booked
+  - services missing songs, notes or Bible texts
+  - requests and guest uploads waiting for approval
+  - stale availability
+  - a WhatsApp reminder checklist that ticks people off as you message them
+  - **Arrange the tiles your way:** drag a tile by its ⠿ handle (mouse or finger), or focus the handle and use the arrow keys. Each person's layout is saved to their account, so it's the same on every device; **Put them back in the usual order** undoes it.
+- **Calendar alerts.** Each shift in a synced calendar has an alert a set number of days before (default 5, in **Settings → Shift reminders**), plus one an hour before call time. iPhone and Mac calendars can be set to drop alerts from subscribed calendars, and Google ignores them; **My shifts** shows each person how to fix that.
+- **Email reminders.** Each person gets one email per shift, sent automatically a set number of days before it. The email has the call time, crew, songs and a Confirm link. This needs an SMTP account (see below).
+- **Run sheets.** One printable page per service: crew with phones and confirmations, the linked sound check, songs and keys (lyrics optional), Bible texts, the pastor's notes and the media list.
+- **Copy last weekend.** Creates the same services and puts the same people back in empty spots. It skips anyone now away, unavailable or no longer trained, and says why.
+- **Trainee shadows.** Mark the positions someone is learning, then add them as a shadow beside the person on that position. Shadow shifts show in their My shifts and calendar.
+- **Load report.** Team & roles shows each person's shifts in the last 90 days, how many are coming up, and their monthly limit.
+- **Activity (admin only).** Your account gets:
+  - a live ticker under the tabs
+  - an Activity page with who's been seen, signed in, synced their calendar, viewed pages and made changes
+  - a filterable feed of everything, including failed sign-ins, guest uploads and reminder emails
+
+  Entries are kept for 180 days.
+- **Home-screen app.** On a phone, use Share → Add to Home Screen. There's no service worker, so updates show up straight away.
+- **Shift requests.** Crew can ask to swap, transfer, drop, or pick up an open shift. Leaders approve or deny. If the schedule changed since the request was made, approval is refused with a reason rather than corrupting anything.
+- **Calendar feeds.** Each person gets a private subscription link for Apple Calendar or Google Calendar. Approved changes show up there automatically.
+- **WhatsApp.** Lineups, reminders and invites open WhatsApp with the message already written. You tap Send. This needs no Meta business account and costs nothing.
+- **Roles.** Admin (you), team leaders and crew, per team. The admin and each team's head leader choose leaders' privileges: edit the schedule, approve requests, message the crew, manage training links, manage crew and positions, lead service plans, manage outside groups (AV).
+- **Resources & help.** Training links per position, a *Quick review* button on each shift, and one-tap WhatsApp contact for leaders.
+- **Availability.** Crew mark services they can't make. Leaders see this when placing people.
+
+---
+
+## 1. First start
+
+```bash
+cp .env.example .env
+# edit .env: set MONGO_PASSWORD, JWT_SECRET and VAULT_KEY (openssl rand -hex 32 for each), and PUBLIC_URL
+docker compose up -d --build
+```
+
+1. Open `http://<server>:8780`. The first visit asks you to create the admin account.
+2. Go to **Settings** and check the weekend template, positions and time zone.
+3. Go to **Team & roles** → **Add person** for each volunteer. Each one gets an invite link you can send on WhatsApp. The link works for 14 days.
+4. Go to **Schedule** → **Build this weekend**, then click cells to place people.
+
+## 2. Public access through a Cloudflare Tunnel
+
+Point the tunnel's public hostname at `http://localhost:8780` (or whatever `WEB_PORT` you set). Then update `.env` and apply the change:
+
+```env
+PUBLIC_URL=https://crew.yourdomain.org
+COOKIE_SECURE=true
+```
+
+```bash
+docker compose up -d
+```
+
+`PUBLIC_URL` controls two things: the invite links and the calendar feed addresses. Phones and Google Calendar must be able to reach the calendar feed from the internet. So until `PUBLIC_URL` is your public https address, subscribing from a phone or from Google won't work.
+
+## 3. How calendar sync works
+
+Crew Call is the source of truth. Each person's feed (`/cal/<private-token>.ics`) always reflects their current shifts, on every team they're on. It also shows every other service and rehearsal (30 days back to 4 months ahead) as free time with no alerts, with who's serving on each team, so one subscription shows who you're with and who to contact.
+
+- **Apple Calendar.** Subscribe once and the feed refreshes on its own. On a Mac you can set the calendar's Auto-refresh to every 5 or 15 minutes. iPhones refresh on their own schedule.
+- **Google Calendar.** Google re-reads subscribed calendars on its own schedule, often every several hours. Changes can take that long to appear.
+- **Leaked links.** If someone shares their link by mistake, they can make a new one under **My shifts**. The old link stops working.
+
+Each of your shifts starts at the call time, lists who's serving on every team plus the notes, and has a one-hour alert.
+
+## 4. WhatsApp
+
+WhatsApp only lets other apps open a chat with a message pre-filled; the person still taps Send. Buttons that use this:
+
+- **Send lineup** and the 💬 button on each service open a sheet with one *Open chat* button per crew member, plus *Share to a group…*, which lets you pick your crew group.
+- If you paste your group's invite link in **Settings**, the sheet adds *Copy & open crew group*.
+
+Phone numbers are stored with the country code (10-digit numbers get the default code from Settings, `1` for the US).
+
+To switch to fully automatic sending later (Meta Cloud API or Twilio), everything goes through the `WaSheet` component and `waLink()` in `web/src/`. A server-side sender can replace those without touching the rest of the app.
+
+## 5. Email reminders (optional)
+
+1. Add `SMTP_URL` and `MAIL_FROM` to `.env`.
+   - For Gmail, turn on 2-step verification, create an App Password and use `smtps://you%40gmail.com:APP_PASSWORD@smtp.gmail.com:465`.
+   - Any SMTP service works the same way (Fastmail, SendGrid, Brevo, your church's mail server).
+2. Run `docker compose up -d`.
+3. In **Settings → Shift reminders**, press **Send me a test**.
+
+Reminders are checked every 15 minutes. Each shift gets one email, sent the number of days you choose before its call time. Without email set up, use the WhatsApp reminder list on **Weekend check**.
+
+## 6. ProPresenter workflow
+
+1. In **Service plans → Songs**, add or edit the song. Put each section label on its own line and leave a blank line between slides.
+2. Click **.txt** on the song, or **Download for ProPresenter** for the whole service.
+3. In ProPresenter 7, go to **File → Import** and pick the `.txt`. In the import window's parsing settings, set the delimiter so each blank-line-separated block becomes one slide. Labels like Verse 1, Chorus or Bridge become groups.
+4. Style the presentation, save it, then upload the `.pro` back onto the song so the next person can download the finished file.
+
+Crew Call doesn't write `.pro` files itself. The format is undocumented, and generating it risks files that ProPresenter can't open.
+
+**What the exports contain**
+
+- **Download for ProPresenter** (a zip): each song as an importable `.txt` plus its stored `.pro`, `Bible texts.txt`, `Service notes.txt`, a `Media` folder with every approved upload exactly as it was uploaded (pictures, videos, PDFs, the pastor's own slide decks), and a PowerPoint of the service.
+- **PowerPoint**: 16:9 slides, white text on black: a title slide (pastor's notes in its speaker notes), each song's title and lyric slides, the Bible texts broken between verses, then each picture full screen. Videos and documents aren't put in the deck; they're in the zip's Media folder. Open it in PowerPoint or Keynote, or bring it into ProPresenter with **File → Import → PowerPoint**.
+
+## 6a. Digital signage (Anthias)
+
+The **Signage** tab decides what the church screens show. It's separate from service plans, but you can pull anything from a plan's media onto the screens (**Show on screens** on a plan's file, or **Add → From a service plan**), and send a screen item into a plan (**Edit → Add to a service plan**). It's laid out like Anthias's own screen:
+
+- **Playlist.** Active items (showing now) and Inactive ones (switched off, scheduled for later, ended, or still getting ready), each with a start, an end, a duration and an on/off switch. Drag ⠿ to change the order. Pick a screen at the top to see just its playlist. **Preview** plays it here.
+- **What it can show:** pictures; videos (made into an H.264 MP4 every screen can play, at most 1080p); PDFs, one page at a time (for PowerPoint, Keynote or Word, save it as a PDF first); and web pages.
+- **Several screens** (Lobby, Fellowship hall…). Each item goes on every screen or only the ones you pick.
+- **Upload links.** Make a link that works until you turn it off, or for 4 hours, a day, a week or 30 days. Anyone with it can send pictures, videos and PDFs with their name and the dates they'd like. Everything waits under **Waiting** until someone approves it (and picks the screens and dates) or turns it down. Each link has a QR code for the bulletin.
+- **Who manages it:** the admin, every team's head leader, and every team leader on AV, Praise or Church Admin. The admin or a head leader can switch **Manage signage** off for a leader in Team & roles, or turn it on for a crew member (under **Church screens** on their page) without making them a leader. Nobody else can change anything: screen links only play, and what comes in through upload links waits for approval. A leader moved back to crew loses it.
+
+Each screen gets its playlist one of two ways (set under **Screens**):
+
+1. **Live link** (works from any network). In Anthias choose **Add Asset → URL**, paste the screen's link, set the duration to a day (86400 seconds) and the end date far ahead, and switch off Anthias's other items. The link shows whatever is on that screen's playlist. It keeps a connection open to Crew Call, so anything you add, change, switch off or delete reaches the screen in under a second (and anything new plays next). If that connection drops, the screen still checks in every 10 seconds. After a Crew Call update the screen reloads itself into the new version, so there's no need to restart anything in Anthias. It keeps playing what it has if the internet drops.
+2. **Crew Call sends to Anthias.** Crew Call adds each item to Anthias's own playlist through its API (Anthias's own video player is the smoothest), keeps names, dates, durations, on/off and order in step, and removes what you delete here. It only touches items it added, which show in Anthias as "Crew Call · …". This needs Crew Call to reach the Pi, so Crew Call and the screen must be on the same network (the church server). Enter the Pi's address (like `https://192.168.1.50`) and, if Anthias sign-in is on, an API token from **Anthias → Settings → API tokens**. **Test connection** checks it; changes are sent a few seconds after you make them and every 10 minutes.
+
+**Restart and Turn off.** Each live-link screen has **Restart** (reloads the screen, like switching it off and on in Anthias) and **Turn off** / **Turn on** (the screen goes black and keeps its playlist for when it's back on), above the playlist and on the Screens tab. Both take effect in under a second. A screen that's offline when you press Restart reloads when it's back.
+
+**How items change.** Each new item fades in over the last one once it has loaded, so the screen never flashes black. An item that's the only one on a screen just stays up (a lone video loops without a gap). Set a picture, PDF or web page to **0 seconds** to keep it on screen: the screen won't move on from it to anything else until it's switched off or its end date passes.
+
+**Seeing what's on right now.** Screens on a live link check in every 10 seconds and whenever a new item starts. Above the playlist, each screen shows a green dot and what it's showing (*"welcome" · 6s left · next: countdown*), or a red dot with *offline · last seen 7:42 PM*; the row being shown gets *On screen now: Lobby*. Two TVs on one link show as *on 2 TVs*, and right after you change something, *picking up your changes…* until the screen has the new playlist (about 10 seconds). **Watch** (or **Preview** with a screen picked) shows that screen live, on the same item and at the same point, and keeps in step with it. Screens that Crew Call sends to Anthias are played by Anthias itself, so for those the tab shows when Crew Call last sent the playlist, not the item on screen.
+
+Anthias plays video on a Raspberry Pi 4 (up to 1080p) and Pi 5 (up to 4K); keep Anthias updated, since recent versions play video far more smoothly on a Pi 5. Video conversion and PDF pages need `ffmpeg` and `poppler-utils`, which the API image now installs; the API log says `[signage] video on, PDFs on` at start-up.
+
+## 7. Accounts and guests
+
+- **Crew and leaders** each have their own account. Add people on **Team & roles**, send each one their invite link, and they set a password. Any number can be signed in at once.
+- **Forgot password?** on the sign-in page emails a link to choose a new password; it works for one hour and signs out other devices. (Email must be set up — see Email reminders.)
+- **Help with sign-in.** On Team & roles, a leader with *Manage crew* makes a 24-hour reset link (or a new invite for someone who never signed up) for crew on their team; the head leader can do it for the team's leaders too. Nobody sees or sets another person's password, nobody can reset the admin, and every reset link is logged in Activity. The person always gets an email when a reset link is made for them, and their old address gets one when their sign-in email is changed, so nobody can quietly take over an account.
+- **Outside guests** don't get accounts. On a service plan, use **Quick links**: each comes with a 6-digit code, opens and locks on a schedule, and can be reopened, given a new code, or turned off. Guests see only what they sent.
+- **Approving late guest changes.** The **Service plans** tab shows a badge when something sent after a guest's deadline is waiting for approval.
+
+### Signing out
+
+- **Automatic.** People are signed out after 90 minutes without activity and when they close their browser. Change both on **Settings → Sign-in**. Background checks (badges, the live activity feed) don't count as activity. Some browsers reopen tabs after a restart and keep cookies; the no-activity limit still applies.
+- **Sign out everywhere.** Anyone can sign themselves out on every device from **Your account**. Changing your password signs out your other devices too.
+- **Admin.** Sign one person out on all devices from **Team & roles → their name → Sign out everywhere**, or everyone except you from **Settings → Sign-in → Sign everyone else out**.
+
+### View as (admin)
+
+Use **View as…** in the top bar to see Crew Call exactly as one person sees it: their tabs, their shifts, the phone numbers they can see, the buttons they're allowed to use, their tile layout, their account window and their chat dock. If they're on more than one team, switch between their teams at the top. A blue banner shows whose view you're in. Nothing can be changed while previewing, either in the app or on the server, and Exit preview puts you back on your own team.
+
+Some things stay private even in a preview: their notes, the vault, their private calendar link, Church Admin details, and what anyone writes in chat. The chat dock shows who's online, their team chats and unread counts, and how many one-on-one chats and groups they have, but not who those are with or what's in them. Choose **Switch person** or **Exit preview** in the banner.
+
+### Booth Crew Academy sign-in
+
+Crew use their Crew Call account for Booth Crew Academy too. They don't make a second account. The Academy is AV training, so it's on the **AV Team's side only**: the Praise Team and Church Admin don't see it, and people only on those teams can't sign in to it through Crew Call.
+
+- **Open the Academy** (on **Resources & help**), and any resource that links to the Academy, signs them straight in there.
+- **First visit:** the Academy makes them a volunteer account. Set roles and crews in the Academy as usual.
+- **Already have an Academy account with the same email?** They type their Academy password once to connect the two, and keep their progress.
+- **Signed out of Crew Call?** They sign in to Crew Call first, then go on to the Academy page they tapped.
+- **Turned off in Crew Call?** They can't get into the Academy through Crew Call any more. Turn them off in the Academy as well if they also have an Academy password.
+
+Behind the scenes, Crew Call gives the Academy a pass signed with a secret the two apps share. Each pass lasts 60 seconds and works once. No passwords move between the apps.
+
+To set it up, add the same secret to both `.env` files and install the Academy add-on (`bca-crew-call-signin`):
+
+```
+ACADEMY_URL=https://academy.example.org
+ACADEMY_SSO_SECRET=<openssl rand -hex 32>
+```
+
+## 8. Backups
+
+`scripts/backup.sh` backs up the database and a copy of `.env` (it holds the database password) every time it runs, plus the uploaded files (media and `.pro` files) once a week on Mondays. It keeps 30 days and deletes older copies. Files already in cold storage live on the NAS, so back those up with the NAS's own tools.
+
+### Nightly backups to the NAS
+
+1. On the NAS, make a shared folder, e.g. `CrewCallBackups`, with an account that can read and write it.
+2. On the server, mount it at boot (the same way as the cold-storage share, below), owned by your user:
+
+   ```bash
+   sudo apt install cifs-utils
+   sudo mkdir -p /mnt/crewcall-backups
+   sudo sh -c 'printf "username=NAS_USER\npassword=NAS_PASSWORD\n" > /root/.nas-crewcall-backups && chmod 600 /root/.nas-crewcall-backups'
+   echo "//NAS_ADDRESS/CrewCallBackups /mnt/crewcall-backups cifs credentials=/root/.nas-crewcall-backups,uid=$(id -u),gid=$(id -g),file_mode=0600,dir_mode=0700,nofail,_netdev,x-systemd.automount 0 0" | sudo tee -a /etc/fstab
+   sudo systemctl daemon-reload && sudo mount -a
+   touch /mnt/crewcall-backups/.crewcall-backups
+   ```
+
+   The `.crewcall-backups` file marks the real share. If the NAS isn't mounted, the script stops instead of filling the server's disk.
+3. In `.env`:
+
+   ```env
+   BACKUP_DEST=/mnt/crewcall-backups
+   BACKUP_KEEP_DAYS=30
+   BACKUP_UPLOADS=weekly
+   ```
+
+4. Check it, then run it once by hand:
+
+   ```bash
+   scripts/backup.sh --check
+   scripts/backup.sh
+   ```
+
+5. Run it every night at 3:30 AM: `crontab -e`, then add
+
+   ```
+   30 3 * * * /opt/crew-call/scripts/backup.sh >> /opt/crew-call/backups/backup.log 2>&1
+   ```
+
+   `last-backup.txt` in the backup folder shows when the last good backup finished, and `backups/backup.log` shows any errors.
+
+Without `BACKUP_DEST`, backups go to `./backups` on the server itself, which won't survive a dead disk.
+
+### Restoring
+
+```bash
+C="docker compose -f docker-compose.yml -f compose.override.yaml"
+# database (replaces what's there now)
+$C exec -T mongo sh -c 'mongorestore --drop --archive --gzip -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' < /mnt/crewcall-backups/crewcall-db-YYYY-MM-DD-HHMM.gz
+# uploaded files
+$C exec -T api tar xzf - -C /data/uploads < /mnt/crewcall-backups/crewcall-uploads-YYYY-MM-DD-HHMM.tgz
+```
+
+If `.env` is lost or changed, copy back the matching `crewcall-env-*.txt`: the database only accepts the password it was first set up with, and the vault and notes can only be read with the `VAULT_KEY` they were saved with.
+
+## 9. Updating
+
+```bash
+docker compose up -d --build
+```
+
+There's no service worker, and `index.html` is served with `no-cache`, so browsers pick up a new build on the next reload.
+
+## 10. Moving to a Raspberry Pi
+
+MongoDB 5 and later need an ARMv8.2 CPU:
+
+- **Raspberry Pi 5:** runs `mongo:7`.
+- **Raspberry Pi 4:** can't run `mongo:7` (its CPU is ARMv8.0). Either change the image to `mongo:4.4.18`, the last version that runs there, or keep MongoDB on the Mac mini.
+
+To move the data, run the backup command on the old machine, copy the archive to the new one, and restore it there.
+
+## 11. Development
+
+```bash
+# terminal 1: MongoDB on localhost:27017 (e.g. docker run -p 27017:27017 mongo:7)
+cd api && npm install && JWT_SECRET=dev-secret-dev-secret-dev-secret-00 npm run dev
+# terminal 2
+cd web && npm install && npm run dev      # http://localhost:5173, proxies /api and /cal
+```
+
+To run the end-to-end API check, point it at an **empty** database:
+
+```bash
+cd api && BASE_URL=http://localhost:4000 node test/smoke.mjs
+```
+
+It covers:
+
+- setup and invites
+- weekend building and placement
+- the calendar feed
+- transfer, pick-up and swap approvals
+- stale-request refusal
+- leader privileges
+- availability
+- resources
+- deactivation
+
+## 12. Archive and cold storage
+
+How a week's media is handled:
+
+| Stage | When | What crew see | Where files are |
+|---|---|---|---|
+| Active | This weekend and anything coming up | Editable plans | `uploads` volume |
+| Archived | Monday morning after the service, or **Archive this weekend** | Read-only, under **Archive**, searchable | `uploads` volume |
+| Cold | `ARCHIVE_AFTER_DAYS` (90) after the service | Same; files show **In the archive** | NAS folder |
+| Removed | Only if `PURGE_VIDEO_AFTER_DAYS` is set | Videos show **Removed to save space** | Deleted |
+
+The plan record itself (who served, songs, Bible texts, sermon, notes) is never deleted. Songs' `.pro` files and media library items never move.
+
+### Setting up cold storage on a NAS (Linux server + TerraMaster)
+
+1. On the NAS, make a shared folder, e.g. `CrewCallArchive`, with an account that can read and write it.
+2. On the server, mount it at boot. The API container runs as user `node` (uid 1000), so the mount is owned by 1000:
+
+   ```bash
+   sudo apt install cifs-utils
+   sudo mkdir -p /mnt/crewcall-archive
+   sudo sh -c 'printf "username=NAS_USER\npassword=NAS_PASSWORD\n" > /root/.nas-crewcall && chmod 600 /root/.nas-crewcall'
+   echo '//NAS_ADDRESS/CrewCallArchive /mnt/crewcall-archive cifs credentials=/root/.nas-crewcall,uid=1000,gid=1000,file_mode=0660,dir_mode=0770,nofail,_netdev,x-systemd.automount 0 0' | sudo tee -a /etc/fstab
+   sudo systemctl daemon-reload && sudo mount -a
+   ```
+
+   `nofail` keeps the server booting normally when the NAS is off.
+3. Mark the folder as Crew Call's archive (only once the share is mounted):
+
+   ```bash
+   touch /mnt/crewcall-archive/.crewcall-archive
+   ```
+
+4. In `.env`, set `ARCHIVE_HOST_DIR=/mnt/crewcall-archive`, then restart Crew Call with your usual `docker compose ... up -d`.
+5. As admin, open **Service plans → Media** and check the **Storage** card. **Run now** moves anything that's due.
+
+### Setting up cold storage on a NAS (Mac mini + TerraMaster)
+
+1. On the NAS, make a shared folder, e.g. `CrewCallArchive`, and give the Mac mini's account read/write access.
+2. On the Mac mini: **Finder → Go → Connect to Server**, enter `smb://<nas-address>/CrewCallArchive`, and sign in. To reconnect it after a restart, drag the mounted share into **System Settings → General → Login Items**.
+3. Mark the folder as Crew Call's archive:
+
+   ```bash
+   touch /Volumes/CrewCallArchive/.crewcall-archive
+   ```
+
+   Crew Call only uses a folder that contains this file. If the NAS isn't mounted, `/Volumes/CrewCallArchive` is just an empty local folder, and without the marker Crew Call won't fill your Mac's disk with files meant for the NAS.
+4. In `.env`:
+
+   ```env
+   ARCHIVE_HOST_DIR=/Volumes/CrewCallArchive
+   ARCHIVE_AFTER_DAYS=90
+   PURGE_VIDEO_AFTER_DAYS=0
+   ```
+
+5. Run `docker compose up -d`. Docker Desktop shares `/Volumes` by default; if it doesn't on your Mac, add it under **Settings → Resources → File sharing**.
+6. As admin, open **Service plans → Media**. The **Storage** card at the bottom shows how much is in the library, in recent services and in the archive. **Run now** moves anything that's due; otherwise it checks every 6 hours.
+
+If the NAS is off or unmounted, nothing breaks: files stay on the Mac mini until it's back, archived files say the NAS isn't reachable when opened, and **Copy to this week** tells you which files couldn't come across.
+
+To test the archive features against an empty database:
+
+```bash
+cd api && ARCHIVE_DIR=/tmp/cc-archive BASE_URL=http://localhost:4000 node test/archive.mjs
+# the API must run with the same ARCHIVE_DIR, plus ARCHIVE_AFTER_DAYS=90 PURGE_VIDEO_AFTER_DAYS=200
+```
+
+## Project layout
+
+```
+docker-compose.yml   mongo + api + web (nginx)
+api/src/
+  index.js           Express app, routes, error handling
+  auth.js            sign-in, first-run setup, invites, sessions (httpOnly cookie)
+  models.js          User, Position, Event, Assignment, Unavailable, Request, Resource, Settings
+  routes/            events, weekend (auto-fill, copy, check, run sheet), activity, requests, people, groups, plans (plans, archive, copy, songs, media, guest links, approvals), library (media library, storage), guest (public upload page), misc
+  lib/               permissions, ICS builder, response shapes, archive.js (cold storage job)
+web/src/
+  App.jsx            sign-in flow, tabs, shared context
+  pages/             Schedule, WeekendCheck, AutoFill, RunSheet, Activity, MyShifts, Plans (plans + archive), Songs, Library (media library), Guest, Requests, Groups, Team, Resources, Settings, Account, Auth
+  ui.jsx             Modal, WhatsApp sheet, icons, avatars
+```
+
+## Security notes
+
+- **Passwords and sessions.** Passwords are hashed with bcrypt. Sessions are a signed httpOnly cookie lasting 30 days.
+- **Rate limiting.** Sign-in, setup and invite acceptance are rate-limited per visitor (Cloudflare's `CF-Connecting-IP`, when present).
+- **Admin-only actions.** Only the admin picks each team's head leader and adds teams. A team's head leader can make sign-in links for the team's leaders; nobody can make one for the admin. A team's head leader can change roles and privileges on that team only; deactivating someone who is on more than one team is admin-only.
+- **Leaders' scope.** Leaders work on their own team: its positions, people, spots and requests. Leaders with *Manage crew* can invite and edit crew members only.
+- **Phone numbers.** Crew see leaders' phone numbers. On a service's **Who's serving** list, everyone signed in sees the phone numbers of the people serving on it, so they can reach each other. Other numbers are visible only to people allowed to message the crew or manage people.
+- **Deactivation.** Deactivating someone signs them out, frees their upcoming shifts and cancels their open requests.
+- **Uploads.** Files are stored under random names and served with `nosniff`. Only images, video, audio and PDFs open in the browser; everything else (HTML, SVG, scripts) downloads instead of running.
+- **Rundown and bulletin links** are long random tokens, rate-limited, kept out of search engines, and replaceable. The rundown shows names but never phone numbers or emails.
+- **Quick links.** Each link is a long random token tied to one service, plus a 6-digit code (8 wrong tries lock it; tries are also rate-limited). The code unlocks a cookie that only works for that one link, and a new code signs out anyone using the old one. Links stop working at the end of the service day (or an hour after a later deadline), are rate-limited, and are capped at 40 files and 60 notes or texts. Late uploads stay hidden from crew until a leader approves them, and rejected files are deleted from disk.
+- **Vault and notes.** Vault entries (username, password, notes) and personal notes are encrypted with AES-256-GCM before they reach the database, using `VAULT_KEY` from `.env` (or, if it isn't set, a key made from `JWT_SECRET`). Someone with only the database or a database backup can't read them; someone with the server's `.env` as well can. Adding `VAULT_KEY` later moves everything to the new key on the next start. If the key changes after that, the vault and notes stay locked (nothing is lost) until the old key is back. Passwords are sent to the browser only when someone taps Show or Copy, and each time is logged.
+- **Sessions.** Each sign-in carries a per-person session version, so "sign out everywhere" and admin sign-outs take effect on the next request from every device.

@@ -1,0 +1,574 @@
+import { useEffect, useState } from 'react';
+import { api, unsaved, uploadFiles } from '../lib.js';
+import { DateInput, Icon, useApp } from '../ui.jsx';
+import { ExtraFeaturesCard } from './Extras.jsx';
+import { TeamsAdmin } from './TeamSetup.jsx';
+import TeamLook from './TeamLook.jsx';
+
+const DAY_NAMES = ['Friday', 'Sabbath', 'Sunday'];
+
+export default function Settings() {
+  const { team, isAv } = useApp();
+  return (
+    <div className="stack-lg">
+      <div className="page-head">
+        <div>
+          <h1>Settings</h1>
+          <div className="muted">Only you (the admin) see this page. Positions, the look and the template’s checkboxes are for the {team.name}; switch teams at the top to set up another team.</div>
+        </div>
+      </div>
+      <div className="split">
+        <div className="main-col stack-lg">
+          <Template />
+          <TeamsAdmin />
+          <TeamLook />
+        </div>
+        <div className="side-col stack-lg">
+          <Reminders />
+          <SignIn />
+          <General />
+          <BulletinLogo />
+          {isAv && <BurnoutWatch />}
+          <ExtraFeaturesCard />
+          <Positions />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function useSaver() {
+  const app = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async (fn, msg) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      app.toast(msg);
+      await app.reload();
+      return true;
+    } catch (e) {
+      setError(e.message);
+      app.toast(`Not saved: ${e.message}`);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, error, run };
+}
+
+function SignIn() {
+  const app = useApp();
+  const { settings } = app;
+  const [idle, setIdle] = useState(String(settings.idleMinutes ?? 90));
+  const [onClose, setOnClose] = useState(settings.endOnBrowserClose ?? true);
+  const { busy, error, run } = useSaver();
+  const everyone = async () => {
+    if (!window.confirm('Sign everyone except you out on all their devices? They’ll need their passwords to sign in again.')) return;
+    try {
+      const r = await api('/settings/sign-out-everyone', { method: 'POST' });
+      app.toast(`Signed out ${r.signedOut} ${r.signedOut === 1 ? 'person' : 'people'}`);
+    } catch (e) {
+      app.toast(e.message);
+    }
+  };
+  const choices = [
+    ['30', '30 minutes'],
+    ['60', '1 hour'],
+    ['90', '90 minutes'],
+    ['120', '2 hours'],
+    ['240', '4 hours'],
+    ['0', 'Never'],
+  ];
+  if (!choices.some(([v]) => v === idle)) choices.unshift([idle, `${idle} minutes`]);
+  return (
+    <section className="card stack" aria-label="Sign-in">
+      <h2>Sign-in</h2>
+      <label className="field">
+        <span>Sign people out after no activity for</span>
+        <select value={idle} onChange={(e) => setIdle(e.target.value)}>
+          {choices.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={onClose} onChange={(e) => setOnClose(e.target.checked)} />
+        Sign people out when they close the browser
+      </label>
+      <p className="muted small">
+        Some browsers reopen your last tabs after a restart and keep you signed in; the no-activity limit still signs those out. Changes apply the next time someone signs in or opens a page.
+      </p>
+      {error && <div className="error" role="alert">{error}</div>}
+      <button
+        type="button"
+        className="btn btn-primary self-start"
+        disabled={busy}
+        onClick={() => run(() => api('/settings', { method: 'PATCH', body: { idleMinutes: Number(idle), endOnBrowserClose: onClose } }), 'Sign-in settings saved')}
+      >
+        Save
+      </button>
+      <div className="stack-sm divider-top">
+        <h3>Sign everyone out</h3>
+        <p className="muted small">Signs every crew member and leader out on all their devices. You stay signed in. One person at a time: Team &amp; roles → their name → Sign out everywhere.</p>
+        <button type="button" className="btn btn-danger self-start" onClick={everyone}>
+          Sign everyone else out
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function Reminders() {
+  const app = useApp();
+  const { settings } = app;
+  const [on, setOn] = useState(settings.reminderEmails);
+  const [days, setDays] = useState(settings.reminderDays);
+  const [alertDays, setAlertDays] = useState(settings.calendarAlertDays ?? 5);
+  const { busy, error, run } = useSaver();
+  const [note, setNote] = useState('');
+  const test = async () => {
+    setNote('');
+    try {
+      const r = await api('/settings/test-email', { method: 'POST' });
+      setNote(`Test email sent to ${r.sentTo}. Check your inbox (and spam).`);
+    } catch (e) {
+      setNote(e.message);
+    }
+  };
+  const runNow = async () => {
+    setNote('');
+    try {
+      const r = await api('/weekend/reminders/run', { method: 'POST' });
+      setNote(r.skipped ? r.skipped : `${r.sent} reminder${r.sent === 1 ? '' : 's'} sent.`);
+    } catch (e) {
+      setNote(e.message);
+    }
+  };
+  return (
+    <section className="card stack" aria-label="Reminders">
+      <h2>Shift reminders</h2>
+      {settings.emailConfigured ? (
+        <p className="small good strong">Email is set up.</p>
+      ) : (
+        <p className="small">
+          Email isn’t set up yet. Add <code>SMTP_URL</code> and <code>MAIL_FROM</code> to the server’s <code>.env</code> and restart (the README shows a Gmail example). Until then, use the WhatsApp reminder list on Weekend check.
+        </p>
+      )}
+      <label className="check">
+        <input type="checkbox" checked={on} onChange={() => setOn(!on)} />
+        <span>Email everyone before each shift</span>
+      </label>
+      <label className="field field-row">
+        <span className="small">Days before</span>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">Each person gets one email per shift: call time, crew, songs, a Confirm link and their Quick review link.</p>
+      <label className="field field-row">
+        <span className="small">Calendar alert</span>
+        <select value={alertDays} onChange={(e) => setAlertDays(Number(e.target.value))}>
+          <option value={0}>Off</option>
+          {[1, 2, 3, 4, 5, 6, 7, 10, 14].map((n) => (
+            <option key={n} value={n}>
+              {n} day{n === 1 ? '' : 's'} before
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">An alert on each shift in people’s synced calendars (“You’re on FOH Audio for Worship Service on Sabbath, Oct 31”), plus one an hour before call time.</p>
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="row-wrap">
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { reminderEmails: on, reminderDays: days, calendarAlertDays: alertDays } }), 'Reminder settings saved')}>
+          Save
+        </button>
+        {settings.emailConfigured && (
+          <>
+            <button type="button" className="btn btn-ghost" onClick={test}>
+              Send me a test
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={runNow}>
+              Send due reminders now
+            </button>
+          </>
+        )}
+      </div>
+      {note && <p className="small">{note}</p>}
+    </section>
+  );
+}
+
+function General() {
+  const { settings } = useApp();
+  const [f, setF] = useState({ orgName: settings.orgName, timezone: settings.timezone, countryCode: settings.countryCode });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const { busy, error, run } = useSaver();
+  return (
+    <section className="card stack" aria-label="General">
+      <h2>General</h2>
+      <label className="field">
+        <span>Church or ministry name</span>
+        <input value={f.orgName} onChange={set('orgName')} />
+      </label>
+      <label className="field">
+        <span>Time zone</span>
+        <input value={f.timezone} onChange={set('timezone')} list="tz-list" />
+        <datalist id="tz-list">
+          {['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'Pacific/Honolulu', 'Europe/London'].map((z) => (
+            <option key={z} value={z} />
+          ))}
+        </datalist>
+      </label>
+      <label className="field">
+        <span>Default country code for phone numbers</span>
+        <input value={f.countryCode} onChange={set('countryCode')} inputMode="numeric" />
+      </label>
+      <p className="muted small">Each team’s WhatsApp group link is under Teams.</p>
+      {error && <div className="error" role="alert">{error}</div>}
+      <button type="button" className="btn btn-primary self-start" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: f }), 'Settings saved')}>
+        Save
+      </button>
+    </section>
+  );
+}
+
+// Church logo at the top of the congregation's bulletin, and the standard livestream ending
+function BulletinLogo() {
+  const { settings } = useApp();
+  const { busy, error, run } = useSaver();
+  const [footer, setFooter] = useState(settings.streamFooter || '');
+  const pick = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) run(() => uploadFiles('/settings/logo', [f], { field: 'file' }), 'Logo saved');
+  };
+  return (
+    <section className="card stack" aria-label="Bulletin and livestream">
+      <h2>Bulletin and livestream</h2>
+      <div className="label-sm">Bulletin logo</div>
+      <p className="muted small">Shown at the top of the congregation’s bulletin, on screen and printed. PNG, JPEG or WebP up to 3 MB; a wide logo on a white or clear background works best.</p>
+      {settings.logo ? <img className="logo-preview" src={settings.logo} alt="Current bulletin logo" /> : <div className="logo-preview logo-empty small muted">No logo yet</div>}
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="row-wrap">
+        <label className={`btn btn-outline btn-sm${busy ? ' disabled' : ''}`}>
+          {settings.logo ? 'Replace logo' : 'Upload logo'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={pick} />
+        </label>
+        {settings.logo && (
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => run(() => api('/settings/logo', { method: 'DELETE' }), 'Logo removed')}>
+            Remove
+          </button>
+        )}
+      </div>
+      <BulletinLook run={run} busy={busy} />
+      <label className="field divider-top">
+        <span>End of every livestream description</span>
+        <textarea rows={3} maxLength={2000} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder={'Website: …\nGive online: …\nPrayer requests: …'} />
+      </label>
+      {footer !== (settings.streamFooter || '') && (
+        <button type="button" className="btn btn-primary btn-sm self-start" disabled={busy} onClick={() => run(() => api('/settings', { method: 'PATCH', body: { streamFooter: footer } }), 'Saved')}>
+          Save
+        </button>
+      )}
+    </section>
+  );
+}
+
+// The bulletin's colour (section headings, rules, the sermon bar) and its type
+const BULLETIN_COLORS = [
+  ['#1f3a5f', 'Navy'],
+  ['#4a2358', 'Plum'],
+  ['#1f5a43', 'Forest'],
+  ['#7a1f2b', 'Burgundy'],
+  ['#0f5f6b', 'Teal'],
+  ['#2b2f36', 'Charcoal'],
+];
+function BulletinLook({ run, busy }) {
+  const { settings } = useApp();
+  const color = settings.bulletinColor || '#1f3a5f';
+  const font = settings.bulletinFont || 'serif';
+  const save = (body) => run(() => api('/settings', { method: 'PATCH', body }), 'Bulletin look saved');
+  return (
+    <div className="stack-sm divider-top">
+      <div className="label-sm" id="bl-color">Bulletin colour</div>
+      <div className="row-wrap" role="group" aria-labelledby="bl-color">
+        {BULLETIN_COLORS.map(([c, name]) => (
+          <button key={c} type="button" className={`bl-swatch${color === c ? ' bl-swatch-on' : ''}`} style={{ background: c }} aria-pressed={color === c} aria-label={name} title={name} disabled={busy} onClick={() => save({ bulletinColor: c })} />
+        ))}
+        <label className="bl-swatch bl-swatch-own" title="Pick your own">
+          <span className="sr-only">Pick your own colour</span>
+          <input type="color" value={color} disabled={busy} onChange={(e) => save({ bulletinColor: e.target.value })} />
+        </label>
+      </div>
+      <div className="label-sm" id="bl-font">Bulletin type</div>
+      <div className="seg self-start" role="group" aria-labelledby="bl-font">
+        <button type="button" aria-pressed={font === 'serif'} disabled={busy} onClick={() => save({ bulletinFont: 'serif' })} style={{ fontFamily: "'Source Serif 4', Georgia, serif" }}>
+          Classic serif
+        </button>
+        <button type="button" aria-pressed={font === 'sans'} disabled={busy} onClick={() => save({ bulletinFont: 'sans' })}>
+          Clean sans
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Burnout watch: flag people who've served several weekends in a row
+function BurnoutWatch() {
+  const { settings } = useApp();
+  const { busy, run } = useSaver();
+  const n = settings.burnoutWeeks ?? 4;
+  return (
+    <section className="card stack" aria-label="Burnout watch">
+      <h2>Burnout watch</h2>
+      <p className="muted small">Flags anyone serving this many weekends in a row, on Team &amp; roles and in the month planner, so you can give them a break or say thanks.</p>
+      <label className="field">
+        <span>Flag after</span>
+        <select value={n} disabled={busy} onChange={(e) => run(() => api('/settings', { method: 'PATCH', body: { burnoutWeeks: Number(e.target.value) } }), 'Saved')}>
+          {[0, 2, 3, 4, 5, 6, 8].map((x) => (
+            <option key={x} value={x}>
+              {x === 0 ? 'Off' : `${x} weekends in a row`}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}
+
+export function Positions() {
+  const { positions, team } = useApp();
+  const [labels, setLabels] = useState(Object.fromEntries(positions.map((p) => [p.key, p.label])));
+  const [newLabel, setNewLabel] = useState('');
+  const { busy, error, run } = useSaver();
+
+  const move = (i, dir) =>
+    run(async () => {
+      const list = [...positions];
+      const [p] = list.splice(i, 1);
+      list.splice(i + dir, 0, p);
+      for (let j = 0; j < list.length; j++) if (list[j].order !== j) await api(`/positions/${list[j].key}`, { method: 'PATCH', body: { order: j } });
+    }, 'Order saved');
+
+  return (
+    <section className="card stack" aria-label="Positions">
+      <h2>Positions</h2>
+      <p className="muted small">The {team.name}’s positions. Each team has its own.</p>
+      <ul className="pos-list">
+        {positions.map((p, i) => (
+          <li key={p.key}>
+            <label className="field grow">
+              <span className="sr-only">Name for {p.label}</span>
+              <input value={labels[p.key] ?? p.label} onChange={(e) => setLabels({ ...labels, [p.key]: e.target.value })} />
+            </label>
+            {labels[p.key] !== undefined && labels[p.key] !== p.label && (
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => run(() => api(`/positions/${p.key}`, { method: 'PATCH', body: { label: labels[p.key] } }), 'Renamed')}>
+                Save
+              </button>
+            )}
+            <button type="button" className="icon-btn" aria-label={`Move ${p.label} up`} disabled={busy || i === 0} onClick={() => move(i, -1)}>
+              <Icon name="up" />
+            </button>
+            <button type="button" className="icon-btn" aria-label={`Move ${p.label} down`} disabled={busy || i === positions.length - 1} onClick={() => move(i, 1)}>
+              <Icon name="down" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={`Remove ${p.label}`}
+              disabled={busy}
+              onClick={() => window.confirm(`Remove ${p.label}? It will be taken off everyone’s trained positions.`) && run(() => api(`/positions/${p.key}`, { method: 'DELETE' }), 'Position removed')}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form
+        className="row-wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run(() => api('/positions', { method: 'POST', body: { label: newLabel } }), `Added ${newLabel}`).then(() => setNewLabel(''));
+        }}
+      >
+        <label className="field grow">
+          <span className="sr-only">New position</span>
+          <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="New position, e.g. Graphics" required />
+        </label>
+        <button className="btn btn-outline" disabled={busy}>
+          <Icon name="plus" /> Add
+        </button>
+      </form>
+      {error && <div className="error" role="alert">{error}</div>}
+    </section>
+  );
+}
+
+// Build weekends from the template ahead of time, so regulars land on calendars early.
+function PlanAhead() {
+  const app = useApp();
+  const [weeks, setWeeks] = useState(app.settings.autoBuildWeeks ?? 4);
+  const { busy, error, run } = useSaver();
+  const change = (n) => {
+    setWeeks(n);
+    run(() => api('/settings', { method: 'PATCH', body: { autoBuildWeeks: n } }), n ? `Weekends will be built ${n} week${n === 1 ? '' : 's'} ahead` : 'Weekends won’t be built automatically');
+  };
+  return (
+    <div className="plan-ahead stack-xs">
+      <label className="field field-row">
+        <span className="small strong">Build weekends automatically</span>
+        <select value={weeks} disabled={busy} onChange={(e) => change(Number(e.target.value))}>
+          <option value={0}>Off — build each one by hand</option>
+          {[1, 2, 3, 4, 6, 8, 12].map((n) => (
+            <option key={n} value={n}>
+              {n} week{n === 1 ? '' : 's'} ahead
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted small">Crew Call builds each weekend from this template that far ahead and places everyone with a regular schedule, so it shows on their calendar early. Everyone else is still placed by you or Auto-fill. Skipped weekends and services stay skipped.</p>
+      {error && <div className="error" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+function Template() {
+  const { settings, positions, groups, isAv, team } = useApp();
+  const fromSettings = () => settings.weekendTemplate.map((t) => ({ ...t, kind: t.kind || 'service', needs: [...t.needs], groups: (t.groups || []).map(String), off: Boolean(t.off) }));
+  const [rows, setRows] = useState(fromSettings);
+  const [saved, setSaved] = useState(() => JSON.stringify(fromSettings()));
+  const dirty = JSON.stringify(rows) !== saved;
+  useEffect(() => {
+    if (dirty) unsaved.add('template');
+    else unsaved.delete('template');
+    return () => unsaved.delete('template');
+  }, [dirty]);
+  const { busy, error, run } = useSaver();
+  const save = async () => {
+    const sorted = [...rows].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+    const ok = await run(() => api('/settings', { method: 'PATCH', body: { weekendTemplate: sorted } }), 'Template saved. Use “Sync with template” on the Schedule to apply it to weekends already built.');
+    if (ok) {
+      setRows(sorted);
+      setSaved(JSON.stringify(sorted));
+    }
+  };
+  const upd = (i, patch) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const toggle = (i, k) => upd(i, { needs: rows[i].needs.includes(k) ? rows[i].needs.filter((x) => x !== k) : [...rows[i].needs, k] });
+  const toggleGroup = (i, id) => {
+    const cur = rows[i].groups || [];
+    upd(i, { groups: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
+
+  return (
+    <section className="card stack" aria-label="Weekend template">
+      <div>
+        <h2>Weekend template</h2>
+        <p className="muted small">
+          “Build this weekend” on the Schedule creates these services and sound checks. Turn a service <strong>off</strong> to stop using it without losing its settings. For a weekend that’s already built, press <strong>Sync with template</strong> on the Schedule: it adds missing services, offers to update ones you changed here, and offers to take off ones you removed or turned off.
+        </p>
+      </div>
+      {!isAv && <p className="current-box small">The checkboxes show the {team.name}’s positions; other teams’ positions on each service are kept as they are.</p>}
+      <PlanAhead />
+      {dirty && (
+        <div className="warn-box row-wrap spread">
+          <span>You have unsaved changes to the template.</span>
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={save}>
+            Save template
+          </button>
+        </div>
+      )}
+      {error && <div className="error" role="alert">{error}</div>}
+      {rows.map((r, i) => (
+        <div key={i} className={`tmpl-row stack-sm ${r.off ? 'tmpl-off' : ''}`}>
+          <div className="row-wrap spread">
+            <label className="switch">
+              <input type="checkbox" checked={!r.off} onChange={() => upd(i, { off: !r.off })} />
+              <span>{r.off ? 'Off — not built on weekends' : 'On — built every weekend'}</span>
+            </label>
+            {r.off && r.title && <span className="muted small">{r.title} stays here so you can turn it back on later.</span>}
+          </div>
+          <div className="row-wrap fields-5">
+            <label className="field">
+              <span>Type</span>
+              <select value={r.kind || 'service'} onChange={(e) => upd(i, { kind: e.target.value })}>
+                <option value="service">Service</option>
+                <option value="soundcheck">Sound check</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Day</span>
+              <select value={r.day} onChange={(e) => upd(i, { day: Number(e.target.value) })}>
+                {DAY_NAMES.map((d, n) => (
+                  <option key={d} value={n}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field field-wide">
+              <span>Service</span>
+              <input value={r.title} onChange={(e) => upd(i, { title: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>Call</span>
+              <DateInput type="time" value={r.call} onChange={(e) => upd(i, { call: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>Starts</span>
+              <DateInput type="time" value={r.start} onChange={(e) => upd(i, { start: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>Ends</span>
+              <DateInput type="time" value={r.end} onChange={(e) => upd(i, { end: e.target.value })} />
+            </label>
+          </div>
+          <div className="row-wrap spread">
+            <div className="check-grid">
+              {positions.map((p) => (
+                <label key={p.key} className="check">
+                  <input type="checkbox" checked={r.needs.includes(p.key)} onChange={() => toggle(i, p.key)} />
+                  <span>{p.label}</span>
+                </label>
+              ))}
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
+              Remove
+            </button>
+          </div>
+          {groups.length > 0 && (
+            <div className="row-wrap">
+              <span className="label-sm">Groups:</span>
+              {groups.map((g) => (
+                <label key={g.id} className="check">
+                  <input type="checkbox" checked={(r.groups || []).includes(g.id)} onChange={() => toggleGroup(i, g.id)} />
+                  <span>{g.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      <div className="row-wrap">
+        <button type="button" className="btn btn-outline" onClick={() => setRows([...rows, { day: 1, title: '', kind: 'service', start: '11:00', call: '10:15', end: '12:30', needs: [], groups: [] }])}>
+          <Icon name="plus" /> Add a service
+        </button>
+        <button type="button" className="btn btn-outline" onClick={() => setRows([...rows, { day: 1, title: 'Sound check', kind: 'soundcheck', start: '09:45', call: '09:30', end: '10:15', needs: ['foh'], groups: [] }])}>
+          <Icon name="mic" /> Add a sound check
+        </button>
+        <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={save}>
+          {dirty ? 'Save template' : 'Saved'}
+        </button>
+      </div>
+    </section>
+  );
+}

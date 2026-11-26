@@ -1,0 +1,20 @@
+/* Working on a page together (live.jsx): meetings and service plans */
+.lm-here { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.lm-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #b42318; }
+.lm-dot { width: 8px; height: 8px; border-radius: 50%; background: #d92d20; box-shadow: 0 0 0 3px #fde3e1; }
+.lm-faces { display: inline-flex; }
+.lm-face { margin-left: -6px; border-radius: 50%; box-shadow: 0 0 0 2px var(--surface); display: inline-flex; }
+.lm-face:first-child { margin-left: 0; }
+.lm-busy { color: var(--accent-ink); font-weight: 600; }
+.lm-call { padding-top: 4px; }
+.lm-join { font-size: 16px; }
+.lm-call .link-btn { min-height: 0; padding: 0; }
+
+/* Now discussing */
+.agenda-list li.agenda-now { background: var(--accent-soft); border-radius: 8px; margin-left: -10px; padding: 6px 10px; box-shadow: inset 4px 0 0 var(--accent); }
+.lm-now { display: inline-block; margin-right: 8px; font-size: 11px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 7px; vertical-align: 1px; }
+.lm-discuss { min-height: 0; padding: 0 0 0 10px; font-size: 13px; }
+.lm-lead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lm-saving { font-size: 13px; color: var(--muted); }
+.lm-conflict { font-size: 13px; color: #8a5200; background: #fff4dc; border-radius: 8px; padding: 6px 10px; }
+@media (prefers-reduced-motion: reduce) { .lm-dot { box-shadow: none; } }
